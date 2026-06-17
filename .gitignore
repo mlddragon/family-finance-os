@@ -1,0 +1,77 @@
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python and general build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Virtual environments and local dependency folders
+.venv/
+venv/
+env/
+node_modules/
+
+# Environment variables, credentials, and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Financial source data and generated artifacts
+raw/
+normalized/
+reports/
+snapshots/
+exports/
+imports/
+downloads/
+attachments/
+statements/
+receipts/
+
+# Common local financial-data file formats
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.ofx
+*.qfx
+*.qbo
+*.pdf
+
+# Allow intentionally reviewed documentation and templates
+!docs/**/*.md
+!planning/**/*.md
+!README.md
+
+# Local databases and caches
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+*.parquet
+*.feather
+
+# Logs and temporary output
+*.log
+tmp/
+temp/
+.cache/
