@@ -319,8 +319,8 @@ Before implementation planning starts, the following gates apply:
 
 - Completed: data model and audit design have been captured in `planning/data_model_audit_design_v1.md`.
 - Completed: UI mockups for v1 screens have been approved in `planning/ui_mockups_v1.md`.
+- Drafted for review: import validation contract has been captured in `planning/import_validation_contract_v1.md`.
 - Remaining: settings/config audit design.
-- Remaining: import validation contract.
 - Remaining: controlled decision event model.
 - Remaining: report artifact structure.
 - Remaining: test and validation strategy.
@@ -329,7 +329,7 @@ Before implementation planning starts, the following gates apply:
 
 The next planning work should be one of:
 
-1. Import validation contract for Alliant and Chase.
+1. Owner review of `planning/import_validation_contract_v1.md`.
 2. Report and monthly close artifact detail.
 3. Test and validation strategy.
 4. Implementation plan after the above gates are approved.
