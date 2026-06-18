@@ -6,9 +6,9 @@ This document defines the first minimally viable closed-loop product slice for D
 
 - Slice definition approved by owner.
 - App implementation has not started.
-- Data model and audit design are still required before implementation planning.
-- UI mockups are still required before UI implementation.
-- This slice should guide the next data model, audit, and implementation planning work.
+- Data model and audit design have been captured in `planning/data_model_audit_design_v1.md`.
+- UI mockups have been drafted in `planning/ui_mockups_v1.md` and are pending owner review.
+- This slice should guide the next UI, import validation, report artifact, test, and implementation planning work.
 
 ## Product Goal
 
@@ -318,7 +318,7 @@ Initial defaults:
 Before implementation planning starts, the following still need approval:
 
 - Data model and audit design has been captured in `planning/data_model_audit_design_v1.md`.
-- UI mockups for v1 screens.
+- UI mockups for v1 screens have been drafted in `planning/ui_mockups_v1.md` and need owner approval.
 - Settings/config audit design.
 - Import validation contract.
 - Controlled decision event model.
@@ -329,7 +329,7 @@ Before implementation planning starts, the following still need approval:
 
 The next planning work should be one of:
 
-1. UI mockups for v1 screens.
+1. Owner review of `planning/ui_mockups_v1.md` and `planning/ui_mockup_review_checklist_v1.md`.
 2. Import validation contract for Alliant and Chase.
 3. Report and monthly close artifact detail.
 4. Test and validation strategy.
