@@ -4,7 +4,7 @@ This document defines the proposed v1 test and validation strategy for Dillon Fi
 
 ## Status
 
-- Proposed for owner review.
+- Approved by owner for v1 planning on 2026-06-18.
 - App implementation has not started.
 - Test implementation has not started.
 - No real transaction data, raw exports, normalized data, generated reports, database files, or credentials have been added.
@@ -246,17 +246,17 @@ Recommended default:
 - Any check that uses `DATA_ROOT` with real files must be local-only, off by default, and owner-triggered.
 - CI should fail if sensitive artifact files are added accidentally.
 
-This is a routine engineering recommendation inside the already approved GitHub workflow, but owner approval is requested before adding the actual GitHub Actions workflow file.
+This is approved as the v1 testing direction. Adding the actual GitHub Actions workflow file remains a later implementation task and should happen in its own branch/PR.
 
 ## Owner Review Gates
 
-Approval requested before implementation planning:
+Approved owner decisions:
 
-- Confirm synthetic-only repository fixtures as the default.
-- Confirm GitHub Actions may run synthetic-only safety and test checks.
-- Confirm local real-data smoke checks are manual-only and off by default.
-- Confirm sensitive artifact scanning should be required for every PR.
-- Confirm no live AI/API tests are included in v1.
+- Synthetic-only repository fixtures are the default.
+- GitHub Actions may run synthetic-only safety and test checks.
+- Local real-data smoke checks are manual-only and off by default.
+- Sensitive artifact scanning should be required for every PR.
+- Live AI/API tests are not included in v1.
 
 Data integrity gates during implementation:
 
@@ -282,4 +282,4 @@ Data integrity gates during implementation:
 
 ## Recommended Next Step
 
-Owner should review this strategy and approve or revise the five owner review gates. After approval, Codex can create the first implementation plan with a test scaffold that proves the v1 closed loop using synthetic data only.
+Codex can create the first implementation plan with a test scaffold that proves the v1 closed loop using synthetic data only, after the remaining planning gates are approved.
