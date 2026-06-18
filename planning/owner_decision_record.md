@@ -258,4 +258,4 @@ The product should mature through these stages:
 
 ## Next Planning Step
 
-The first architecture decision pass has been captured in `planning/architecture_decisions_v1.md`. The next planning step should define the first closed-loop slice in implementation-ready detail, produce the required UI mockups, or write the data model and audit design proposal before implementation planning.
+The first architecture decision pass has been captured in `planning/architecture_decisions_v1.md`, and the first closed-loop slice has been captured in `planning/first_closed_loop_slice_v1.md`. The next planning step should produce the required UI mockups, write the data model and audit design proposal, or define the Alliant/Chase import validation contract before implementation planning.
