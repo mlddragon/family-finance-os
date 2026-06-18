@@ -555,7 +555,7 @@ Before implementation planning starts, these gates apply:
 
 - Completed: UI mockups for v1 screens have been approved in `planning/ui_mockups_v1.md`.
 - Drafted for review: Alliant/Chase import validation contract has been captured in `planning/import_validation_contract_v1.md`.
-- Remaining: initial category taxonomy/settings scope.
+- Drafted for review: initial category taxonomy/settings scope has been captured in `planning/settings_config_audit_design_v1.md`.
 - Drafted for review: report artifact structure details have been captured in `planning/report_monthly_close_artifacts_v1.md`.
 - Drafted for review: test and validation strategy has been captured in `planning/test_validation_strategy_v1.md`.
 
@@ -565,4 +565,5 @@ The next planning work should be one of:
 
 1. Owner review of `planning/report_monthly_close_artifacts_v1.md`.
 2. Owner review of `planning/test_validation_strategy_v1.md`.
-3. Initial category taxonomy/settings scope.
+3. Owner review of `planning/settings_config_audit_design_v1.md`.
+4. Controlled decision event model.
