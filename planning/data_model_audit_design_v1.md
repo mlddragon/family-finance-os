@@ -551,19 +551,18 @@ The following are intentionally deferred to implementation planning:
 
 ## Required Gates Before Implementation
 
-Before implementation planning starts, these still need approval:
+Before implementation planning starts, these gates apply:
 
-- UI mockups for v1 screens.
-- Alliant/Chase import validation contract.
-- Initial category taxonomy/settings scope.
-- Report artifact structure details.
-- Test and validation strategy.
+- Completed: UI mockups for v1 screens have been approved in `planning/ui_mockups_v1.md`.
+- Remaining: Alliant/Chase import validation contract.
+- Remaining: initial category taxonomy/settings scope.
+- Remaining: report artifact structure details.
+- Remaining: test and validation strategy.
 
 ## Next Recommended Work
 
 The next planning work should be one of:
 
-1. UI mockups for v1 operator screens.
-2. Alliant/Chase import validation contract.
-3. Report and monthly close artifact detail.
-4. Test and validation strategy.
+1. Alliant/Chase import validation contract.
+2. Report and monthly close artifact detail.
+3. Test and validation strategy.

@@ -4,11 +4,11 @@ This document captures proposed low-fidelity UI mockups for the first Dillon Fin
 
 ## Status
 
-- Proposed for owner review.
+- Approved by owner for v1 planning on 2026-06-18.
 - App implementation has not started.
 - Mockups use synthetic/redacted examples only.
 - Visual styling is intentionally low fidelity.
-- These mockups should be approved or revised before UI implementation planning.
+- These mockups are approved as the v1 UI direction, but UI implementation remains gated by the remaining planning artifacts.
 
 ## Product Intent
 
@@ -452,7 +452,7 @@ Before implementation planning, the owner should approve or revise:
 
 ## Recommended Next Step
 
-Review these mockups with the owner. After approval, the next planning artifacts should be:
+The mockups are approved for v1. The next planning artifacts should be:
 
 1. Import validation contract for Alliant and Chase.
 2. Report and monthly close artifact detail.
