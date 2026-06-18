@@ -4,7 +4,7 @@ This document defines the proposed v1 controlled decision event model for Dillon
 
 ## Status
 
-- Proposed for owner review.
+- Approved by owner for v1 planning on 2026-06-18.
 - App implementation has not started.
 - Controlled-write implementation has not started.
 - Database schema has not been created.
@@ -273,15 +273,15 @@ v1 recommendation:
 
 ## Owner Review Gates
 
-Approval requested before implementation planning:
+Approved owner decisions:
 
-- Confirm v1 ledger review decisions should attach to canonical transactions, not imported rows.
-- Confirm v1 controlled write scope should stay limited to classification, review status/reason, and review flags.
-- Confirm every v1 controlled decision requires explicit owner save action.
-- Confirm routine category decisions may use optional notes, while high-impact decisions require an owner note.
-- Confirm rollback/correction should create new superseding or revert events rather than editing prior events.
-- Confirm AI/rule/Codex suggestions remain proposals until owner approval.
-- Confirm decision event exports and monthly close snapshots are required.
+- v1 ledger review decisions should attach to canonical transactions, not imported rows.
+- v1 controlled write scope should stay limited to classification, review status/reason, and review flags.
+- Every v1 controlled decision requires explicit owner save action.
+- Routine category decisions may use optional notes, while high-impact decisions require an owner note.
+- Rollback/correction should create new superseding or revert events rather than editing prior events.
+- AI/rule/Codex suggestions remain proposals until owner approval.
+- Decision event exports and monthly close snapshots are required.
 
 Data integrity gates during implementation:
 
@@ -310,4 +310,4 @@ Data integrity gates during implementation:
 
 ## Recommended Next Step
 
-Owner should review this strategy and approve or revise the owner review gates. After approval, Codex can record the decision outcome and then prepare the implementation plan only after all remaining planning gates are approved.
+Codex can prepare the implementation plan after confirming no planning gates remain open. App implementation remains blocked until that implementation plan is approved.
