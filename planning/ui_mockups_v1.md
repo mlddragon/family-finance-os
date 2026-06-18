@@ -457,4 +457,6 @@ The mockups are approved for v1. The next planning artifacts should be:
 1. Import validation contract for Alliant and Chase.
 2. Report and monthly close artifact detail.
 3. Test and validation strategy.
-4. Implementation plan after product, UI, data, and architecture gates are approved.
+4. Settings/config audit design.
+5. Controlled decision event model.
+6. Implementation plan after product, UI, data, and architecture gates are approved.

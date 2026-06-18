@@ -321,7 +321,7 @@ Before implementation planning starts, the following gates apply:
 - Completed: UI mockups for v1 screens have been approved in `planning/ui_mockups_v1.md`.
 - Drafted for review: import validation contract has been captured in `planning/import_validation_contract_v1.md`.
 - Drafted for review: report and monthly close artifact detail has been captured in `planning/report_monthly_close_artifacts_v1.md`.
-- Remaining: settings/config audit design.
+- Drafted for review: settings/config audit design has been captured in `planning/settings_config_audit_design_v1.md`.
 - Remaining: controlled decision event model.
 - Drafted for review: test and validation strategy has been captured in `planning/test_validation_strategy_v1.md`.
 
@@ -331,6 +331,6 @@ The next planning work should be one of:
 
 1. Owner review of `planning/report_monthly_close_artifacts_v1.md`.
 2. Owner review of `planning/test_validation_strategy_v1.md`.
-3. Settings/config audit design.
+3. Owner review of `planning/settings_config_audit_design_v1.md`.
 4. Controlled decision event model.
 5. Implementation plan after the above gates are approved.
