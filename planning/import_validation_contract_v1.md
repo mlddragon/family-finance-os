@@ -1,10 +1,10 @@
 # Import Validation Contract v1
 
-This document defines the proposed v1 import validation contract for the first Dillon Finances closed-loop ledger sources: Alliant Checking, Alliant Savings, Alliant Credit Card, and Chase Prime Visa. It is a planning artifact only. It does not create parser code, create a database schema, add dependencies, migrate data, or commit any financial exports.
+This document defines the approved v1 import validation contract for the first Dillon Finances closed-loop ledger sources: Alliant Checking, Alliant Savings, Alliant Credit Card, and Chase Prime Visa. It is a planning artifact only. It does not create parser code, create a database schema, add dependencies, migrate data, or commit any financial exports.
 
 ## Status
 
-- Proposed for owner review.
+- Approved by owner for v1 planning on 2026-06-18.
 - App implementation has not started.
 - No source files or transaction data have been migrated.
 - Exact parser code and database schema remain deferred to implementation planning.
@@ -230,8 +230,15 @@ Every validation finding should have:
 Severity meanings:
 
 - Info: visible context that does not require action.
-- Warning: import can proceed only with visible acknowledgment; downstream reports may be provisional.
+- Warning: import can proceed only with visible acknowledgment; notes are optional by default; downstream reports may be provisional.
 - Blocking: import acceptance, report readiness, or monthly close readiness is stopped until resolved.
+
+Owner-approved warning policy:
+
+- Accepted warnings require explicit acknowledgment.
+- Acknowledgment is logged.
+- Notes are optional for v1 unless a later approved rule requires notes for a specific high-impact warning type.
+- Blocking findings require resolution, not acknowledgment.
 
 ## File-Level Validations
 
@@ -290,6 +297,10 @@ Rules:
 - Source detection can use filename hints, header profile, known account metadata, and row-pattern checks.
 - Source/account identity cannot be inferred from filename alone.
 - If a file could belong to more than one source/account, it must go to validation review.
+- Unknown or ambiguous source/account identity blocks acceptance.
+- Owner confirmation of a source/account profile creates an auditable settings event.
+- Future files matching the confirmed profile do not require repeated confirmation.
+- Material changes to header/profile/account signals require renewed confirmation.
 
 ### Header/Profile Validation
 
@@ -445,6 +456,9 @@ Rules:
 - Initial default stale threshold is 14 days for checking and card sources.
 - Latest successful import date and latest transaction date must be tracked per source.
 - Reports are marked provisional if any required source is stale or missing.
+- Stale sources do not block import.
+- Stale sources do not block provisional report generation.
+- Stale required sources block final monthly close for the affected period.
 
 ### Overlapping Exports
 
@@ -652,6 +666,7 @@ Allowed only when:
 - Row counts and date ranges are recorded.
 - Accepted warnings are acknowledged.
 - The import creates immutable imported facts and does not overwrite prior facts.
+- A valid source can be imported independently even when other required sources are missing, as long as downstream reports remain provisional and final monthly close remains blocked until required coverage is complete.
 
 ### Mark Reports Provisional
 
@@ -726,13 +741,13 @@ Before parser implementation starts, implementation planning should capture:
 - No silent dedupe.
 - No reports that ignore validation status.
 
-## Owner Review Questions
+## Owner Review Outcome
 
-Recommended default: approve this contract as the v1 validation baseline, with Alliant raw-column confirmation deferred until header-only or synthetic source samples are available.
+Approved as the v1 validation baseline, with Alliant raw-column confirmation deferred until header-only or synthetic source samples are available.
 
-Questions for review:
+Approved decisions:
 
-- Should accepted warnings require a note, or is explicit acknowledgment enough for v1?
-- Should stale source be blocking for report generation or only for final monthly close?
-- Should source/account identity confirmation be a one-time setting event or required per unknown file?
-- Should v1 allow importing a single source when other required sources are missing, as long as reports remain provisional?
+- Accepted warnings require explicit acknowledgment; notes are optional by default.
+- Stale sources make affected reports provisional and block final monthly close, but do not block report generation.
+- Source/account identity confirmation is a one-time audited settings event unless the profile changes materially.
+- Partial imports are allowed; incomplete required-source coverage keeps reports provisional and blocks final monthly close.
