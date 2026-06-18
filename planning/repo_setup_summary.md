@@ -52,7 +52,7 @@
 
 ## Recommended next conversation
 
-Start with first-slice selection. Codex should propose 2-3 possible minimally viable closed-loop slices, recommend one, and ask for owner approval. Architecture design should wait until that product slice is chosen.
+The first clarifying-question interview has been completed and captured in `planning/owner_decision_record.md`. The next conversation should convert those owner decisions into architecture options for the first closed-loop slice. Codex should recommend a primary architecture and any serious alternatives, then stop for owner approval before implementation planning.
 
 ## Implementation status
 
