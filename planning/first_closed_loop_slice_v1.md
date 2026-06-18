@@ -317,7 +317,7 @@ Initial defaults:
 
 Before implementation planning starts, the following still need approval:
 
-- Data model and audit design.
+- Data model and audit design has been captured in `planning/data_model_audit_design_v1.md`.
 - UI mockups for v1 screens.
 - Settings/config audit design.
 - Import validation contract.
@@ -329,7 +329,8 @@ Before implementation planning starts, the following still need approval:
 
 The next planning work should be one of:
 
-1. Data model and audit design for v1.
-2. UI mockups for v1 screens.
-3. Import validation contract for Alliant and Chase.
-4. Implementation plan after the above gates are approved.
+1. UI mockups for v1 screens.
+2. Import validation contract for Alliant and Chase.
+3. Report and monthly close artifact detail.
+4. Test and validation strategy.
+5. Implementation plan after the above gates are approved.

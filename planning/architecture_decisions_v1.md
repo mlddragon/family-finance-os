@@ -426,9 +426,9 @@ Examples:
 
 ## Next Step
 
-The first closed-loop slice has been captured in `planning/first_closed_loop_slice_v1.md`. The next planning step is not implementation. It should be one of:
+The first closed-loop slice has been captured in `planning/first_closed_loop_slice_v1.md`, and the data model/audit design has been captured in `planning/data_model_audit_design_v1.md`. The next planning step is not implementation. It should be one of:
 
 1. Produce UI mockups for the required mockup gates.
-2. Write a data model and audit design proposal.
-3. Define the Alliant/Chase import validation contract.
+2. Define the Alliant/Chase import validation contract.
+3. Detail the report and monthly close artifact structure.
 4. Create an implementation plan only after the relevant product, UI, data, and architecture gates are approved.
