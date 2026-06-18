@@ -114,6 +114,8 @@ Rules:
 
 ## v1 Report Set
 
+Synthetic examples for each report/artifact type are captured in `planning/report_examples_v1.md`.
+
 ### Import And Validation Summary
 
 Purpose:
