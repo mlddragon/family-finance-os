@@ -554,16 +554,15 @@ The following are intentionally deferred to implementation planning:
 Before implementation planning starts, these gates apply:
 
 - Completed: UI mockups for v1 screens have been approved in `planning/ui_mockups_v1.md`.
-- Drafted for review: Alliant/Chase import validation contract has been captured in `planning/import_validation_contract_v1.md`.
-- Drafted for review: initial category taxonomy/settings scope has been captured in `planning/settings_config_audit_design_v1.md`.
-- Drafted for review: report artifact structure details have been captured in `planning/report_monthly_close_artifacts_v1.md`.
-- Drafted for review: test and validation strategy has been captured in `planning/test_validation_strategy_v1.md`.
+- Completed: Alliant/Chase import validation contract has been approved in `planning/import_validation_contract_v1.md`.
+- Completed: initial category taxonomy/settings scope has been approved in `planning/settings_config_audit_design_v1.md`.
+- Completed: report artifact structure details have been approved in `planning/report_monthly_close_artifacts_v1.md`.
+- Completed: test and validation strategy has been approved in `planning/test_validation_strategy_v1.md`.
+- Drafted for review: controlled decision event model has been captured in `planning/controlled_decision_event_model_v1.md`.
 
 ## Next Recommended Work
 
 The next planning work should be one of:
 
-1. Owner review of `planning/report_monthly_close_artifacts_v1.md`.
-2. Owner review of `planning/test_validation_strategy_v1.md`.
-3. Owner review of `planning/settings_config_audit_design_v1.md`.
-4. Controlled decision event model.
+1. Owner review of `planning/controlled_decision_event_model_v1.md`.
+2. Implementation plan after the above gate is approved.

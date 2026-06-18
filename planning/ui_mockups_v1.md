@@ -458,5 +458,5 @@ The mockups are approved for v1. The next planning artifacts should be:
 2. Report and monthly close artifact detail.
 3. Test and validation strategy.
 4. Settings/config audit design.
-5. Controlled decision event model.
+5. Owner review of controlled decision event model.
 6. Implementation plan after product, UI, data, and architecture gates are approved.
