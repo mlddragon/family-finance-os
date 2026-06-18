@@ -7,7 +7,7 @@ This document defines the first minimally viable closed-loop product slice for D
 - Slice definition approved by owner.
 - App implementation has not started.
 - Data model and audit design have been captured in `planning/data_model_audit_design_v1.md`.
-- UI mockups have been drafted in `planning/ui_mockups_v1.md` and are pending owner review.
+- UI mockups have been approved for v1 planning in `planning/ui_mockups_v1.md`.
 - This slice should guide the next UI, import validation, report artifact, test, and implementation planning work.
 
 ## Product Goal
@@ -315,22 +315,21 @@ Initial defaults:
 
 ## Required Gates Before Implementation
 
-Before implementation planning starts, the following still need approval:
+Before implementation planning starts, the following gates apply:
 
-- Data model and audit design has been captured in `planning/data_model_audit_design_v1.md`.
-- UI mockups for v1 screens have been drafted in `planning/ui_mockups_v1.md` and need owner approval.
-- Settings/config audit design.
-- Import validation contract.
-- Controlled decision event model.
-- Report artifact structure.
-- Test and validation strategy.
+- Completed: data model and audit design have been captured in `planning/data_model_audit_design_v1.md`.
+- Completed: UI mockups for v1 screens have been approved in `planning/ui_mockups_v1.md`.
+- Remaining: settings/config audit design.
+- Remaining: import validation contract.
+- Remaining: controlled decision event model.
+- Remaining: report artifact structure.
+- Remaining: test and validation strategy.
 
 ## Next Recommended Work
 
 The next planning work should be one of:
 
-1. Owner review of `planning/ui_mockups_v1.md` and `planning/ui_mockup_review_checklist_v1.md`.
-2. Import validation contract for Alliant and Chase.
-3. Report and monthly close artifact detail.
-4. Test and validation strategy.
-5. Implementation plan after the above gates are approved.
+1. Import validation contract for Alliant and Chase.
+2. Report and monthly close artifact detail.
+3. Test and validation strategy.
+4. Implementation plan after the above gates are approved.
