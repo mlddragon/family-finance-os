@@ -4,7 +4,7 @@ This document defines the proposed v1 settings/config audit design for Dillon Fi
 
 ## Status
 
-- Proposed for owner review.
+- Approved by owner for v1 planning on 2026-06-18.
 - App implementation has not started.
 - Settings implementation has not started.
 - Database schema has not been created.
@@ -369,14 +369,14 @@ This keeps the Settings page useful without making the first version a risky con
 
 ## Owner Review Gates
 
-Approval requested before implementation planning:
+Approved owner decisions:
 
-- Confirm active settings should live in SQLite and be edited through the Settings UI.
-- Confirm JSON/YAML/CSV should be export/seed/reference formats, not active household config.
-- Confirm the initial editable scope should be narrow: freshness thresholds and low-risk source metadata first.
-- Confirm high-impact settings should require an owner note.
-- Confirm category taxonomy edits should use deactivate/supersede instead of destructive deletes.
-- Confirm future LAN/NAS exposure and AI/provider settings remain read-only deferred states until separately approved.
+- Active settings should live in SQLite and be edited through the Settings UI.
+- JSON/YAML/CSV should be export, seed-default, reference, backup, and review formats, not active household config.
+- The initial editable scope should be narrow: freshness thresholds and low-risk source metadata first.
+- High-impact settings should require an owner note.
+- Category taxonomy edits should use deactivate/supersede, rename, or merge events instead of destructive deletes.
+- Future LAN/NAS exposure and AI/provider settings remain read-only deferred states until separately approved.
 
 Data integrity/security gates during implementation:
 
@@ -403,4 +403,4 @@ Data integrity/security gates during implementation:
 
 ## Recommended Next Step
 
-Owner should review this strategy and approve or revise the owner review gates. After approval, Codex can record the decision outcome and continue to the controlled decision event model planning gate.
+Codex can continue to the controlled decision event model planning gate. App implementation remains blocked until the remaining planning gates are approved.
