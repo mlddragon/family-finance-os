@@ -557,11 +557,12 @@ Before implementation planning starts, these gates apply:
 - Drafted for review: Alliant/Chase import validation contract has been captured in `planning/import_validation_contract_v1.md`.
 - Remaining: initial category taxonomy/settings scope.
 - Drafted for review: report artifact structure details have been captured in `planning/report_monthly_close_artifacts_v1.md`.
-- Remaining: test and validation strategy.
+- Drafted for review: test and validation strategy has been captured in `planning/test_validation_strategy_v1.md`.
 
 ## Next Recommended Work
 
 The next planning work should be one of:
 
 1. Owner review of `planning/report_monthly_close_artifacts_v1.md`.
-2. Test and validation strategy.
+2. Owner review of `planning/test_validation_strategy_v1.md`.
+3. Initial category taxonomy/settings scope.

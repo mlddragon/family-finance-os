@@ -426,7 +426,9 @@ Examples:
 
 ## Next Step
 
-The first closed-loop slice has been captured in `planning/first_closed_loop_slice_v1.md`, the data model/audit design has been captured in `planning/data_model_audit_design_v1.md`, UI mockups have been approved in `planning/ui_mockups_v1.md`, the import validation contract has been captured in `planning/import_validation_contract_v1.md`, and report/monthly close artifacts have been drafted in `planning/report_monthly_close_artifacts_v1.md`. The next planning step is not implementation. It should be one of:
+The first closed-loop slice has been captured in `planning/first_closed_loop_slice_v1.md`, the data model/audit design has been captured in `planning/data_model_audit_design_v1.md`, UI mockups have been approved in `planning/ui_mockups_v1.md`, the import validation contract has been captured in `planning/import_validation_contract_v1.md`, report/monthly close artifacts have been captured in `planning/report_monthly_close_artifacts_v1.md`, and the test/validation strategy has been drafted in `planning/test_validation_strategy_v1.md`. The next planning step is not implementation. It should be one of:
 
-1. Review `planning/report_monthly_close_artifacts_v1.md`.
-2. Create an implementation plan only after the relevant product, UI, data, and architecture gates are approved.
+1. Owner review of `planning/test_validation_strategy_v1.md`.
+2. Settings/config audit design.
+3. Controlled decision event model.
+4. Create an implementation plan only after the relevant product, UI, data, and architecture gates are approved.
