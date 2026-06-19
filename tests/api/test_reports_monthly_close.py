@@ -383,3 +383,22 @@ def test_artifact_download_rejects_registered_file_when_integrity_metadata_no_lo
 
     assert download_response.status_code == 409
     assert download_response.json()["detail"]["code"] == "artifact_integrity_mismatch"
+
+
+def test_artifact_download_rejects_registered_path_replaced_by_symlink(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        create_accepted_chase_batch(client, tmp_path)
+        run_response = client.post("/api/reports/run", json={"actor": "mason"})
+        artifact = run_response.json()["artifacts"][0]
+        artifact_path = Path(artifact["path"])
+        replacement_target = artifact_path.with_name(f"{artifact_path.stem}_same_content{artifact_path.suffix}")
+        replacement_target.write_bytes(artifact_path.read_bytes())
+        artifact_path.unlink()
+        artifact_path.symlink_to(replacement_target)
+
+        download_response = client.get(f"/api/artifacts/{artifact['id']}/download")
+
+    assert download_response.status_code == 409
+    assert download_response.json()["detail"]["code"] == "artifact_file_not_regular"

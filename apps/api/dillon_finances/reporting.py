@@ -339,20 +339,27 @@ def artifact_download_path(session: Session, data_root: Path, artifact_id: str) 
     artifact = session.get(Artifact, artifact_id)
     if artifact is None:
         raise ReportingError("artifact_not_found", "Artifact not found.", status_code=404)
-    path = Path(artifact.path).resolve()
+    registered_path = Path(artifact.path)
+    path = registered_path.resolve()
     data_root_resolved = data_root.resolve()
     if not path.is_relative_to(data_root_resolved):
         raise ReportingError("artifact_path_outside_data_root", "Artifact path is outside DATA_ROOT.", status_code=409)
-    if not path.exists():
+    if not registered_path.exists():
         raise ReportingError("artifact_file_missing", "Artifact file is missing.", status_code=404)
-    content = path.read_bytes()
+    if registered_path.is_symlink() or not registered_path.is_file():
+        raise ReportingError(
+            "artifact_file_not_regular",
+            "Artifact path must be a regular file at the registered location.",
+            status_code=409,
+        )
+    content = registered_path.read_bytes()
     if len(content) != artifact.byte_size or hashlib.sha256(content).hexdigest() != artifact.sha256:
         raise ReportingError(
             "artifact_integrity_mismatch",
             "Artifact file no longer matches its registered integrity metadata.",
             status_code=409,
         )
-    return path
+    return registered_path
 
 
 def close_readiness(session: Session, *, month: Optional[str] = None) -> dict[str, Any]:
