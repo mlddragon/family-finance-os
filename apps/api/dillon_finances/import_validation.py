@@ -203,11 +203,28 @@ def _parse_csv(path: Path) -> ParsedCsv:
     return ParsedCsv(headers=headers, rows=list(reader))
 
 
-def _detect_profile(headers: list[str]) -> Optional[SourceProfile]:
+def _profile_filename_tokens(profile: SourceProfile) -> set[str]:
+    return {
+        profile.source_key,
+        profile.source_key.replace("_", "-"),
+        profile.display_name.lower().replace(" ", "_"),
+        profile.display_name.lower().replace(" ", "-"),
+    }
+
+
+def _detect_profile(headers: list[str], *, filename: str = "") -> Optional[SourceProfile]:
     matches = [profile for profile in list_source_profiles() if list(profile.expected_headers) == headers]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
+        filename_key = filename.lower()
+        hinted_matches = [
+            profile
+            for profile in matches
+            if any(token in filename_key for token in _profile_filename_tokens(profile))
+        ]
+        if len(hinted_matches) == 1:
+            return hinted_matches[0]
         raise ImportValidationError("ambiguous_source", "Headers match multiple source profiles")
     return None
 
@@ -447,7 +464,7 @@ def validate_import_batch(session: Session, batch_id: str) -> dict[str, Any]:
             continue
         try:
             parsed = _parse_csv(path)
-            profile = _detect_profile(parsed.headers)
+            profile = _detect_profile(parsed.headers, filename=source_file.original_filename)
         except ImportValidationError as exc:
             findings.append(
                 _create_finding(

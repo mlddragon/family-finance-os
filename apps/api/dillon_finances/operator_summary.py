@@ -55,6 +55,7 @@ def operator_summary_payload(
             validation=validation_summary,
             review=review_summary,
             sources=source_summary,
+            monthly_close=monthly_close,
         ),
     }
 
@@ -166,6 +167,7 @@ def _next_action(
     validation: dict[str, Any],
     review: dict[str, Any],
     sources: dict[str, Any],
+    monthly_close: dict[str, Any],
 ) -> dict[str, str]:
     if latest_import["status"] == "none":
         return {
@@ -191,6 +193,11 @@ def _next_action(
         return {
             "code": "import_remaining_required_sources",
             "label": "Import remaining required sources",
+        }
+    if monthly_close["status"] == "final":
+        return {
+            "code": "refresh_source_data",
+            "label": "Refresh source data for the next cycle",
         }
     return {
         "code": "run_reports_monthly_close",
