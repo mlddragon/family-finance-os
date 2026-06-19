@@ -3,14 +3,24 @@ from pathlib import Path
 import os
 from typing import Any, AsyncIterator, Dict, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from dillon_finances import __version__
 from dillon_finances.database import create_sqlite_engine, upgrade_database
+from dillon_finances.import_validation import (
+    ImportValidationError,
+    accept_import_batch,
+    list_validation_findings,
+    save_upload,
+    scan_inbox,
+    serialize_import_batch,
+    validate_import_batch,
+)
 from dillon_finances.runtime import bootstrap_data_root
 from dillon_finances.settings_service import (
     SettingsPatchRequest,
@@ -24,6 +34,10 @@ from dillon_finances.settings_service import (
 
 APP_NAME = "Dillon Finances"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+class AcceptImportBatchRequest(BaseModel):
+    acknowledge_warnings: bool = False
 
 
 def _default_data_root() -> Path:
@@ -101,6 +115,75 @@ def create_app(
     @app.get("/api/status")
     def status() -> Dict[str, Any]:
         return status_payload()
+
+    def import_validation_http_error(exc: ImportValidationError) -> HTTPException:
+        return HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        )
+
+    @app.get("/api/inbox/scan")
+    def get_inbox_scan() -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            return {
+                "import_batches": [
+                    serialize_import_batch(batch) for batch in scan_inbox(session, active_data_root)
+                ]
+            }
+
+    @app.post("/api/inbox/scan")
+    def post_inbox_scan() -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            return {
+                "import_batches": [
+                    serialize_import_batch(batch) for batch in scan_inbox(session, active_data_root)
+                ]
+            }
+
+    @app.post("/api/uploads")
+    async def upload_source_file(file: UploadFile = File(...)) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        filename = file.filename or "uploaded-file"
+        content = await file.read()
+        with create_session() as session:
+            try:
+                batch = save_upload(session, active_data_root, filename, content)
+                return {"import_batch": serialize_import_batch(batch)}
+            except ImportValidationError as exc:
+                raise import_validation_http_error(exc) from exc
+
+    @app.post("/api/import-batches/{batch_id}/validate")
+    def validate_batch(batch_id: str) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return validate_import_batch(session, batch_id)
+            except ImportValidationError as exc:
+                raise import_validation_http_error(exc) from exc
+
+    @app.post("/api/import-batches/{batch_id}/accept")
+    def accept_batch(
+        batch_id: str,
+        payload: Optional[AcceptImportBatchRequest] = None,
+    ) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        request_payload = payload or AcceptImportBatchRequest()
+        with create_session() as session:
+            try:
+                return accept_import_batch(
+                    session,
+                    active_data_root,
+                    batch_id,
+                    acknowledge_warnings=request_payload.acknowledge_warnings,
+                )
+            except ImportValidationError as exc:
+                raise import_validation_http_error(exc) from exc
+
+    @app.get("/api/validation-findings")
+    def get_validation_findings() -> Dict[str, Any]:
+        with create_session() as session:
+            return {"findings": list_validation_findings(session)}
 
     @app.get("/api/settings")
     def get_settings() -> Dict[str, Any]:
