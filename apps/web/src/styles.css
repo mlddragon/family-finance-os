@@ -395,7 +395,8 @@ tbody tr:hover {
 
 .filters label,
 .decision-editor label,
-.upload-form label {
+.upload-form label,
+.settings-form label {
   display: grid;
   gap: 5px;
   color: #425048;
@@ -492,9 +493,19 @@ input[readonly] {
   font-weight: 760;
 }
 
-.upload-form {
+.upload-form,
+.settings-form {
   display: grid;
   gap: 12px;
+}
+
+.form-banner {
+  border: 1px solid #ded2a4;
+  border-radius: 6px;
+  padding: 9px 10px;
+  background: #fffaf0;
+  font-size: 13px;
+  font-weight: 760;
 }
 
 .empty-state {
@@ -517,6 +528,10 @@ input[readonly] {
 
 .danger-text {
   color: #8e3428;
+}
+
+.warn-text {
+  color: #71561c;
 }
 
 .plain-list,

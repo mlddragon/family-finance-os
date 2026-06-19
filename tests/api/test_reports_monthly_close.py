@@ -78,6 +78,24 @@ def disable_unavailable_required_sources(client: TestClient) -> None:
     assert response.status_code == 200
 
 
+def confirm_source_profile_sample(client: TestClient, source_key: str) -> None:
+    response = client.patch(
+        "/api/settings",
+        json={
+            "actor": "mason",
+            "changes": [
+                {
+                    "domain": "sources",
+                    "setting_key": f"sources.{source_key}.profile_confirmation_status",
+                    "value": "owner_confirmed_header_sample",
+                    "note": f"Synthetic confirmation of header-only sample for {source_key}.",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+
 def artifact_paths(body: dict) -> list[Path]:
     return [Path(artifact["path"]) for artifact in body["artifacts"]]
 
@@ -231,6 +249,33 @@ def test_final_close_blocks_missing_required_source_coverage(tmp_path):
     assert detail["validation_summary"]["missing_required_count"] == 3
 
 
+def test_final_close_blocks_unconfirmed_required_source_profiles(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        create_accepted_chase_batch(client, tmp_path)
+        disable_unavailable_required_sources(client)
+        readiness_before_confirmation = client.post(
+            "/api/monthly-close/finalize",
+            json={"actor": "mason", "notes": "Synthetic final close should wait for source confirmation."},
+        )
+
+        assert readiness_before_confirmation.status_code == 409
+        detail = readiness_before_confirmation.json()["detail"]
+        assert detail["code"] == "final_close_blocked"
+        assert "unconfirmed_source_profiles" in detail["validation_summary"]["blockers"]
+        assert detail["validation_summary"]["unconfirmed_source_profiles"] == ["chase_prime_visa"]
+
+        confirm_source_profile_sample(client, "chase_prime_visa")
+        readiness_after_confirmation = client.post(
+            "/api/monthly-close/finalize",
+            json={"actor": "mason", "notes": "Synthetic final close after profile confirmation."},
+        )
+
+    assert readiness_after_confirmation.status_code == 200
+    assert readiness_after_confirmation.json()["validation_summary"]["unconfirmed_source_profiles"] == []
+
+
 def test_monthly_close_duplicate_month_status_returns_controlled_conflict(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
@@ -250,6 +295,7 @@ def test_final_close_writes_immutable_bundle_after_owner_required_source_setting
     with TestClient(app) as client:
         create_accepted_chase_batch(client, tmp_path)
         disable_unavailable_required_sources(client)
+        confirm_source_profile_sample(client, "chase_prime_visa")
         response = client.post(
             "/api/monthly-close/finalize",
             json={"actor": "mason", "notes": "Synthetic final close after explicit source requirement settings review."},

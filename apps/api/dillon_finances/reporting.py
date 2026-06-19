@@ -29,7 +29,7 @@ from dillon_finances.models import (
     ValidationFinding,
     utc_now_iso,
 )
-from dillon_finances.settings_service import list_settings
+from dillon_finances.settings_service import CONFIRMED_SOURCE_PROFILE_STATUSES, list_settings
 from dillon_finances.source_profiles import list_source_profiles
 
 
@@ -363,6 +363,8 @@ def close_readiness(session: Session, *, month: Optional[str] = None) -> dict[st
         blockers.append("missing_required_sources")
     if coverage["stale_required_sources"]:
         blockers.append("stale_required_sources")
+    if coverage["unconfirmed_source_profiles"]:
+        blockers.append("unconfirmed_source_profiles")
 
     return {
         "month": target_month,
@@ -373,6 +375,7 @@ def close_readiness(session: Session, *, month: Optional[str] = None) -> dict[st
         "stale_required_count": len(coverage["stale_required_sources"]),
         "missing_required_sources": coverage["missing_required_sources"],
         "stale_required_sources": coverage["stale_required_sources"],
+        "unconfirmed_source_profiles": coverage["unconfirmed_source_profiles"],
         "accepted_source_keys": coverage["accepted_source_keys"],
         "required_source_keys": coverage["required_source_keys"],
         "accepted_import_batch_ids": [batch.id for batch in accepted_batches],
@@ -581,6 +584,7 @@ def _monthly_close_memo(*, month: str, status: str, validation_summary: dict[str
             f"Transactions: {validation_summary['transaction_count']}",
             f"Missing required sources: {validation_summary['missing_required_count']}",
             f"Stale required sources: {validation_summary['stale_required_count']}",
+            f"Unconfirmed source profiles: {len(validation_summary['unconfirmed_source_profiles'])}",
             f"Open blocking findings: {validation_summary['open_blocking_count']}",
         ]
     )
@@ -596,14 +600,21 @@ def _source_coverage(session: Session, accepted_batches: list[ImportBatch]) -> d
     required_source_keys: list[str] = []
     missing_required_sources: list[str] = []
     stale_required_sources: list[str] = []
+    unconfirmed_source_profiles: list[str] = []
     for profile in list_source_profiles():
         required = bool(settings.get(("sources", f"sources.{profile.source_key}.required"), profile.required))
         freshness_days = int(
             settings.get(("freshness", f"sources.{profile.source_key}.freshness_threshold_days"), profile.freshness_threshold_days)
         )
+        confirmation_status = settings.get(
+            ("sources", f"sources.{profile.source_key}.profile_confirmation_status"),
+            profile.confirmation_status,
+        )
         if not required:
             continue
         required_source_keys.append(profile.source_key)
+        if confirmation_status not in CONFIRMED_SOURCE_PROFILE_STATUSES:
+            unconfirmed_source_profiles.append(profile.source_key)
         latest = latest_by_source.get(profile.source_key)
         if latest is None:
             missing_required_sources.append(profile.source_key)
@@ -618,6 +629,7 @@ def _source_coverage(session: Session, accepted_batches: list[ImportBatch]) -> d
         "accepted_source_keys": sorted(latest_by_source.keys()),
         "missing_required_sources": sorted(missing_required_sources),
         "stale_required_sources": sorted(stale_required_sources),
+        "unconfirmed_source_profiles": sorted(unconfirmed_source_profiles),
     }
 
 
@@ -670,6 +682,7 @@ def _validation_status(validation_summary: dict[str, Any]) -> str:
         validation_summary["open_warning_count"]
         or validation_summary["missing_required_count"]
         or validation_summary["stale_required_count"]
+        or validation_summary["unconfirmed_source_profiles"]
     ):
         return "passed_with_warnings"
     return "passed"

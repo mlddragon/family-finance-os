@@ -103,6 +103,25 @@ def save_decision(client: TestClient, transaction_id: str, *, field_name: str, d
     return response.json()
 
 
+def confirm_source_profiles(client: TestClient, source_keys: list[str]) -> None:
+    response = client.patch(
+        "/api/settings",
+        json={
+            "actor": "mason",
+            "changes": [
+                {
+                    "domain": "sources",
+                    "setting_key": f"sources.{source_key}.profile_confirmation_status",
+                    "value": "owner_confirmed_header_sample",
+                    "note": f"SYNTHETIC header-only sample confirmation for {source_key}.",
+                }
+                for source_key in sorted(source_keys)
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+
 def test_required_pr10_synthetic_fixtures_exist_and_are_obviously_fake():
     expected_fixtures = set(VALID_SOURCE_FIXTURES) | SCENARIO_FIXTURES
     assert expected_fixtures
@@ -120,6 +139,7 @@ def test_full_synthetic_closed_loop_reaches_final_close_advisor_export_and_refre
     with TestClient(app) as client:
         accepted_batches = scan_validate_accept_all(client)
         source_keys = sorted(batch["source_key"] for batch in accepted_batches)
+        confirm_source_profiles(client, source_keys)
         transactions_response = client.get("/api/transactions")
         assert transactions_response.status_code == 200
         transactions = transactions_response.json()["transactions"]

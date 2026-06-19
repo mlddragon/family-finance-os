@@ -29,6 +29,12 @@ const sourceProfiles = [
   },
 ];
 
+const confirmedSourceProfiles = sourceProfiles.map((profile) =>
+  profile.source_key === "chase_prime_visa"
+    ? { ...profile, confirmation_status: "owner_confirmed_header_sample" }
+    : profile,
+);
+
 const transaction = {
   id: "tx-1",
   posted_date: "2026-06-17",
@@ -72,6 +78,34 @@ function pathFor(input: RequestInfo | URL) {
 function installApiMock() {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = pathFor(input);
+    if (path === "/api/settings" && init?.method === "PATCH") {
+      return response({
+        tabs: ["Data root", "Sources", "Thresholds", "Reports", "Privacy", "Future integrations"],
+        local_only: true,
+        data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
+        source_profiles: confirmedSourceProfiles,
+        settings: [
+          {
+            id: "setting-1",
+            domain: "privacy",
+            setting_key: "runtime.local_only",
+            value: true,
+            editable: false,
+            note_required: true,
+          },
+        ],
+        settings_events: [
+          {
+            id: "setting-event-2",
+            domain: "sources",
+            setting_key: "sources.chase_prime_visa.profile_confirmation_status",
+            new_value: "owner_confirmed_header_sample",
+            actor: "mason",
+            created_at: "2026-06-18T00:01:00Z",
+          },
+        ],
+      });
+    }
     if (path === "/api/decision-events" && init?.method === "POST") {
       return response({
         event: { id: "event-2", approved_value: "Groceries" },
@@ -403,4 +437,44 @@ test("reports screen runs artifacts and close/export actions", async () => {
     "href",
     "/api/artifacts/artifact-existing-1/download",
   );
+});
+
+test("settings screen saves source profile sample confirmation with owner note", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+  expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
+  expect(await screen.findByText("Parser sample confirmation needed")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Source profile"), {
+    target: { value: "chase_prime_visa" },
+  });
+  fireEvent.change(screen.getByLabelText("Owner confirmation note"), {
+    target: { value: "Header-only Chase Prime Visa sample approved." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm source sample" }));
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+  expect(await screen.findByText("Source confirmation saved")).toBeInTheDocument();
+  const settingsPatchCall = fetchMock.mock.calls.find(
+    (call) => pathFor(call[0]) === "/api/settings" && call[1]?.method === "PATCH",
+  );
+  expect(JSON.parse(settingsPatchCall?.[1]?.body as string)).toMatchObject({
+    actor: "mason",
+    changes: [
+      {
+        domain: "sources",
+        setting_key: "sources.chase_prime_visa.profile_confirmation_status",
+        value: "owner_confirmed_header_sample",
+        note: "Header-only Chase Prime Visa sample approved.",
+      },
+    ],
+  });
 });

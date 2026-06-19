@@ -14,6 +14,7 @@ import {
 } from "@tanstack/react-table";
 
 import {
+  confirmSourceProfileSample,
   fetchOperatorSummary,
   createAdvisorExport,
   draftMonthlyClose,
@@ -788,7 +789,44 @@ function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artif
 }
 
 function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; profiles: SourceProfile[] }) {
+  const queryClient = useQueryClient();
   const activeProfiles = settings?.source_profiles ?? profiles;
+  const pendingProfiles = activeProfiles.filter((profile) => profile.confirmation_status === "pending_owner_sample");
+  const [selectedSourceKey, setSelectedSourceKey] = useState(pendingProfiles[0]?.source_key ?? "");
+  const [confirmationNote, setConfirmationNote] = useState("");
+  const [confirmationStatus, setConfirmationStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedSourceKey && pendingProfiles.length > 0) {
+      setSelectedSourceKey(pendingProfiles[0].source_key);
+    }
+    if (selectedSourceKey && !pendingProfiles.some((profile) => profile.source_key === selectedSourceKey)) {
+      setSelectedSourceKey(pendingProfiles[0]?.source_key ?? "");
+    }
+  }, [pendingProfiles, selectedSourceKey]);
+
+  const confirmationMutation = useMutation({
+    mutationFn: confirmSourceProfileSample,
+    onSuccess: (body) => {
+      setConfirmationStatus("Source confirmation saved");
+      setConfirmationNote("");
+      queryClient.setQueryData(["settings"], body);
+      void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
+    },
+    onError: () => setConfirmationStatus("Source confirmation blocked"),
+  });
+
+  function saveSourceConfirmation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedSourceKey || !confirmationNote.trim()) {
+      return;
+    }
+    confirmationMutation.mutate({
+      sourceKey: selectedSourceKey,
+      note: confirmationNote,
+    });
+  }
+
   return (
     <section className="screen" aria-labelledby="settings-heading">
       <div className="screen-heading">
@@ -821,6 +859,38 @@ function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; pr
 
         <section className="work-panel">
           <h3>Source profiles</h3>
+          {pendingProfiles.length ? (
+            <form className="settings-form" onSubmit={saveSourceConfirmation}>
+              <div className="form-banner warn-text">Parser sample confirmation needed</div>
+              <label>
+                Source profile
+                <select value={selectedSourceKey} onChange={(event) => setSelectedSourceKey(event.target.value)}>
+                  {pendingProfiles.map((profile) => (
+                    <option key={profile.source_key} value={profile.source_key}>
+                      {profile.display_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Owner confirmation note
+                <textarea
+                  value={confirmationNote}
+                  onChange={(event) => setConfirmationNote(event.target.value)}
+                  rows={3}
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={!selectedSourceKey || !confirmationNote.trim() || confirmationMutation.isPending}
+              >
+                Confirm source sample
+              </button>
+              {confirmationStatus ? <p className="form-status">{confirmationStatus}</p> : null}
+            </form>
+          ) : (
+            <p className="empty-state">All required source samples are confirmed</p>
+          )}
           <DataTable
             data={activeProfiles}
             emptyLabel="No source profiles loaded"

@@ -102,6 +102,26 @@ def save_decision(base_url: str, transaction_id: str, *, field_name: str, decisi
     )
 
 
+def confirm_source_profiles(base_url: str, source_keys: list[str]) -> None:
+    request_json(
+        base_url,
+        "PATCH",
+        "/api/settings",
+        {
+            "actor": "mason",
+            "changes": [
+                {
+                    "domain": "sources",
+                    "setting_key": f"sources.{source_key}.profile_confirmation_status",
+                    "value": "owner_confirmed_header_sample",
+                    "note": f"SYNTHETIC Docker E2E header-only sample confirmation for {source_key}.",
+                }
+                for source_key in sorted(source_keys)
+            ],
+        },
+    )
+
+
 def run_blocked_validation_path(base_url: str, data_root: Path) -> dict[str, Any]:
     blocked_filename = "SYNTHETIC_docker_blocked_wrong_header.csv"
     blocked_path = data_root / "inbox" / blocked_filename
@@ -154,11 +174,20 @@ def run_closed_loop(base_url: str, repo_root: Path, data_root: Path) -> dict[str
 
     scan = request_json(base_url, "POST", "/api/inbox/scan")
     assert_condition(len(scan["import_batches"]) == len(SOURCE_FIXTURES), "all synthetic source files must scan")
+    accepted_source_keys: list[str] = []
     for batch in scan["import_batches"]:
         validation = request_json(base_url, "POST", f"/api/import-batches/{batch['id']}/validate")
         blocking = [finding for finding in validation["findings"] if finding["severity"] == "blocking"]
         assert_condition(not blocking, f"batch {batch['id']} has blocking findings")
-        request_json(base_url, "POST", f"/api/import-batches/{batch['id']}/accept", {"acknowledge_warnings": False})
+        accepted_batch = request_json(
+            base_url,
+            "POST",
+            f"/api/import-batches/{batch['id']}/accept",
+            {"acknowledge_warnings": False},
+        )
+        accepted_source_keys.append(accepted_batch["source_key"])
+
+    confirm_source_profiles(base_url, accepted_source_keys)
 
     transactions = request_json(base_url, "GET", "/api/transactions")["transactions"]
     assert_condition(len(transactions) >= 4, "closed loop must create synthetic transactions")

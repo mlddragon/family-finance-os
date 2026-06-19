@@ -74,6 +74,27 @@ export function fetchSettings() {
   return apiJson<SettingsPayload>("/api/settings");
 }
 
+export function confirmSourceProfileSample(payload: {
+  sourceKey: string;
+  note: string;
+}) {
+  return apiJson<SettingsPayload>("/api/settings", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: "mason",
+      changes: [
+        {
+          domain: "sources",
+          setting_key: `sources.${payload.sourceKey}.profile_confirmation_status`,
+          value: "owner_confirmed_header_sample",
+          note: payload.note.trim(),
+        },
+      ],
+    }),
+  });
+}
+
 export function fetchArtifacts() {
   return apiJson<{ artifacts: Artifact[] }>("/api/artifacts");
 }
