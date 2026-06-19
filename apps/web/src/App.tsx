@@ -159,6 +159,7 @@ function OperatorApp() {
   const findings = findingsQuery.data?.findings ?? [];
   const inbox = inboxQuery.data?.import_batches ?? [];
   const settings = settingsQuery.data;
+  const sourceProfileKey = summary.sources.profiles.map((profile) => profile.source_key).join("|") || "no-source-profiles";
   const selectedTransaction =
     transactionDetailQuery.data?.transaction ??
     transactions.find((transaction) => transaction.id === selectedTransactionId) ??
@@ -187,7 +188,7 @@ function OperatorApp() {
 
         <main className="content">
           {activeScreen === "home" ? <HomeScreen summary={summary} /> : null}
-          {activeScreen === "sources" ? <SourcesScreen profiles={summary.sources.profiles} inbox={inbox} /> : null}
+          {activeScreen === "sources" ? <SourcesScreen key={sourceProfileKey} profiles={summary.sources.profiles} inbox={inbox} /> : null}
           {activeScreen === "validation" ? <ValidationScreen findings={findings} /> : null}
           {activeScreen === "review" ? (
             <ReviewScreen
@@ -278,7 +279,18 @@ function HomeScreen({ summary }: { summary: OperatorSummary }) {
 function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: ImportBatch[] }) {
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedUploadSourceKey, setSelectedUploadSourceKey] = useState(profiles[0]?.source_key ?? "");
   const [batchActionStatus, setBatchActionStatus] = useState<string | null>(null);
+  const uploadSourceKey = selectedUploadSourceKey || profiles[0]?.source_key || "";
+
+  useEffect(() => {
+    if (!selectedUploadSourceKey && profiles[0]) {
+      setSelectedUploadSourceKey(profiles[0].source_key);
+    }
+    if (selectedUploadSourceKey && !profiles.some((profile) => profile.source_key === selectedUploadSourceKey)) {
+      setSelectedUploadSourceKey(profiles[0]?.source_key ?? "");
+    }
+  }, [profiles, selectedUploadSourceKey]);
 
   function updateCachedBatch(updatedBatch: ImportBatch) {
     queryClient.setQueryData<InboxScan>(["inbox-scan"], (current) => {
@@ -426,16 +438,26 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
             className="upload-form"
             onSubmit={(event) => {
               event.preventDefault();
-              if (selectedFile) {
-                uploadMutation.mutate(selectedFile);
+              if (selectedFile && uploadSourceKey) {
+                uploadMutation.mutate({ file: selectedFile, sourceKey: uploadSourceKey });
               }
             }}
           >
             <label>
+              Source profile
+              <select value={uploadSourceKey} onChange={(event) => setSelectedUploadSourceKey(event.target.value)}>
+                {profiles.map((profile) => (
+                  <option key={profile.source_key} value={profile.source_key}>
+                    {profile.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
               Source file
               <input type="file" accept=".csv" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
             </label>
-            <button type="submit" disabled={!selectedFile || uploadMutation.isPending}>
+            <button type="submit" disabled={!selectedFile || !uploadSourceKey || uploadMutation.isPending}>
               Upload to inbox
             </button>
             {uploadMutation.isError ? <p className="form-status danger-text">{formatApiError(uploadMutation.error, "Upload blocked")}</p> : null}

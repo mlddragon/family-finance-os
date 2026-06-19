@@ -19,6 +19,15 @@ const sourceProfiles = [
     confirmation_status: "pending_owner_sample",
   },
   {
+    source_key: "alliant_savings",
+    display_name: "Alliant Savings",
+    account_type: "savings",
+    required: true,
+    freshness_threshold_days: 14,
+    accepted_file_extensions: [".csv"],
+    confirmation_status: "pending_owner_sample",
+  },
+  {
     source_key: "chase_prime_visa",
     display_name: "Chase Prime Visa",
     account_type: "credit_card",
@@ -151,6 +160,18 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
         source_key: "chase_prime_visa",
         imported_rows_created: 2,
         canonical_transactions_created: 2,
+      });
+    }
+    if (path === "/api/uploads" && init?.method === "POST") {
+      return response({
+        import_batch: {
+          id: "uploaded-batch-1",
+          status: "detected",
+          validation_status: "pending",
+          row_count: null,
+          source_key: "alliant_savings",
+          source_files: [],
+        },
       });
     }
     if (path === "/api/decision-events" && init?.method === "POST") {
@@ -394,7 +415,7 @@ test("navigates through the PR8 operator screens", async () => {
   fireEvent.click(screen.getByRole("link", { name: "Sources" }));
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
-  expect(await screen.findByText("Chase Prime Visa")).toBeInTheDocument();
+  expect(screen.getAllByText("Chase Prime Visa").length).toBeGreaterThan(0);
   expect(screen.getByText("Quarantine" )).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("link", { name: "Validation Issues" }));
@@ -470,6 +491,41 @@ test("sources screen shows structured backend reasons when import acceptance is 
       "Batch acceptance blocked: Warnings require explicit acknowledgment before acceptance. (warning_acknowledgment_required)",
     ),
   ).toBeInTheDocument();
+});
+
+test("sources upload sends selected source profile with the file", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Sources" }));
+  expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
+  await waitFor(() => expect(screen.getAllByText("Alliant Savings").length).toBeGreaterThan(0));
+
+  const sourceProfileSelect = screen.getByLabelText("Source profile");
+  fireEvent.change(sourceProfileSelect, {
+    target: { value: "alliant_savings" },
+  });
+  await waitFor(() => expect(sourceProfileSelect).toHaveValue("alliant_savings"));
+
+  const sourceFile = new File(["Date,Description,Amount,Balance\n"], "History-061926-011955.csv", { type: "text/csv" });
+  const sourceFileInput = screen.getByLabelText("Source file") as HTMLInputElement;
+  Object.defineProperty(sourceFileInput, "files", { value: [sourceFile], configurable: true });
+  fireEvent.change(sourceFileInput);
+
+  const uploadButton = screen.getByRole("button", { name: "Upload to inbox" });
+  await waitFor(() => expect(uploadButton).not.toBeDisabled());
+  fireEvent.submit(uploadButton.closest("form") as HTMLFormElement);
+
+  await waitFor(() => {
+    const uploadCall = fetchMock.mock.calls.find(([input, init]) => pathFor(input) === "/api/uploads" && init?.method === "POST");
+    expect(uploadCall).toBeTruthy();
+    const body = uploadCall?.[1]?.body;
+    expect(body).toBeInstanceOf(FormData);
+    expect((body as FormData).get("source_key")).toBe("alliant_savings");
+    expect((body as FormData).get("file")).toBeInstanceOf(File);
+  });
+  expect(await screen.findByText("File uploaded to inbox")).toBeInTheDocument();
 });
 
 test("review controls are labelled, focusable, and save append-only decisions", async () => {

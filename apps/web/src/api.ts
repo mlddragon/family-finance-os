@@ -71,9 +71,10 @@ export function scanInbox() {
   return apiJson<InboxScan>("/api/inbox/scan");
 }
 
-export function uploadSourceFile(file: File) {
+export function uploadSourceFile(payload: { file: File; sourceKey: string }) {
   const body = new FormData();
-  body.append("file", file);
+  body.append("file", payload.file);
+  body.append("source_key", payload.sourceKey);
   return apiJson<InboxScan>("/api/uploads", {
     method: "POST",
     body,

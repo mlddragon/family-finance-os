@@ -3,7 +3,7 @@ from pathlib import Path
 import os
 from typing import Any, AsyncIterator, Dict, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -169,13 +169,16 @@ def create_app(
             }
 
     @app.post("/api/uploads")
-    async def upload_source_file(file: UploadFile = File(...)) -> Dict[str, Any]:
+    async def upload_source_file(
+        file: UploadFile = File(...),
+        source_key: Optional[str] = Form(default=None),
+    ) -> Dict[str, Any]:
         active_data_root = get_data_root()
         filename = file.filename or "uploaded-file"
         content = await file.read()
         with create_session() as session:
             try:
-                batch = save_upload(session, active_data_root, filename, content)
+                batch = save_upload(session, active_data_root, filename, content, source_key_hint=source_key)
                 return {"import_batch": serialize_import_batch(batch)}
             except ImportValidationError as exc:
                 raise import_validation_http_error(exc) from exc

@@ -51,7 +51,7 @@ SOURCE_PROFILES: tuple[SourceProfile, ...] = (
         required=True,
         freshness_threshold_days=14,
         accepted_file_extensions=(".csv",),
-        expected_headers=("Transaction Date", "Description", "Amount"),
+        expected_headers=("Date", "Description", "Amount", "Balance", "Post Date"),
         amount_sign_policy="charges_positive_payments_negative",
         parser_version="alliant_credit_card:v1",
     ),

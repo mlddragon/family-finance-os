@@ -22,7 +22,7 @@ from dillon_finances.models import (
     ValidationFinding,
 )
 from dillon_finances.ledger_normalization import normalize_import_batch
-from dillon_finances.source_profiles import SourceProfile, list_source_profiles
+from dillon_finances.source_profiles import SourceProfile, get_source_profile, list_source_profiles
 
 
 VALIDATION_CODES = {
@@ -246,7 +246,17 @@ def _profile_filename_tokens(profile: SourceProfile) -> set[str]:
     }
 
 
-def _detect_profile(headers: list[str], *, filename: str = "") -> Optional[SourceProfile]:
+def _detect_profile(headers: list[str], *, filename: str = "", source_key_hint: Optional[str] = None) -> Optional[SourceProfile]:
+    if source_key_hint:
+        try:
+            hinted_profile = get_source_profile(source_key_hint)
+        except KeyError as exc:
+            raise ImportValidationError(
+                "source_account_unconfirmed",
+                "Selected source profile is not approved for v1 import.",
+            ) from exc
+        return hinted_profile if list(hinted_profile.expected_headers) == headers else None
+
     matches = [profile for profile in list_source_profiles() if list(profile.expected_headers) == headers]
     if len(matches) == 1:
         return matches[0]
@@ -263,21 +273,44 @@ def _detect_profile(headers: list[str], *, filename: str = "") -> Optional[Sourc
     return None
 
 
-def _scan_file(session: Session, path: Path) -> ImportBatch:
+def _scan_file(session: Session, path: Path, *, source_key_hint: Optional[str] = None) -> ImportBatch:
     file_hash = sha256_file(path)
-    unknown = _unknown_source(session)
-    batch = ImportBatch(source=unknown, status="detected", validation_status="pending")
+    if source_key_hint:
+        try:
+            profile = get_source_profile(source_key_hint)
+        except KeyError as exc:
+            raise ImportValidationError(
+                "source_account_unconfirmed",
+                "Selected source profile is not approved for v1 import.",
+                status_code=400,
+            ) from exc
+        source = _source_for_profile(session, profile)
+        source_account = _account_for_profile(session, source, profile)
+        parser_version = profile.parser_version
+    else:
+        source = _unknown_source(session)
+        source_account = None
+        parser_version = None
+
+    batch = ImportBatch(
+        source=source,
+        source_account=source_account,
+        status="detected",
+        validation_status="pending",
+        parser_version=parser_version,
+    )
     session.add(batch)
     session.flush()
     source_file = SourceFile(
-        source=unknown,
+        source=source,
+        source_account=source_account,
         import_batch=batch,
         original_filename=path.name,
         stored_path=str(path),
         file_sha256=file_hash,
         byte_size=path.stat().st_size,
         validation_status="pending",
-        parser_version=None,
+        parser_version=parser_version,
     )
     session.add(source_file)
     session.commit()
@@ -319,7 +352,14 @@ def _safe_upload_filename(filename: str) -> str:
     return filename
 
 
-def save_upload(session: Session, data_root: Path, filename: str, content: bytes) -> ImportBatch:
+def save_upload(
+    session: Session,
+    data_root: Path,
+    filename: str,
+    content: bytes,
+    *,
+    source_key_hint: Optional[str] = None,
+) -> ImportBatch:
     safe_filename = _safe_upload_filename(filename)
     extension = Path(safe_filename).suffix.lower()
     if extension in REJECTED_EXTENSIONS or extension not in SUPPORTED_EXTENSIONS:
@@ -333,7 +373,7 @@ def save_upload(session: Session, data_root: Path, filename: str, content: bytes
             status_code=409,
         )
     inbox_path.write_bytes(content)
-    return _scan_file(session, inbox_path)
+    return _scan_file(session, inbox_path, source_key_hint=source_key_hint)
 
 
 def _validate_rows(
@@ -632,7 +672,14 @@ def validate_import_batch(session: Session, batch_id: str) -> dict[str, Any]:
             continue
         try:
             parsed = _parse_csv(path)
-            profile = _detect_profile(parsed.headers, filename=source_file.original_filename)
+            source_key_hint = None
+            if batch.source and batch.source.source_key != "unknown":
+                source_key_hint = batch.source.source_key
+            profile = _detect_profile(
+                parsed.headers,
+                filename=source_file.original_filename,
+                source_key_hint=source_key_hint,
+            )
         except ImportValidationError as exc:
             findings.append(
                 _create_finding(
@@ -702,13 +749,22 @@ def refresh_source_coverage_findings(session: Session) -> None:
     accepted_keys = _accepted_source_keys(session)
     missing_keys = required_keys - accepted_keys
     existing = session.scalars(
-        select(ValidationFinding).where(ValidationFinding.code == "required_source_missing")
+        select(ValidationFinding)
+        .where(ValidationFinding.code == "required_source_missing")
+        .order_by(ValidationFinding.created_at)
     ).all()
-    open_by_source = {finding.target_id: finding for finding in existing if finding.status == "open"}
+    open_by_source: dict[str, list[ValidationFinding]] = {}
+    for finding in existing:
+        if finding.status == "open" and finding.target_id:
+            open_by_source.setdefault(finding.target_id, []).append(finding)
 
-    for source_key, finding in open_by_source.items():
+    for source_key, findings in open_by_source.items():
         if source_key not in missing_keys:
-            finding.status = "resolved"
+            for finding in findings:
+                finding.status = "resolved"
+            continue
+        for duplicate in findings[1:]:
+            duplicate.status = "resolved"
 
     for source_key in sorted(missing_keys):
         if source_key in open_by_source:

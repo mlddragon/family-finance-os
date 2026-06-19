@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from dillon_finances.database import create_sqlite_engine
 from dillon_finances.import_validation import VALIDATION_CODES
 from dillon_finances.main import create_app
-from dillon_finances.models import SourceFile
+from dillon_finances.models import SourceFile, ValidationFinding
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -190,6 +190,73 @@ def test_upload_rejects_unsupported_file_type(tmp_path):
 
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "unsupported_file_type"
+
+
+def test_upload_source_hint_disambiguates_alliant_checking_and_savings_headers(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    content = (
+        "Date,Description,Amount,Balance\n"
+        f"{(date.today() - timedelta(days=1)).isoformat()},SYNTHETIC ALLIANT SAVINGS INTEREST,25.00,10025.00\n"
+    )
+
+    with TestClient(app) as client:
+        upload_response = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_savings"},
+            files={"file": ("History-061926-011955.csv", content.encode(), "text/csv")},
+        )
+        assert upload_response.status_code == 200
+        batch_id = upload_response.json()["import_batch"]["id"]
+
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+
+    assert validate_response.status_code == 200
+    body = validate_response.json()
+    assert body["source_key"] == "alliant_savings"
+    assert body["findings"] == []
+
+
+def test_upload_rejects_source_hint_when_headers_do_not_match_profile(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    content = CHASE_HEADER + fresh_chase_row()
+
+    with TestClient(app) as client:
+        upload_response = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_savings"},
+            files={"file": ("SYNTHETIC_chase_prime_visa.csv", content.encode(), "text/csv")},
+        )
+        assert upload_response.status_code == 200
+        batch_id = upload_response.json()["import_batch"]["id"]
+
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+
+    assert validate_response.status_code == 200
+    assert validate_response.json()["findings"][0]["code"] == "schema_mismatch"
+
+
+def test_real_alliant_credit_card_header_profile_validates(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    content = (
+        "Date,Description,Amount,Balance,Post Date\n"
+        f"{(date.today() - timedelta(days=1)).isoformat()},SYNTHETIC ALLIANT CARD GROCERY,84.25,915.75,{date.today().isoformat()}\n"
+    )
+
+    with TestClient(app) as client:
+        upload_response = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_credit_card"},
+            files={"file": ("History-061926-012007.csv", content.encode(), "text/csv")},
+        )
+        assert upload_response.status_code == 200
+        batch_id = upload_response.json()["import_batch"]["id"]
+
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+
+    assert validate_response.status_code == 200
+    body = validate_response.json()
+    assert body["source_key"] == "alliant_credit_card"
+    assert body["findings"] == []
 
 
 def test_upload_rejects_path_like_filename_without_writing_outside_inbox(tmp_path):
@@ -592,6 +659,39 @@ def test_missing_required_sources_are_first_class_validation_findings_and_resolv
         for finding in resolved_response.json()["findings"]
         if finding["status"] == "open" and finding["code"] == "required_source_missing"
     ] == []
+
+
+def test_missing_required_source_findings_resolve_duplicate_open_warnings(tmp_path):
+    write_rendered_fixture(tmp_path, "v1_valid_chase_prime_visa.csv")
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        accept_latest_batch(client)
+        engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+        Session = sessionmaker(bind=engine)
+        with Session() as session:
+            for _ in range(2):
+                session.add(
+                    ValidationFinding(
+                        severity="warning",
+                        code="required_source_missing",
+                        message="Required source alliant_checking has not been accepted for the current close cycle.",
+                        target_type="source",
+                        target_id="alliant_checking",
+                        status="open",
+                    )
+                )
+            session.commit()
+
+        response = client.get("/api/validation-findings")
+
+    assert response.status_code == 200
+    open_missing_by_source = [
+        finding["target_id"]
+        for finding in response.json()["findings"]
+        if finding["status"] == "open" and finding["code"] == "required_source_missing"
+    ]
+    assert open_missing_by_source.count("alliant_checking") == 1
 
 
 def test_duplicate_file_hash_warns_without_silent_dedupe(tmp_path):
