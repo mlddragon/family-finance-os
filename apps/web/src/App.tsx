@@ -1,3 +1,5 @@
+import { FormEvent, useEffect, useMemo, useState } from "react";
+
 import "./styles.css";
 
 const navItems = ["Home", "Sources", "Review", "Transactions", "Reports", "Settings"];
@@ -9,7 +11,106 @@ const sourceProfiles = [
   { name: "Chase Prime Visa", type: "Credit card", freshness: "14 days" },
 ];
 
+type Transaction = {
+  id: string;
+  raw_description: string | null;
+  amount: string;
+  category_current: string | null;
+  review_status: string;
+  validation_status: string;
+};
+
 export function App() {
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
+  const [approvedCategory, setApprovedCategory] = useState("");
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadTransactions() {
+      if (typeof fetch === "undefined") {
+        return;
+      }
+      try {
+        const response = await fetch("/api/transactions");
+        if (!response.ok) {
+          return;
+        }
+        const body = await response.json();
+        if (!isMounted) {
+          return;
+        }
+        const loadedTransactions = body.transactions ?? [];
+        setTransactions(loadedTransactions);
+        setSelectedTransactionId(loadedTransactions[0]?.id ?? null);
+      } catch {
+        if (isMounted) {
+          setTransactions([]);
+        }
+      }
+    }
+    void loadTransactions();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const selectedTransaction = useMemo(
+    () => transactions.find((transaction) => transaction.id === selectedTransactionId) ?? null,
+    [selectedTransactionId, transactions],
+  );
+
+  useEffect(() => {
+    setApprovedCategory(selectedTransaction?.category_current ?? "");
+    setSaveStatus(null);
+  }, [selectedTransaction?.id]);
+
+  async function saveDecision(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedTransaction || !approvedCategory.trim()) {
+      return;
+    }
+    setIsSaving(true);
+    setSaveStatus(null);
+    try {
+      const response = await fetch("/api/decision-events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target_type: "canonical_transaction",
+          target_id: selectedTransaction.id,
+          decision_type: "category_change",
+          field_name: "category",
+          proposed_value: approvedCategory.trim(),
+          approved_value: approvedCategory.trim(),
+          actor: "mason",
+          suggestion_source: "owner",
+          explicit_user_action: true,
+        }),
+      });
+      if (!response.ok) {
+        setSaveStatus("Decision blocked");
+        return;
+      }
+      const body = await response.json();
+      const category = body.current_state?.category_current ?? approvedCategory.trim();
+      setTransactions((currentTransactions) =>
+        currentTransactions.map((transaction) =>
+          transaction.id === selectedTransaction.id
+            ? { ...transaction, category_current: category, review_status: body.current_state?.review_status ?? transaction.review_status }
+            : transaction,
+        ),
+      );
+      setSaveStatus("Decision saved");
+    } catch {
+      setSaveStatus("Decision blocked");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -58,6 +159,76 @@ export function App() {
             <div>
               <h3>Next action</h3>
               <p>Complete scaffold, Docker, and repository safety checks.</p>
+            </div>
+          </section>
+
+          <section className="review-panel" aria-labelledby="review-heading" id="review">
+            <div className="section-heading">
+              <p className="eyebrow">Controlled review</p>
+              <h2 id="review-heading">Ledger Review</h2>
+            </div>
+
+            <div className="review-layout">
+              <div className="review-list" aria-label="Review queue">
+                {transactions.length === 0 ? (
+                  <p className="empty-state">No transactions ready for review</p>
+                ) : (
+                  transactions.map((transaction) => (
+                    <button
+                      key={transaction.id}
+                      type="button"
+                      className={transaction.id === selectedTransactionId ? "selected" : undefined}
+                      onClick={() => setSelectedTransactionId(transaction.id)}
+                    >
+                      <span>{transaction.raw_description ?? "Unlabeled transaction"}</span>
+                      <span>{transaction.amount}</span>
+                      <span>{transaction.category_current ?? "Uncategorized"}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+
+              <form className="decision-editor" onSubmit={saveDecision}>
+                <div className="decision-header">
+                  <div>
+                    <p className="eyebrow">Selected transaction</p>
+                    <h3>{selectedTransaction?.raw_description ?? "No transaction selected"}</h3>
+                  </div>
+                  <span>{selectedTransaction?.validation_status ?? "not_loaded"}</span>
+                </div>
+
+                <label>
+                  Current category
+                  <input
+                    type="text"
+                    value={selectedTransaction?.category_current ?? ""}
+                    readOnly
+                  />
+                </label>
+
+                <label>
+                  Approved category
+                  <input
+                    type="text"
+                    value={approvedCategory}
+                    onChange={(event) => setApprovedCategory(event.target.value)}
+                  />
+                </label>
+
+                <div className="audit-preview" aria-label="Audit preview">
+                  <span>Target: canonical transaction</span>
+                  <span>Actor: mason</span>
+                  <span>Source: owner</span>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={!selectedTransaction || selectedTransaction.validation_status === "blocked" || isSaving}
+                >
+                  Save decision
+                </button>
+                {saveStatus ? <p className="save-status">{saveStatus}</p> : null}
+              </form>
             </div>
           </section>
 

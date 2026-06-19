@@ -1,7 +1,12 @@
-import { render, screen } from "@testing-library/react";
-import { expect, test } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
 
 import { App } from "./App";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 test("renders local-only Dillon Finances shell", () => {
   render(<App />);
@@ -29,4 +34,58 @@ test("renders settings tabs and source profile status", () => {
   expect(screen.getByRole("tab", { name: "Future integrations" })).toBeInTheDocument();
   expect(screen.getByText("Alliant Checking")).toBeInTheDocument();
   expect(screen.getByText("Chase Prime Visa")).toBeInTheDocument();
+});
+
+test("saves a classification decision from the review panel", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        transactions: [
+          {
+            id: "tx-1",
+            raw_description: "SYNTHETIC GROCERY",
+            amount: "12.34",
+            category_current: "Food",
+            review_status: "unreviewed",
+            validation_status: "ready_for_review",
+          },
+        ],
+      }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        event: { id: "event-1" },
+        current_state: { category_current: "Groceries" },
+      }),
+    });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  expect((await screen.findAllByText("SYNTHETIC GROCERY")).length).toBeGreaterThan(0);
+  fireEvent.change(screen.getByLabelText("Approved category"), {
+    target: { value: "Groceries" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save decision" }));
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/decision-events",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+  });
+  expect(await screen.findByText("Decision saved")).toBeInTheDocument();
+  expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({
+    target_type: "canonical_transaction",
+    target_id: "tx-1",
+    decision_type: "category_change",
+    field_name: "category",
+    approved_value: "Groceries",
+    explicit_user_action: true,
+  });
 });

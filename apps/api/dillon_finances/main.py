@@ -12,6 +12,11 @@ from sqlalchemy.orm import sessionmaker
 
 from dillon_finances import __version__
 from dillon_finances.database import create_sqlite_engine, upgrade_database
+from dillon_finances.decision_events import (
+    DecisionEventError,
+    DecisionEventRequest,
+    create_decision_event,
+)
 from dillon_finances.import_validation import (
     ImportValidationError,
     accept_import_batch,
@@ -201,6 +206,17 @@ def create_app(
                     detail={"code": "transaction_not_found", "message": "Transaction not found"},
                 )
             return {"transaction": transaction}
+
+    @app.post("/api/decision-events")
+    def post_decision_event(payload: DecisionEventRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return create_decision_event(session, payload)
+            except DecisionEventError as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={"code": exc.code, "message": exc.message},
+                ) from exc
 
     @app.get("/api/settings")
     def get_settings() -> Dict[str, Any]:

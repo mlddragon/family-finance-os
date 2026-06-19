@@ -12,6 +12,7 @@ from typing import Any, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from dillon_finances.decision_events import derive_decision_state, decision_history
 from dillon_finances.models import (
     CanonicalTransaction,
     ImportBatch,
@@ -313,12 +314,18 @@ def _transaction_validation_status(canonical: CanonicalTransaction) -> str:
     return "ready_for_review"
 
 
-def serialize_transaction(canonical: CanonicalTransaction, *, include_facts: bool = False) -> dict[str, Any]:
+def serialize_transaction(
+    session: Session,
+    canonical: CanonicalTransaction,
+    *,
+    include_facts: bool = False,
+) -> dict[str, Any]:
     imported_rows = sorted(
         canonical.imported_rows,
         key=lambda imported_row: (imported_row.posted_date, imported_row.source_row_number),
     )
     primary_fact = imported_rows[0] if imported_rows else None
+    reviewed_state = derive_decision_state(session, canonical)
     payload: dict[str, Any] = {
         "id": canonical.id,
         "canonical_identity": canonical.canonical_identity,
@@ -333,9 +340,11 @@ def serialize_transaction(canonical: CanonicalTransaction, *, include_facts: boo
         "raw_description": primary_fact.raw_description if primary_fact else None,
         "normalized_merchant": primary_fact.normalized_merchant if primary_fact else None,
         "initial_category": primary_fact.initial_category if primary_fact else None,
+        **reviewed_state,
     }
     if include_facts:
         payload["imported_facts"] = [_imported_fact_payload(row) for row in imported_rows]
+        payload["decision_history"] = decision_history(session, canonical)
     return payload
 
 
@@ -345,7 +354,7 @@ def list_transactions(session: Session) -> list[dict[str, Any]]:
         .options(selectinload(CanonicalTransaction.imported_rows).selectinload(ImportedRow.source_file))
         .order_by(CanonicalTransaction.posted_date.desc(), CanonicalTransaction.created_at.desc())
     ).all()
-    return [serialize_transaction(canonical) for canonical in canonicals]
+    return [serialize_transaction(session, canonical) for canonical in canonicals]
 
 
 def get_transaction(session: Session, transaction_id: str) -> Optional[dict[str, Any]]:
@@ -356,4 +365,4 @@ def get_transaction(session: Session, transaction_id: str) -> Optional[dict[str,
     )
     if canonical is None:
         return None
-    return serialize_transaction(canonical, include_facts=True)
+    return serialize_transaction(session, canonical, include_facts=True)
