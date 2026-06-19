@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 from datetime import date, timedelta
@@ -52,6 +53,16 @@ def write_fixture_to_inbox(data_root: Path, fixture_name: str, *, filename: str 
     inbox_path.parent.mkdir(parents=True, exist_ok=True)
     inbox_path.write_text(render_fixture(fixture_name))
     return inbox_path
+
+
+def load_docker_e2e_module():
+    script_path = REPO_ROOT / "scripts" / "run_docker_e2e.py"
+    spec = importlib.util.spec_from_file_location("run_docker_e2e", script_path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def scan_validate_accept_all(client: TestClient, *, acknowledge_warnings: bool = False) -> list[dict]:
@@ -212,3 +223,53 @@ def test_pr10_security_contract_and_docker_e2e_scripts_exist_and_pass_static_che
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_docker_e2e_script_exercises_blocked_validation_path(tmp_path, monkeypatch):
+    module = load_docker_e2e_module()
+    calls: list[tuple[str, str]] = []
+
+    def fake_request_json(_base_url: str, method: str, path: str, payload: dict | None = None):
+        calls.append((method, path))
+        if path == "/api/inbox/scan":
+            return {
+                "import_batches": [
+                    {
+                        "id": "blocked-batch-1",
+                        "source_files": [
+                            {"original_filename": "SYNTHETIC_docker_blocked_wrong_header.csv"}
+                        ],
+                    }
+                ]
+            }
+        if path == "/api/import-batches/blocked-batch-1/validate":
+            return {
+                "findings": [
+                    {"severity": "blocking", "code": "schema_mismatch", "status": "open"}
+                ]
+            }
+        if path == "/api/import-batches/blocked-batch-1/accept":
+            raise module.E2EHttpError(
+                method,
+                path,
+                409,
+                '{"detail":{"code":"blocking_validation_findings"}}',
+            )
+        if path == "/api/validation-findings":
+            return {
+                "findings": [
+                    {"severity": "blocking", "code": "schema_mismatch", "status": "open"}
+                ]
+            }
+        raise AssertionError(f"unexpected request: {method} {path} {payload}")
+
+    monkeypatch.setattr(module, "request_json", fake_request_json)
+
+    result = module.run_blocked_validation_path("http://127.0.0.1:8080", tmp_path)
+
+    assert (tmp_path / "inbox" / "SYNTHETIC_docker_blocked_wrong_header.csv").exists()
+    assert result == {
+        "blocked_batch_id": "blocked-batch-1",
+        "validation_codes": ["schema_mismatch"],
+    }
+    assert ("POST", "/api/import-batches/blocked-batch-1/accept") in calls
