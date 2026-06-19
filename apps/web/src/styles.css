@@ -543,6 +543,12 @@ input[readonly] {
   font-weight: 760;
 }
 
+.muted-text {
+  color: #647066;
+  font-size: 13px;
+  font-weight: 760;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

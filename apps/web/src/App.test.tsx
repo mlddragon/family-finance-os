@@ -93,6 +93,7 @@ function pathFor(input: RequestInfo | URL) {
 }
 
 function installApiMock(options: { acceptImportError?: boolean } = {}) {
+  let importBatchVoided = false;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = pathFor(input);
     if (path === "/api/settings" && init?.method === "PATCH") {
@@ -163,6 +164,7 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
       });
     }
     if (path === "/api/import-batches/batch-1/void" && init?.method === "POST") {
+      importBatchVoided = true;
       return response({
         import_batch: {
           id: "batch-1",
@@ -297,15 +299,16 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
         import_batches: [
           {
             id: "batch-1",
-            status: "detected",
-            validation_status: "pending",
+            status: importBatchVoided ? "voided" : "detected",
+            validation_status: importBatchVoided ? "voided" : "pending",
             row_count: 2,
             source_key: "chase_prime_visa",
             source_files: [
               {
                 id: "file-1",
                 original_filename: "SYNTHETIC_chase_summary.csv",
-                validation_status: "pending",
+                validation_status: importBatchVoided ? "voided" : "pending",
+                storage_status: importBatchVoided ? "destroyed" : "present",
                 row_count: 2,
               },
             ],
@@ -547,6 +550,9 @@ test("sources screen voids an upload with confirmation and optional file destruc
     });
   });
   expect(await screen.findByText("Upload voided and stored files destroyed")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Validate batch" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Accept batch" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Void upload" })).not.toBeInTheDocument();
 });
 
 test("sources upload sends selected source profile with the file", async () => {

@@ -238,6 +238,109 @@ def test_void_import_batch_can_destroy_files_for_unaccepted_upload(tmp_path):
         assert event is not None
 
 
+def test_voided_destroyed_import_batch_cannot_be_revalidated(tmp_path):
+    write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_voided_destroyed_wrong_header.csv",
+        "Wrong,Header\n2026-06-01,12.34\n",
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        client.post(f"/api/import-batches/{batch_id}/validate")
+        void_response = client.post(
+            f"/api/import-batches/{batch_id}/void",
+            json={
+                "actor": "mason",
+                "reason": "Wrong source selected during upload",
+                "destroy_files": True,
+            },
+        )
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        findings_response = client.get("/api/validation-findings")
+
+    assert void_response.status_code == 200
+    assert void_response.json()["import_batch"]["status"] == "voided"
+    assert validate_response.status_code == 409
+    assert validate_response.json()["detail"]["code"] == "voided_import_validation_blocked"
+    assert [
+        finding
+        for finding in findings_response.json()["findings"]
+        if finding["target_id"] == batch_id and finding["status"] == "open"
+    ] == []
+
+    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        batch = session.get(ImportBatch, batch_id)
+        source_file = session.scalar(select(SourceFile).where(SourceFile.import_batch_id == batch_id))
+        assert batch is not None
+        assert source_file is not None
+        assert batch.status == "voided"
+        assert batch.validation_status == "voided"
+        assert source_file.validation_status == "voided"
+        assert source_file.storage_status == "destroyed"
+
+
+def test_revoid_does_not_delete_reuploaded_same_filename(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    filename = "History-061926-011648.csv"
+    content = (
+        "Date,Description,Amount,Balance\n"
+        "06/18/2026,SYNTHETIC FIRST UPLOAD,$12.34,$100.00\n"
+    )
+    replacement_content = (
+        "Date,Description,Amount,Balance\n"
+        "06/19/2026,SYNTHETIC SECOND UPLOAD,$45.67,$145.67\n"
+    )
+
+    with TestClient(app) as client:
+        first_upload = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_checking"},
+            files={"file": (filename, content.encode(), "text/csv")},
+        )
+        assert first_upload.status_code == 200
+        first_batch_id = first_upload.json()["import_batch"]["id"]
+        first_stored_path = first_upload.json()["import_batch"]["source_files"][0]["stored_path"]
+
+        void_response = client.post(
+            f"/api/import-batches/{first_batch_id}/void",
+            json={
+                "actor": "mason",
+                "reason": "Wrong source selected during upload",
+                "destroy_files": True,
+            },
+        )
+        assert void_response.status_code == 200
+
+        second_upload = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_checking"},
+            files={"file": (filename, replacement_content.encode(), "text/csv")},
+        )
+        assert second_upload.status_code == 200
+        second_batch_id = second_upload.json()["import_batch"]["id"]
+        second_stored_path = second_upload.json()["import_batch"]["source_files"][0]["stored_path"]
+
+        revoid_response = client.post(
+            f"/api/import-batches/{first_batch_id}/void",
+            json={
+                "actor": "mason",
+                "reason": "Repeat void should not touch replacement upload",
+                "destroy_files": True,
+            },
+        )
+        validate_second = client.post(f"/api/import-batches/{second_batch_id}/validate")
+
+    assert first_stored_path != second_stored_path
+    assert revoid_response.status_code == 200
+    assert revoid_response.json()["import_batch"]["status"] == "voided"
+    assert validate_second.status_code == 200
+    assert validate_second.json()["findings"] == []
+
+
 def test_void_import_batch_rejects_accepted_batches(tmp_path):
     write_inbox_file(
         tmp_path,
@@ -380,6 +483,68 @@ def test_real_alliant_credit_card_header_profile_validates(tmp_path):
     body = validate_response.json()
     assert body["source_key"] == "alliant_credit_card"
     assert body["findings"] == []
+
+
+def test_alliant_export_money_and_us_dates_validate_and_accept(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    content = (
+        "Date,Description,Amount,Balance\n"
+        '06/18/2026,SYNTHETIC ALLIANT DEPOSIT,"$1,234.56","$2,345.67"\n'
+        '06/19/2026,SYNTHETIC ALLIANT WITHDRAWAL,($45.67),"$2,300.00"\n'
+    )
+
+    with TestClient(app) as client:
+        upload_response = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_checking"},
+            files={"file": ("History-061926-011648.csv", content.encode(), "text/csv")},
+        )
+        assert upload_response.status_code == 200
+        batch_id = upload_response.json()["import_batch"]["id"]
+
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+        transactions_response = client.get("/api/transactions")
+
+    assert validate_response.status_code == 200
+    assert validate_response.json()["findings"] == []
+    assert accept_response.status_code == 200
+    assert accept_response.json()["status"] == "accepted"
+    transactions = transactions_response.json()["transactions"]
+    assert len(transactions) == 2
+    assert {transaction["posted_date"] for transaction in transactions} == {"2026-06-18", "2026-06-19"}
+    assert {transaction["amount"] for transaction in transactions} == {"1234.56", "-45.67"}
+
+
+def test_alliant_credit_card_export_money_and_us_dates_validate_and_accept(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    content = (
+        "Date,Description,Amount,Balance,Post Date\n"
+        "06/18/2026,SYNTHETIC ALLIANT CARD CHARGE,$45.67,$100.00,06/19/2026\n"
+        "06/19/2026,SYNTHETIC ALLIANT CARD PAYMENT,($123.45),$0.00,06/20/2026\n"
+    )
+
+    with TestClient(app) as client:
+        upload_response = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_credit_card"},
+            files={"file": ("History-061926-012007.csv", content.encode(), "text/csv")},
+        )
+        assert upload_response.status_code == 200
+        batch_id = upload_response.json()["import_batch"]["id"]
+
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+        transactions_response = client.get("/api/transactions")
+
+    assert validate_response.status_code == 200
+    assert validate_response.json()["findings"] == []
+    assert accept_response.status_code == 200
+    assert accept_response.json()["status"] == "accepted"
+    transactions = transactions_response.json()["transactions"]
+    assert len(transactions) == 2
+    assert {transaction["posted_date"] for transaction in transactions} == {"2026-06-19", "2026-06-20"}
+    assert {transaction["amount"] for transaction in transactions} == {"45.67", "-123.45"}
 
 
 def test_upload_rejects_path_like_filename_without_writing_outside_inbox(tmp_path):

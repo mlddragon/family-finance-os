@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from dillon_finances.decision_events import derive_decision_state, decision_history
+from dillon_finances.ledger_parsing import decimal_string, parse_ledger_date, parse_money
 from dillon_finances.models import (
     CanonicalTransaction,
     ImportBatch,
@@ -41,10 +42,6 @@ class NormalizedLedgerRow:
 def _stable_sha256(payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
-
-
-def _decimal_string(value: str) -> str:
-    return f"{Decimal(value):.2f}"
 
 
 def _description_fingerprint(description: str) -> str:
@@ -121,19 +118,21 @@ def parse_source_file(source_file: SourceFile) -> list[NormalizedLedgerRow]:
         transaction_date = _first_present(row, "Transaction Date", "Date")
         post_date = _first_present(row, "Post Date", "Date", "Transaction Date")
         raw_amount = _first_present(row, "Amount") or "0"
-        amount = Decimal(raw_amount)
+        amount = parse_money(raw_amount)
         raw_description = _first_present(row, "Description", "Memo", "Merchant") or ""
         balance = _first_present(row, "Balance")
+        posted_date = parse_ledger_date(post_date or transaction_date or "").isoformat()
+        effective_date = parse_ledger_date(transaction_date).isoformat() if transaction_date else None
         normalized_rows.append(
             NormalizedLedgerRow(
                 source_row_number=row_number,
-                posted_date=post_date or transaction_date or "",
-                effective_date=transaction_date,
+                posted_date=posted_date,
+                effective_date=effective_date,
                 raw_description=raw_description,
                 normalized_merchant=_description_fingerprint(raw_description) or None,
-                amount=_decimal_string(raw_amount),
+                amount=decimal_string(amount),
                 direction=_direction(amount, account_type),
-                balance=_decimal_string(balance) if balance is not None else None,
+                balance=decimal_string(parse_money(balance)) if balance is not None else None,
                 initial_category=_first_present(row, "Category"),
                 initial_subcategory=_first_present(row, "Subcategory"),
                 source_transaction_id=_first_present(
@@ -300,7 +299,7 @@ def _imported_fact_payload(imported_row: ImportedRow) -> dict[str, Any]:
         "effective_date": imported_row.effective_date,
         "raw_description": imported_row.raw_description,
         "normalized_merchant": imported_row.normalized_merchant,
-        "amount": _decimal_string(str(imported_row.amount)),
+        "amount": decimal_string(Decimal(str(imported_row.amount))),
         "direction": imported_row.direction,
         "initial_category": imported_row.initial_category,
         "initial_subcategory": imported_row.initial_subcategory,
@@ -330,7 +329,7 @@ def serialize_transaction(
         "id": canonical.id,
         "canonical_identity": canonical.canonical_identity,
         "posted_date": canonical.posted_date,
-        "amount": _decimal_string(str(canonical.amount)),
+        "amount": decimal_string(Decimal(str(canonical.amount))),
         "description_fingerprint": canonical.description_fingerprint,
         "status": canonical.status,
         "validation_status": _transaction_validation_status(canonical),

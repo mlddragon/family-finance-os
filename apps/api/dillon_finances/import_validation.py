@@ -6,9 +6,10 @@ import json
 import shutil
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import InvalidOperation
 from pathlib import Path, PurePath, PureWindowsPath
 from typing import Any, Optional
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -24,6 +25,7 @@ from dillon_finances.models import (
     utc_now_iso,
 )
 from dillon_finances.ledger_normalization import normalize_import_batch
+from dillon_finances.ledger_parsing import parse_ledger_date, parse_money
 from dillon_finances.source_profiles import SourceProfile, get_source_profile, list_source_profiles
 
 
@@ -279,7 +281,13 @@ def _detect_profile(headers: list[str], *, filename: str = "", source_key_hint: 
     return None
 
 
-def _scan_file(session: Session, path: Path, *, source_key_hint: Optional[str] = None) -> ImportBatch:
+def _scan_file(
+    session: Session,
+    path: Path,
+    *,
+    source_key_hint: Optional[str] = None,
+    original_filename: Optional[str] = None,
+) -> ImportBatch:
     file_hash = sha256_file(path)
     if source_key_hint:
         try:
@@ -311,7 +319,7 @@ def _scan_file(session: Session, path: Path, *, source_key_hint: Optional[str] =
         source=source,
         source_account=source_account,
         import_batch=batch,
-        original_filename=path.name,
+        original_filename=original_filename or path.name,
         stored_path=str(path),
         file_sha256=file_hash,
         byte_size=path.stat().st_size,
@@ -358,6 +366,31 @@ def _safe_upload_filename(filename: str) -> str:
     return filename
 
 
+def _stored_path_has_source_file_record(session: Session, path: Path) -> bool:
+    return session.scalar(select(SourceFile).where(SourceFile.stored_path == str(path))) is not None
+
+
+def _unique_upload_path(session: Session, data_root: Path, safe_filename: str) -> Path:
+    inbox = data_root / "inbox"
+    candidate = inbox / safe_filename
+    if candidate.is_symlink() or (candidate.exists() and not candidate.is_file()):
+        raise ImportValidationError(
+            "file_not_regular",
+            _non_regular_source_message(safe_filename),
+            status_code=409,
+        )
+    if not candidate.exists() and not _stored_path_has_source_file_record(session, candidate):
+        return candidate
+
+    stem = candidate.stem or "uploaded-file"
+    suffix = candidate.suffix
+    for _ in range(100):
+        replacement = inbox / f"{stem}-{uuid4().hex[:8]}{suffix}"
+        if not replacement.exists() and not _stored_path_has_source_file_record(session, replacement):
+            return replacement
+    raise ImportValidationError("unsafe_filename", "Could not allocate a safe upload storage path.", status_code=409)
+
+
 def save_upload(
     session: Session,
     data_root: Path,
@@ -370,7 +403,7 @@ def save_upload(
     extension = Path(safe_filename).suffix.lower()
     if extension in REJECTED_EXTENSIONS or extension not in SUPPORTED_EXTENSIONS:
         raise ImportValidationError("unsupported_file_type", f"{extension or 'file'} is not supported")
-    inbox_path = data_root / "inbox" / safe_filename
+    inbox_path = _unique_upload_path(session, data_root, safe_filename)
     inbox_path.parent.mkdir(parents=True, exist_ok=True)
     if inbox_path.is_symlink() or (inbox_path.exists() and not inbox_path.is_file()):
         raise ImportValidationError(
@@ -379,7 +412,7 @@ def save_upload(
             status_code=409,
         )
     inbox_path.write_bytes(content)
-    return _scan_file(session, inbox_path, source_key_hint=source_key_hint)
+    return _scan_file(session, inbox_path, source_key_hint=source_key_hint, original_filename=safe_filename)
 
 
 def _validate_rows(
@@ -398,7 +431,7 @@ def _validate_rows(
     for row_number, row in enumerate(parsed.rows, start=2):
         raw_date = row.get(date_header, "")
         try:
-            posted_dates.append(datetime.strptime(raw_date, "%Y-%m-%d").date())
+            posted_dates.append(parse_ledger_date(raw_date))
         except ValueError:
             findings.append(
                 _create_finding(
@@ -413,7 +446,7 @@ def _validate_rows(
 
         raw_amount = row.get(amount_header, "")
         try:
-            amount = Decimal(raw_amount)
+            amount = parse_money(raw_amount)
             if amount.as_tuple().exponent < -2:
                 findings.append(
                     _create_finding(
@@ -650,6 +683,12 @@ def validate_import_batch(session: Session, batch_id: str) -> dict[str, Any]:
     batch = session.get(ImportBatch, batch_id)
     if batch is None:
         raise ImportValidationError("file_missing", "Import batch not found", status_code=404)
+    if batch.status == "voided" or batch.validation_status == "voided":
+        raise ImportValidationError(
+            "voided_import_validation_blocked",
+            "Voided import batches cannot be revalidated.",
+            status_code=409,
+        )
     _clear_batch_findings(session, batch.id)
 
     findings: list[ValidationFinding] = []
@@ -863,6 +902,21 @@ def _record_import_batch_event(
     return event
 
 
+def _stored_path_claimed_by_other_batch(session: Session, source_file: SourceFile, path: Path) -> bool:
+    return (
+        session.scalar(
+            select(SourceFile)
+            .join(ImportBatch)
+            .where(
+                SourceFile.id != source_file.id,
+                SourceFile.stored_path == str(path),
+                ImportBatch.status != "voided",
+            )
+        )
+        is not None
+    )
+
+
 def _quarantine_batch(data_root: Path, batch: ImportBatch, findings: list[ValidationFinding]) -> None:
     quarantine_dir = _ensure_safe_storage_directory(data_root, data_root / "quarantine" / batch.id)
     reason_path = quarantine_dir / "validation.reason.json"
@@ -906,6 +960,18 @@ def void_import_batch(
             "Accepted import batches cannot be voided in v1.",
             status_code=409,
         )
+    if batch.status == "voided" or batch.validation_status == "voided":
+        active_findings = _open_findings(session, batch.id)
+        for finding in active_findings:
+            finding.status = "resolved"
+        batch.status = "voided"
+        batch.validation_status = "voided"
+        for source_file in batch.source_files:
+            source_file.validation_status = "voided"
+        refresh_source_coverage_findings(session)
+        session.commit()
+        session.refresh(batch)
+        return {"import_batch": serialize_import_batch(batch)}
 
     active_findings = _open_findings(session, batch.id)
     for finding in active_findings:
@@ -918,6 +984,7 @@ def void_import_batch(
     for source_file in batch.source_files:
         source_path = Path(source_file.stored_path)
         _ensure_managed_storage_path(data_root, source_path)
+        path_claimed_by_other_batch = _stored_path_claimed_by_other_batch(session, source_file, source_path)
         if destroy_files:
             if source_path.is_symlink() or (source_path.exists() and not source_path.is_file()):
                 raise ImportValidationError(
@@ -925,7 +992,7 @@ def void_import_batch(
                     _non_regular_source_message(source_file.original_filename),
                     status_code=409,
                 )
-            if source_path.exists():
+            if source_path.exists() and not path_claimed_by_other_batch:
                 source_path.unlink()
                 destroyed_file_count += 1
             source_file.storage_status = "destroyed"
@@ -940,11 +1007,11 @@ def void_import_batch(
                     status_code=409,
                 )
             destination = void_dir / source_file.original_filename
-            if source_path.exists() and source_path.resolve() != destination.resolve():
+            if source_path.exists() and not path_claimed_by_other_batch and source_path.resolve() != destination.resolve():
                 if destination.exists():
                     destination = void_dir / f"{source_file.id}-{source_file.original_filename}"
                 shutil.move(str(source_path), str(destination))
-            source_file.stored_path = str(destination)
+                source_file.stored_path = str(destination)
             source_file.storage_status = "preserved"
             preserved_file_count += 1
         source_file.validation_status = "voided"
@@ -989,6 +1056,12 @@ def accept_import_batch(
     batch = session.get(ImportBatch, batch_id)
     if batch is None:
         raise ImportValidationError("file_missing", "Import batch not found", status_code=404)
+    if batch.status == "voided" or batch.validation_status == "voided":
+        raise ImportValidationError(
+            "voided_import_acceptance_blocked",
+            "Voided import batches cannot be accepted.",
+            status_code=409,
+        )
 
     findings = _open_findings(session, batch.id)
     if batch.validation_status == "pending":

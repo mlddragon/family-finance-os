@@ -450,25 +450,29 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
               { header: "Rows", accessorKey: "row_count" },
               {
                 header: "Actions",
-                cell: ({ row }) => (
-                  <div className="table-actions">
-                    <button
-                      type="button"
-                      className="link-button"
-                      disabled={batchActionPending}
-                      onClick={() => validateMutation.mutate(row.original.id)}
-                    >
-                      Validate batch
-                    </button>
-                    <button
-                      type="button"
-                      className="link-button"
-                      disabled={batchActionPending || row.original.validation_status === "pending"}
-                      onClick={() => acceptMutation.mutate(row.original.id)}
-                    >
-                      Accept batch
-                    </button>
-                    {row.original.status !== "accepted" && row.original.status !== "voided" ? (
+                cell: ({ row }) => {
+                  const batchClosed = row.original.status === "accepted" || row.original.status === "voided";
+                  if (batchClosed) {
+                    return <span className="muted-text">{formatStatus(row.original.status)}</span>;
+                  }
+                  return (
+                    <div className="table-actions">
+                      <button
+                        type="button"
+                        className="link-button"
+                        disabled={batchActionPending}
+                        onClick={() => validateMutation.mutate(row.original.id)}
+                      >
+                        Validate batch
+                      </button>
+                      <button
+                        type="button"
+                        className="link-button"
+                        disabled={batchActionPending || row.original.validation_status === "pending"}
+                        onClick={() => acceptMutation.mutate(row.original.id)}
+                      >
+                        Accept batch
+                      </button>
                       <button
                         type="button"
                         className="link-button danger-link"
@@ -477,9 +481,9 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
                       >
                         Void upload
                       </button>
-                    ) : null}
-                  </div>
-                ),
+                    </div>
+                  );
+                },
               },
             ]}
           />
