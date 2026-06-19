@@ -111,6 +111,29 @@ export function confirmSourceProfileSample(payload: {
   });
 }
 
+export function saveSettingChange(payload: {
+  domain: string;
+  settingKey: string;
+  value: unknown;
+  note?: string;
+}) {
+  return apiJson<SettingsPayload>("/api/settings", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: "mason",
+      changes: [
+        {
+          domain: payload.domain,
+          setting_key: payload.settingKey,
+          value: payload.value,
+          note: payload.note?.trim() || null,
+        },
+      ],
+    }),
+  });
+}
+
 export function fetchArtifacts() {
   return apiJson<{ artifacts: Artifact[] }>("/api/artifacts");
 }

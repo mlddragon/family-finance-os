@@ -27,6 +27,7 @@ import {
   finalizeMonthlyClose,
   runReports,
   saveCategoryDecision,
+  saveSettingChange,
   scanInbox,
   uploadSourceFile,
   validateImportBatch,
@@ -882,10 +883,34 @@ function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artif
 function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; profiles: SourceProfile[] }) {
   const queryClient = useQueryClient();
   const activeProfiles = settings?.source_profiles ?? profiles;
+  const editableSettings = useMemo(
+    () => (settings?.settings ?? []).filter((setting) => setting.editable),
+    [settings?.settings],
+  );
   const pendingProfiles = activeProfiles.filter((profile) => profile.confirmation_status === "pending_owner_sample");
+  const [selectedSettingKey, setSelectedSettingKey] = useState(editableSettings[0]?.setting_key ?? "");
+  const selectedSetting = editableSettings.find((setting) => setting.setting_key === selectedSettingKey);
+  const [settingDraftValue, setSettingDraftValue] = useState("");
+  const [settingNote, setSettingNote] = useState("");
+  const [settingStatus, setSettingStatus] = useState<string | null>(null);
   const [selectedSourceKey, setSelectedSourceKey] = useState(pendingProfiles[0]?.source_key ?? "");
   const [confirmationNote, setConfirmationNote] = useState("");
   const [confirmationStatus, setConfirmationStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedSettingKey && editableSettings.length > 0) {
+      setSelectedSettingKey(editableSettings[0].setting_key);
+    }
+    if (selectedSettingKey && !editableSettings.some((setting) => setting.setting_key === selectedSettingKey)) {
+      setSelectedSettingKey(editableSettings[0]?.setting_key ?? "");
+    }
+  }, [editableSettings, selectedSettingKey]);
+
+  useEffect(() => {
+    if (selectedSetting) {
+      setSettingDraftValue(settingValueToInput(selectedSetting.value));
+    }
+  }, [selectedSetting]);
 
   useEffect(() => {
     if (!selectedSourceKey && pendingProfiles.length > 0) {
@@ -906,6 +931,33 @@ function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; pr
     },
     onError: () => setConfirmationStatus("Source confirmation blocked"),
   });
+
+  const settingMutation = useMutation({
+    mutationFn: saveSettingChange,
+    onSuccess: (body) => {
+      setSettingStatus("Setting saved");
+      setSettingNote("");
+      queryClient.setQueryData(["settings"], body);
+      void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
+    },
+    onError: () => setSettingStatus("Setting save blocked"),
+  });
+
+  function saveEditableSetting(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedSetting) {
+      return;
+    }
+    if (selectedSetting.note_required && !settingNote.trim()) {
+      return;
+    }
+    settingMutation.mutate({
+      domain: selectedSetting.domain,
+      settingKey: selectedSetting.setting_key,
+      value: inputToSettingValue(settingDraftValue, selectedSetting.value),
+      note: settingNote,
+    });
+  }
 
   function saveSourceConfirmation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -936,13 +988,61 @@ function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; pr
       <div className="two-column">
         <section className="work-panel">
           <h3>Active settings</h3>
+          {editableSettings.length ? (
+            <form className="settings-form" onSubmit={saveEditableSetting}>
+              <label>
+                Editable setting
+                <select value={selectedSettingKey} onChange={(event) => setSelectedSettingKey(event.target.value)}>
+                  {editableSettings.map((setting) => (
+                    <option key={setting.id} value={setting.setting_key}>
+                      {setting.setting_key}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {selectedSetting ? (
+                <label>
+                  Setting value
+                  {typeof selectedSetting.value === "boolean" ? (
+                    <select value={settingDraftValue} onChange={(event) => setSettingDraftValue(event.target.value)}>
+                      <option value="true">True</option>
+                      <option value="false">False</option>
+                    </select>
+                  ) : (
+                    <input
+                      type={typeof selectedSetting.value === "number" ? "number" : "text"}
+                      value={settingDraftValue}
+                      onChange={(event) => setSettingDraftValue(event.target.value)}
+                    />
+                  )}
+                </label>
+              ) : null}
+              <label>
+                Change note
+                <textarea
+                  value={settingNote}
+                  onChange={(event) => setSettingNote(event.target.value)}
+                  rows={3}
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={!selectedSetting || (selectedSetting.note_required && !settingNote.trim()) || settingMutation.isPending}
+              >
+                Save setting
+              </button>
+              {settingStatus ? <p className="form-status">{settingStatus}</p> : null}
+            </form>
+          ) : (
+            <p className="empty-state">No editable settings loaded</p>
+          )}
           <DataTable
             data={settings?.settings ?? []}
             emptyLabel="No settings loaded"
             columns={[
               { header: "Domain", accessorKey: "domain" },
               { header: "Setting", accessorKey: "setting_key" },
-              { header: "Value", cell: ({ row }) => String(row.original.value) },
+              { header: "Value", cell: ({ row }) => formatSettingValue(row.original.value) },
               { header: "Editable", cell: ({ row }) => (row.original.editable ? "Yes" : "No") },
             ]}
           />
@@ -1077,4 +1177,38 @@ function hasDecisionHistory(transaction: TransactionDetail | Transaction | null)
 
 function formatStatus(status: string) {
   return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function settingValueToInput(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value ?? "");
+}
+
+function inputToSettingValue(input: string, currentValue: unknown) {
+  if (typeof currentValue === "boolean") {
+    return input === "true";
+  }
+  if (typeof currentValue === "number") {
+    return Number(input);
+  }
+  if (typeof currentValue === "string") {
+    return input;
+  }
+  try {
+    return JSON.parse(input);
+  } catch {
+    return input;
+  }
+}
+
+function formatSettingValue(value: unknown) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value);
 }

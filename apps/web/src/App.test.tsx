@@ -79,6 +79,8 @@ function installApiMock() {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = pathFor(input);
     if (path === "/api/settings" && init?.method === "PATCH") {
+      const patchBody = JSON.parse(String(init.body));
+      const changedSetting = patchBody.changes?.[0];
       return response({
         tabs: ["Data root", "Sources", "Thresholds", "Reports", "Privacy", "Future integrations"],
         local_only: true,
@@ -93,13 +95,21 @@ function installApiMock() {
             editable: false,
             note_required: true,
           },
+          {
+            id: "setting-2",
+            domain: "sources",
+            setting_key: "sources.chase_prime_visa.required",
+            value: changedSetting?.setting_key === "sources.chase_prime_visa.required" ? changedSetting.value : true,
+            editable: true,
+            note_required: true,
+          },
         ],
         settings_events: [
           {
             id: "setting-event-2",
-            domain: "sources",
-            setting_key: "sources.chase_prime_visa.profile_confirmation_status",
-            new_value: "owner_confirmed_header_sample",
+            domain: changedSetting?.domain ?? "sources",
+            setting_key: changedSetting?.setting_key ?? "sources.chase_prime_visa.profile_confirmation_status",
+            new_value: changedSetting?.value ?? "owner_confirmed_header_sample",
             actor: "mason",
             created_at: "2026-06-18T00:01:00Z",
           },
@@ -306,6 +316,14 @@ function installApiMock() {
             setting_key: "runtime.local_only",
             value: true,
             editable: false,
+            note_required: true,
+          },
+          {
+            id: "setting-2",
+            domain: "sources",
+            setting_key: "sources.chase_prime_visa.required",
+            value: true,
+            editable: true,
             note_required: true,
           },
         ],
@@ -524,6 +542,48 @@ test("settings screen saves source profile sample confirmation with owner note",
         setting_key: "sources.chase_prime_visa.profile_confirmation_status",
         value: "owner_confirmed_header_sample",
         note: "Header-only Chase Prime Visa sample approved.",
+      },
+    ],
+  });
+});
+
+test("settings screen edits editable database-backed settings with required notes", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+  expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
+
+  fireEvent.change(await screen.findByLabelText("Editable setting"), {
+    target: { value: "sources.chase_prime_visa.required" },
+  });
+  fireEvent.change(screen.getByLabelText("Setting value"), {
+    target: { value: "false" },
+  });
+  fireEvent.change(screen.getByLabelText("Change note"), {
+    target: { value: "Temporarily make Chase Prime Visa optional for v1 smoke testing." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save setting" }));
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+  expect(await screen.findByText("Setting saved")).toBeInTheDocument();
+  const settingsPatchCalls = fetchMock.mock.calls.filter(
+    (call) => pathFor(call[0]) === "/api/settings" && call[1]?.method === "PATCH",
+  );
+  expect(JSON.parse(settingsPatchCalls.at(-1)?.[1]?.body as string)).toMatchObject({
+    actor: "mason",
+    changes: [
+      {
+        domain: "sources",
+        setting_key: "sources.chase_prime_visa.required",
+        value: false,
+        note: "Temporarily make Chase Prime Visa optional for v1 smoke testing.",
       },
     ],
   });
