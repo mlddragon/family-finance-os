@@ -154,6 +154,29 @@ export function saveCategoryDecision(payload: {
   });
 }
 
+export function saveReviewStatusDecision(payload: {
+  transactionId: string;
+  approvedStatus: "reviewed";
+  notes?: string;
+}) {
+  return apiJson<DecisionEventResponse>("/api/decision-events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target_type: "canonical_transaction",
+      target_id: payload.transactionId,
+      decision_type: "review_status_change",
+      field_name: "review_status",
+      proposed_value: payload.approvedStatus,
+      approved_value: payload.approvedStatus,
+      actor: "mason",
+      suggestion_source: "owner",
+      explicit_user_action: true,
+      notes: payload.notes?.trim() || null,
+    }),
+  });
+}
+
 export function fetchSettings() {
   return apiJson<SettingsPayload>("/api/settings");
 }

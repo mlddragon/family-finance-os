@@ -29,6 +29,7 @@ import {
   resolveValidationFinding,
   runReports,
   saveCategoryDecision,
+  saveReviewStatusDecision,
   saveSettingChange,
   scanInbox,
   uploadSourceFile,
@@ -827,9 +828,29 @@ function ReviewScreen({
   const otherCategorySelected = categorySelection === OTHER_LIST_VALUE;
   const approvedCategory = otherCategorySelected ? otherCategory.trim() : categorySelection.trim();
   const otherCategoryRequiresNote = otherCategorySelected;
+  const currentCategory = selectedTransaction?.category_current?.trim() ?? "";
+  const categoryChanged = Boolean(selectedTransaction) && approvedCategory !== currentCategory;
+  const reviewAlreadyComplete = ["reviewed", "approved"].includes(selectedTransaction?.review_status ?? "");
+  const reviewApprovalNeeded = Boolean(selectedTransaction) && !categoryChanged && !reviewAlreadyComplete;
 
   const decisionMutation = useMutation({
-    mutationFn: saveCategoryDecision,
+    mutationFn: () => {
+      if (!selectedTransaction) {
+        throw new Error("No selected transaction");
+      }
+      if (categoryChanged) {
+        return saveCategoryDecision({
+          transactionId: selectedTransaction.id,
+          approvedCategory,
+          notes: otherCategoryRequiresNote ? notes.trim() : notes,
+        });
+      }
+      return saveReviewStatusDecision({
+        transactionId: selectedTransaction.id,
+        approvedStatus: "reviewed",
+        notes,
+      });
+    },
     onSuccess: (body) => {
       setSaveStatus("Decision saved");
       const updatedCategory = body.current_state?.category_current ?? approvedCategory.trim();
@@ -860,7 +881,8 @@ function ReviewScreen({
     selectedTransaction.validation_status === "blocked" ||
     decisionMutation.isPending ||
     !approvedCategory ||
-    (otherCategoryRequiresNote && !notes.trim());
+    (otherCategoryRequiresNote && !notes.trim()) ||
+    (!categoryChanged && !reviewApprovalNeeded);
 
   const columns = useMemo<ColumnDef<Transaction>[]>(
     () => [
@@ -884,14 +906,15 @@ function ReviewScreen({
 
   function saveDecision(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedTransaction || !approvedCategory || (otherCategoryRequiresNote && !notes.trim())) {
+    if (
+      !selectedTransaction ||
+      !approvedCategory ||
+      (otherCategoryRequiresNote && !notes.trim()) ||
+      (!categoryChanged && !reviewApprovalNeeded)
+    ) {
       return;
     }
-    decisionMutation.mutate({
-      transactionId: selectedTransaction.id,
-      approvedCategory,
-      notes: otherCategoryRequiresNote ? notes.trim() : notes,
-    });
+    decisionMutation.mutate();
   }
 
   return (

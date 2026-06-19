@@ -703,6 +703,37 @@ test("review controls are labelled, focusable, and save append-only decisions", 
   });
 });
 
+test("review save approves unchanged category as a reviewed decision", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Review" }));
+  expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
+
+  const approvedCategory = screen.getByLabelText("Approved category");
+  expect(approvedCategory).toHaveValue("Food");
+
+  fireEvent.click(screen.getByRole("button", { name: "Save decision" }));
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/decision-events",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+  expect(await screen.findByText("Decision saved")).toBeInTheDocument();
+  const decisionCalls = fetchMock.mock.calls.filter((call) => pathFor(call[0]) === "/api/decision-events");
+  expect(JSON.parse(decisionCalls.at(-1)?.[1]?.body as string)).toMatchObject({
+    target_type: "canonical_transaction",
+    target_id: "tx-1",
+    decision_type: "review_status_change",
+    field_name: "review_status",
+    approved_value: "reviewed",
+    explicit_user_action: true,
+  });
+});
+
 test("reports screen runs artifacts and close/export actions", async () => {
   const fetchMock = installApiMock();
 
