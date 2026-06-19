@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   QueryClient,
   QueryClientProvider,
@@ -521,7 +521,7 @@ function ReviewScreen({
   const [notes, setNotes] = useState("");
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setApprovedCategory(selectedTransaction?.category_current ?? "");
     setNotes("");
     setSaveStatus(null);
