@@ -3,6 +3,7 @@ import type {
   ArtifactActionResponse,
   DecisionEventResponse,
   InboxScan,
+  ImportBatch,
   OperatorSummary,
   SettingsPayload,
   Transaction,
@@ -32,6 +33,21 @@ export function uploadSourceFile(file: File) {
   return apiJson<InboxScan>("/api/uploads", {
     method: "POST",
     body,
+  });
+}
+
+export function validateImportBatch(batchId: string) {
+  return apiJson<ImportBatch & { findings: ValidationFinding[] }>(`/api/import-batches/${batchId}/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export function acceptImportBatch(batchId: string) {
+  return apiJson<ImportBatch>(`/api/import-batches/${batchId}/accept`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ acknowledge_warnings: false }),
   });
 }
 

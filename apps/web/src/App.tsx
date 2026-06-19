@@ -14,6 +14,7 @@ import {
 } from "@tanstack/react-table";
 
 import {
+  acceptImportBatch,
   confirmSourceProfileSample,
   fetchOperatorSummary,
   createAdvisorExport,
@@ -28,9 +29,11 @@ import {
   saveCategoryDecision,
   scanInbox,
   uploadSourceFile,
+  validateImportBatch,
 } from "./api";
 import type {
   Artifact,
+  InboxScan,
   ImportBatch,
   OperatorSummary,
   SettingsPayload,
@@ -273,16 +276,65 @@ function HomeScreen({ summary }: { summary: OperatorSummary }) {
 function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: ImportBatch[] }) {
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [batchActionStatus, setBatchActionStatus] = useState<string | null>(null);
+
+  function updateCachedBatch(updatedBatch: ImportBatch) {
+    queryClient.setQueryData<InboxScan>(["inbox-scan"], (current) => {
+      if (!current) {
+        return current;
+      }
+      return {
+        import_batches: current.import_batches.map((batch) =>
+          batch.id === updatedBatch.id
+            ? { ...batch, ...updatedBatch, source_files: updatedBatch.source_files?.length ? updatedBatch.source_files : batch.source_files }
+            : batch,
+        ),
+      };
+    });
+  }
+
+  function refreshImportState() {
+    void queryClient.invalidateQueries({ queryKey: ["inbox-scan"] });
+    void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
+    void queryClient.invalidateQueries({ queryKey: ["validation-findings"] });
+    void queryClient.invalidateQueries({ queryKey: ["transactions"] });
+  }
+
+  function refreshAfterBatchAction() {
+    void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
+    void queryClient.invalidateQueries({ queryKey: ["validation-findings"] });
+    void queryClient.invalidateQueries({ queryKey: ["transactions"] });
+  }
+
   const uploadMutation = useMutation({
     mutationFn: uploadSourceFile,
     onSuccess: () => {
       setSelectedFile(null);
-      void queryClient.invalidateQueries({ queryKey: ["inbox-scan"] });
-      void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
+      setBatchActionStatus("File uploaded to inbox");
+      refreshImportState();
     },
+  });
+  const validateMutation = useMutation({
+    mutationFn: validateImportBatch,
+    onSuccess: (body) => {
+      updateCachedBatch(body);
+      setBatchActionStatus("Batch validation completed");
+      refreshAfterBatchAction();
+    },
+    onError: () => setBatchActionStatus("Batch validation blocked"),
+  });
+  const acceptMutation = useMutation({
+    mutationFn: acceptImportBatch,
+    onSuccess: (body) => {
+      updateCachedBatch(body);
+      setBatchActionStatus("Batch accepted");
+      refreshAfterBatchAction();
+    },
+    onError: () => setBatchActionStatus("Batch acceptance blocked"),
   });
 
   const blockedBatches = inbox.filter((batch) => batch.status === "blocked" || batch.validation_status === "blocked");
+  const batchActionPending = validateMutation.isPending || acceptMutation.isPending;
 
   return (
     <section className="screen" aria-labelledby="sources-heading">
@@ -328,16 +380,40 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
 
       <section className="two-column">
         <div className="work-panel">
-          <h3>Inbox files</h3>
+          <h3>Import batches</h3>
+          {batchActionStatus ? <p className="form-status">{batchActionStatus}</p> : null}
           <DataTable
-            data={inbox.flatMap((batch) => batch.source_files.map((file) => ({ ...file, batch })))}
-            emptyLabel="No files tracked in inbox"
+            data={inbox}
+            emptyLabel="No import batches tracked"
             columns={[
-              { header: "File", accessorKey: "original_filename" },
-              { header: "Batch", cell: ({ row }) => row.original.batch.id.slice(0, 8) },
-              { header: "Source", cell: ({ row }) => row.original.batch.source_key ?? "unmatched" },
-              { header: "Status", accessorKey: "validation_status" },
+              { header: "Batch", cell: ({ row }) => row.original.id.slice(0, 8) },
+              { header: "Source", accessorKey: "source_key" },
+              { header: "Status", accessorKey: "status" },
+              { header: "Validation", accessorKey: "validation_status" },
               { header: "Rows", accessorKey: "row_count" },
+              {
+                header: "Actions",
+                cell: ({ row }) => (
+                  <div className="table-actions">
+                    <button
+                      type="button"
+                      className="link-button"
+                      disabled={batchActionPending}
+                      onClick={() => validateMutation.mutate(row.original.id)}
+                    >
+                      Validate batch
+                    </button>
+                    <button
+                      type="button"
+                      className="link-button"
+                      disabled={batchActionPending || row.original.validation_status === "pending"}
+                      onClick={() => acceptMutation.mutate(row.original.id)}
+                    >
+                      Accept batch
+                    </button>
+                  </div>
+                ),
+              },
             ]}
           />
         </div>
@@ -363,6 +439,21 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
             {uploadMutation.isError ? <p className="form-status danger-text">Upload blocked</p> : null}
           </form>
         </div>
+      </section>
+
+      <section className="work-panel">
+        <h3>Inbox files</h3>
+        <DataTable
+          data={inbox.flatMap((batch) => batch.source_files.map((file) => ({ ...file, batch })))}
+          emptyLabel="No files tracked in inbox"
+          columns={[
+            { header: "File", accessorKey: "original_filename" },
+            { header: "Batch", cell: ({ row }) => row.original.batch.id.slice(0, 8) },
+            { header: "Source", cell: ({ row }) => row.original.batch.source_key ?? "unmatched" },
+            { header: "Status", accessorKey: "validation_status" },
+            { header: "Rows", accessorKey: "row_count" },
+          ]}
+        />
       </section>
 
       <section className="work-panel">

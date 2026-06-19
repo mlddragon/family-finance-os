@@ -486,6 +486,12 @@ input[readonly] {
   gap: 8px;
 }
 
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .save-status {
   margin: 10px 0 0;
   color: #24533a;

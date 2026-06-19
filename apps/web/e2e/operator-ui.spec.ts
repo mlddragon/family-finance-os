@@ -34,10 +34,45 @@ const transaction = {
   imported_fact_count: 1,
 };
 
-async function mockApi(page: Page, onDecision?: (payload: unknown) => void) {
+async function mockApi(
+  page: Page,
+  onDecision?: (payload: unknown) => void,
+  onBatchAction?: (action: string, payload: unknown) => void,
+) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+
+    if (path === "/api/import-batches/batch-1/validate") {
+      onBatchAction?.("validate", request.postDataJSON());
+      await route.fulfill({
+        json: {
+          id: "batch-1",
+          status: "validated",
+          validation_status: "passed",
+          row_count: 1,
+          source_key: "chase_prime_visa",
+          source_files: [],
+          findings: [],
+        },
+      });
+      return;
+    }
+
+    if (path === "/api/import-batches/batch-1/accept") {
+      onBatchAction?.("accept", request.postDataJSON());
+      await route.fulfill({
+        json: {
+          id: "batch-1",
+          status: "accepted",
+          validation_status: "accepted",
+          row_count: 1,
+          source_key: "chase_prime_visa",
+          source_files: [],
+        },
+      });
+      return;
+    }
 
     if (path === "/api/decision-events") {
       onDecision?.(request.postDataJSON());
@@ -100,15 +135,15 @@ async function mockApi(page: Page, onDecision?: (payload: unknown) => void) {
         import_batches: [
           {
             id: "batch-1",
-            status: "accepted",
-            validation_status: "accepted",
+            status: "detected",
+            validation_status: "pending",
             row_count: 1,
             source_key: "chase_prime_visa",
             source_files: [
               {
                 id: "file-1",
                 original_filename: "SYNTHETIC_chase_summary.csv",
-                validation_status: "accepted",
+                validation_status: "pending",
                 row_count: 1,
               },
             ],
@@ -204,4 +239,24 @@ test("saves a category decision through the browser flow", async ({ page }) => {
     approved_value: "Groceries",
     explicit_user_action: true,
   });
+});
+
+test("validates and accepts an import batch through the browser flow", async ({ page }) => {
+  const batchActions: Array<{ action: string; payload: unknown }> = [];
+  await mockApi(page, undefined, (action, payload) => {
+    batchActions.push({ action, payload });
+  });
+  await page.goto("/");
+
+  await page.getByRole("link", { name: "Sources" }).click();
+  await expect(page.getByText("SYNTHETIC_chase_summary.csv")).toBeVisible();
+  await page.getByRole("button", { name: "Validate batch" }).click();
+  await expect(page.getByText("Batch validation completed")).toBeVisible();
+  await page.getByRole("button", { name: "Accept batch" }).click();
+  await expect(page.getByText("Batch accepted")).toBeVisible();
+
+  expect(batchActions).toEqual([
+    { action: "validate", payload: null },
+    { action: "accept", payload: { acknowledge_warnings: false } },
+  ]);
 });

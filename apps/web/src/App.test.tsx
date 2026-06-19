@@ -106,6 +106,28 @@ function installApiMock() {
         ],
       });
     }
+    if (path === "/api/import-batches/batch-1/validate" && init?.method === "POST") {
+      return response({
+        id: "batch-1",
+        status: "validated",
+        validation_status: "passed",
+        row_count: 2,
+        source_key: "chase_prime_visa",
+        source_files: [],
+        findings: [],
+      });
+    }
+    if (path === "/api/import-batches/batch-1/accept" && init?.method === "POST") {
+      return response({
+        id: "batch-1",
+        status: "accepted",
+        validation_status: "accepted",
+        row_count: 2,
+        source_key: "chase_prime_visa",
+        imported_rows_created: 2,
+        canonical_transactions_created: 2,
+      });
+    }
     if (path === "/api/decision-events" && init?.method === "POST") {
       return response({
         event: { id: "event-2", approved_value: "Groceries" },
@@ -209,15 +231,15 @@ function installApiMock() {
         import_batches: [
           {
             id: "batch-1",
-            status: "accepted",
-            validation_status: "accepted",
+            status: "detected",
+            validation_status: "pending",
             row_count: 2,
             source_key: "chase_prime_visa",
             source_files: [
               {
                 id: "file-1",
                 original_filename: "SYNTHETIC_chase_summary.csv",
-                validation_status: "accepted",
+                validation_status: "pending",
                 row_count: 2,
               },
             ],
@@ -360,6 +382,34 @@ test("navigates through the PR8 operator screens", async () => {
   expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
   expect(screen.getAllByText("runtime.local_only").length).toBeGreaterThan(0);
   expect(screen.getByText("Settings audit history")).toBeInTheDocument();
+});
+
+test("sources screen validates and accepts import batches from the browser", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Sources" }));
+  expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
+  expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Validate batch" }));
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/import-batches/batch-1/validate",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+  expect(await screen.findByText("Batch validation completed")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Accept batch" }));
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/import-batches/batch-1/accept",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+  expect(await screen.findByText("Batch accepted")).toBeInTheDocument();
 });
 
 test("review controls are labelled, focusable, and save append-only decisions", async () => {
