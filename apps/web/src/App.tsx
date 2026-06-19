@@ -25,6 +25,7 @@ import {
   fetchTransactions,
   fetchValidationFindings,
   finalizeMonthlyClose,
+  formatApiError,
   runReports,
   saveCategoryDecision,
   saveSettingChange,
@@ -322,7 +323,7 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
       setBatchActionStatus("Batch validation completed");
       refreshAfterBatchAction();
     },
-    onError: () => setBatchActionStatus("Batch validation blocked"),
+    onError: (error) => setBatchActionStatus(formatApiError(error, "Batch validation blocked")),
   });
   const acceptMutation = useMutation({
     mutationFn: acceptImportBatch,
@@ -331,7 +332,7 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
       setBatchActionStatus("Batch accepted");
       refreshAfterBatchAction();
     },
-    onError: () => setBatchActionStatus("Batch acceptance blocked"),
+    onError: (error) => setBatchActionStatus(formatApiError(error, "Batch acceptance blocked")),
   });
 
   const blockedBatches = inbox.filter((batch) => batch.status === "blocked" || batch.validation_status === "blocked");
@@ -437,7 +438,7 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
             <button type="submit" disabled={!selectedFile || uploadMutation.isPending}>
               Upload to inbox
             </button>
-            {uploadMutation.isError ? <p className="form-status danger-text">Upload blocked</p> : null}
+            {uploadMutation.isError ? <p className="form-status danger-text">{formatApiError(uploadMutation.error, "Upload blocked")}</p> : null}
           </form>
         </div>
       </section>
@@ -566,7 +567,7 @@ function ReviewScreen({
       void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
       void queryClient.invalidateQueries({ queryKey: ["transaction", selectedTransactionId] });
     },
-    onError: () => setSaveStatus("Decision blocked"),
+    onError: (error) => setSaveStatus(formatApiError(error, "Decision blocked")),
   });
 
   const columns = useMemo<ColumnDef<Transaction>[]>(
@@ -775,7 +776,7 @@ function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artif
       setActionStatus("Reports completed");
       refreshReportState();
     },
-    onError: () => setActionStatus("Reports blocked"),
+    onError: (error) => setActionStatus(formatApiError(error, "Reports blocked")),
   });
   const draftCloseMutation = useMutation({
     mutationFn: draftMonthlyClose,
@@ -783,7 +784,7 @@ function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artif
       setActionStatus("Draft close created");
       refreshReportState();
     },
-    onError: () => setActionStatus("Draft close blocked"),
+    onError: (error) => setActionStatus(formatApiError(error, "Draft close blocked")),
   });
   const finalCloseMutation = useMutation({
     mutationFn: finalizeMonthlyClose,
@@ -791,7 +792,7 @@ function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artif
       setActionStatus("Final close finalized");
       refreshReportState();
     },
-    onError: () => setActionStatus("Final close blocked"),
+    onError: (error) => setActionStatus(formatApiError(error, "Final close blocked")),
   });
   const advisorExportMutation = useMutation({
     mutationFn: createAdvisorExport,
@@ -799,7 +800,7 @@ function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artif
       setActionStatus("Advisor export created");
       refreshReportState();
     },
-    onError: () => setActionStatus("Advisor export blocked"),
+    onError: (error) => setActionStatus(formatApiError(error, "Advisor export blocked")),
   });
   const actionPending =
     runReportsMutation.isPending ||
@@ -929,7 +930,7 @@ function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; pr
       queryClient.setQueryData(["settings"], body);
       void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
     },
-    onError: () => setConfirmationStatus("Source confirmation blocked"),
+    onError: (error) => setConfirmationStatus(formatApiError(error, "Source confirmation blocked")),
   });
 
   const settingMutation = useMutation({
@@ -940,7 +941,7 @@ function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; pr
       queryClient.setQueryData(["settings"], body);
       void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
     },
-    onError: () => setSettingStatus("Setting save blocked"),
+    onError: (error) => setSettingStatus(formatApiError(error, "Setting save blocked")),
   });
 
   function saveEditableSetting(event: FormEvent<HTMLFormElement>) {

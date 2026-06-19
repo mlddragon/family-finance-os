@@ -11,12 +11,56 @@ import type {
   ValidationFinding,
 } from "./types";
 
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   if (!response.ok) {
-    throw new Error(`Request failed: ${path}`);
+    let message = `Request failed: ${path}`;
+    let code: string | undefined;
+    try {
+      const errorBody = await response.json();
+      const detail = isRecord(errorBody) ? errorBody.detail : null;
+      if (isRecord(detail)) {
+        if (typeof detail.message === "string") {
+          message = detail.message;
+        }
+        if (typeof detail.code === "string") {
+          code = detail.code;
+        }
+      } else if (typeof detail === "string") {
+        message = detail;
+      }
+    } catch {
+      // Keep the fallback message when the server does not return JSON.
+    }
+    throw new ApiError(message, response.status, code);
   }
   return response.json() as Promise<T>;
+}
+
+export function formatApiError(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    return error.code ? `${fallback}: ${error.message} (${error.code})` : `${fallback}: ${error.message}`;
+  }
+  if (error instanceof Error && error.message) {
+    return `${fallback}: ${error.message}`;
+  }
+  return fallback;
 }
 
 export function fetchOperatorSummary() {

@@ -65,6 +65,14 @@ function response(body: unknown) {
   };
 }
 
+function errorResponse(status: number, code: string, message: string) {
+  return {
+    ok: false,
+    status,
+    json: async () => ({ detail: { code, message } }),
+  };
+}
+
 function pathFor(input: RequestInfo | URL) {
   if (typeof input === "string") {
     return input;
@@ -75,7 +83,7 @@ function pathFor(input: RequestInfo | URL) {
   return new URL(input.url).pathname;
 }
 
-function installApiMock() {
+function installApiMock(options: { acceptImportError?: boolean } = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = pathFor(input);
     if (path === "/api/settings" && init?.method === "PATCH") {
@@ -128,6 +136,13 @@ function installApiMock() {
       });
     }
     if (path === "/api/import-batches/batch-1/accept" && init?.method === "POST") {
+      if (options.acceptImportError) {
+        return errorResponse(
+          409,
+          "warning_acknowledgment_required",
+          "Warnings require explicit acknowledgment before acceptance.",
+        );
+      }
       return response({
         id: "batch-1",
         status: "accepted",
@@ -428,6 +443,33 @@ test("sources screen validates and accepts import batches from the browser", asy
     );
   });
   expect(await screen.findByText("Batch accepted")).toBeInTheDocument();
+});
+
+test("sources screen shows structured backend reasons when import acceptance is blocked", async () => {
+  const fetchMock = installApiMock({ acceptImportError: true });
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Sources" }));
+  expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
+  expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Validate batch" }));
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/import-batches/batch-1/validate",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+  expect(await screen.findByText("Batch validation completed")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Accept batch" }));
+
+  expect(
+    await screen.findByText(
+      "Batch acceptance blocked: Warnings require explicit acknowledgment before acceptance. (warning_acknowledgment_required)",
+    ),
+  ).toBeInTheDocument();
 });
 
 test("review controls are labelled, focusable, and save append-only decisions", async () => {
