@@ -525,7 +525,7 @@ function ReviewScreen({
     setApprovedCategory(selectedTransaction?.category_current ?? "");
     setNotes("");
     setSaveStatus(null);
-  }, [selectedTransaction?.id, selectedTransaction?.category_current]);
+  }, [selectedTransaction?.id]);
 
   const filteredTransactions = useMemo(
     () =>
