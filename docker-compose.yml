@@ -1,0 +1,13 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATA_ROOT: /data
+      APP_BIND_HOST: 127.0.0.1
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - "${DILLON_FINANCES_DATA_ROOT:-${HOME}/Dillon_Finances_Data}:/data"
+    user: "10001:10001"
