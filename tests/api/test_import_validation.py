@@ -75,6 +75,7 @@ def test_validation_code_registry_covers_pr5_required_codes():
         "file_missing",
         "file_unreadable",
         "file_empty",
+        "file_integrity_mismatch",
         "file_not_regular",
         "unsafe_filename",
         "unsupported_file_type",
@@ -279,6 +280,48 @@ def test_validation_blocks_source_file_replaced_by_symlink_after_scan(tmp_path):
     assert response.status_code == 200
     assert response.json()["findings"][0]["severity"] == "blocking"
     assert response.json()["findings"][0]["code"] == "file_not_regular"
+
+
+def test_validation_blocks_source_file_content_changed_after_scan(tmp_path):
+    inbox_file = write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_chase_prime_visa.csv",
+        CHASE_HEADER + fresh_chase_row("12.34"),
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        inbox_file.write_text(CHASE_HEADER + fresh_chase_row("45.67"))
+
+        response = client.post(f"/api/import-batches/{batch_id}/validate")
+
+    assert response.status_code == 200
+    assert response.json()["findings"][0]["severity"] == "blocking"
+    assert response.json()["findings"][0]["code"] == "file_integrity_mismatch"
+
+
+def test_accept_blocks_source_file_content_changed_after_validation(tmp_path):
+    inbox_file = write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_chase_prime_visa.csv",
+        CHASE_HEADER + fresh_chase_row("12.34"),
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        assert validate_response.status_code == 200
+        assert validate_response.json()["findings"] == []
+
+        inbox_file.write_text(CHASE_HEADER + fresh_chase_row("45.67"))
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+
+    assert accept_response.status_code == 409
+    assert accept_response.json()["detail"]["code"] == "file_integrity_mismatch"
+    assert inbox_file.exists()
+    assert not list((tmp_path / "raw").glob("**/SYNTHETIC_chase_prime_visa.csv"))
 
 
 def test_validation_findings_endpoint_lists_current_findings(tmp_path):

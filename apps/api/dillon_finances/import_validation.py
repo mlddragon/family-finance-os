@@ -29,6 +29,7 @@ VALIDATION_CODES = {
     "file_missing",
     "file_unreadable",
     "file_empty",
+    "file_integrity_mismatch",
     "file_not_regular",
     "unsafe_filename",
     "unsupported_file_type",
@@ -491,6 +492,14 @@ def _is_regular_source_file(path: Path) -> bool:
     return not path.is_symlink() and path.is_file()
 
 
+def _source_file_integrity_matches(path: Path, source_file: SourceFile) -> bool:
+    return path.stat().st_size == source_file.byte_size and sha256_file(path) == source_file.file_sha256
+
+
+def _source_file_integrity_message(filename: str) -> str:
+    return f"{filename} no longer matches the file hash and size recorded at detection."
+
+
 def _non_regular_source_message(filename: str) -> str:
     return f"{filename} must be a regular source export file, not a symlink or special filesystem item."
 
@@ -542,6 +551,18 @@ def validate_import_batch(session: Session, batch_id: str) -> dict[str, Any]:
                     severity=BLOCKING,
                     code="file_missing",
                     message=f"{source_file.original_filename} is missing.",
+                    target_type="import_batch",
+                    target_id=batch.id,
+                )
+            )
+            continue
+        if not _source_file_integrity_matches(path, source_file):
+            findings.append(
+                _create_finding(
+                    session,
+                    severity=BLOCKING,
+                    code="file_integrity_mismatch",
+                    message=_source_file_integrity_message(source_file.original_filename),
                     target_type="import_batch",
                     target_id=batch.id,
                 )
@@ -750,6 +771,50 @@ def accept_import_batch(
             "Warnings require explicit acknowledgment before acceptance.",
             status_code=409,
         )
+
+    for source_file in batch.source_files:
+        source_path = Path(source_file.stored_path)
+        if source_path.is_symlink() or (source_path.exists() and not source_path.is_file()):
+            _create_finding(
+                session,
+                severity=BLOCKING,
+                code="file_not_regular",
+                message=_non_regular_source_message(source_file.original_filename),
+                target_type="import_batch",
+                target_id=batch.id,
+            )
+            session.commit()
+            raise ImportValidationError(
+                "file_not_regular",
+                _non_regular_source_message(source_file.original_filename),
+                status_code=409,
+            )
+        if not source_path.exists():
+            _create_finding(
+                session,
+                severity=BLOCKING,
+                code="file_missing",
+                message=f"{source_file.original_filename} is missing.",
+                target_type="import_batch",
+                target_id=batch.id,
+            )
+            session.commit()
+            raise ImportValidationError("file_missing", f"{source_file.original_filename} is missing.", status_code=404)
+        if not _source_file_integrity_matches(source_path, source_file):
+            _create_finding(
+                session,
+                severity=BLOCKING,
+                code="file_integrity_mismatch",
+                message=_source_file_integrity_message(source_file.original_filename),
+                target_type="import_batch",
+                target_id=batch.id,
+            )
+            session.commit()
+            raise ImportValidationError(
+                "file_integrity_mismatch",
+                _source_file_integrity_message(source_file.original_filename),
+                status_code=409,
+            )
 
     year = batch.transaction_date_max[:4] if batch.transaction_date_max else "unknown-year"
     source_key = batch.source.source_key if batch.source else "unknown"
