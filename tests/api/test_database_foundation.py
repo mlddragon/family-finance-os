@@ -1,4 +1,5 @@
 from decimal import Decimal
+import json
 from uuid import UUID
 
 import pytest
@@ -18,6 +19,7 @@ from dillon_finances.models import (
     ImportedFactMutationError,
     ImportedRow,
     ImportBatch,
+    ImportBatchEvent,
     Job,
     MonthlyClose,
     ReportRun,
@@ -35,6 +37,7 @@ EXPECTED_TABLES = {
     "source_accounts",
     "source_files",
     "import_batches",
+    "import_batch_events",
     "imported_rows",
     "canonical_transactions",
     "validation_findings",
@@ -265,6 +268,67 @@ def test_models_insert_and_query_v1_audit_records(tmp_path):
         assert session.scalar(select(Source).where(Source.source_key == "chase_prime_visa")) == source
         assert session.scalar(select(Job).where(Job.job_type == "import")) == job
         assert session.scalar(select(MonthlyClose).where(MonthlyClose.month == "2026-01")) == close
+
+
+def test_import_batch_void_event_and_source_file_destruction_metadata(tmp_path):
+    database_path = tmp_path / "database" / "dillon_finances.sqlite3"
+
+    upgrade_database(database_path)
+    engine = create_sqlite_engine(database_path)
+    inspector = inspect(engine)
+    source_file_columns = {column["name"] for column in inspector.get_columns("source_files")}
+
+    assert {
+        "storage_status",
+        "destroyed_at",
+        "destroyed_by",
+        "destroyed_reason",
+    }.issubset(source_file_columns)
+    assert "import_batch_events" in inspector.get_table_names()
+
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        source = Source(
+            source_key="chase_prime_visa",
+            display_name="Chase Prime Visa",
+            source_type="credit_card",
+        )
+        account = SourceAccount(
+            source=source,
+            account_key="chase_prime_visa_primary",
+            display_name="Chase Prime Visa Primary",
+            account_type="credit_card",
+        )
+        batch = ImportBatch(source=source, source_account=account, status="voided")
+        source_file = SourceFile(
+            source=source,
+            source_account=account,
+            import_batch=batch,
+            original_filename="bad-upload.csv",
+            stored_path="/data/quarantine/batch/bad-upload.csv",
+            file_sha256="f" * 64,
+            byte_size=128,
+            validation_status="voided",
+            storage_status="destroyed",
+            destroyed_at="2026-06-19T19:00:00+00:00",
+            destroyed_by="mason",
+            destroyed_reason="Wrong source selected during upload",
+        )
+        event = ImportBatchEvent(
+            import_batch=batch,
+            event_type="files_destroyed",
+            actor="mason",
+            notes="Wrong source selected during upload",
+            metadata_json='{"destroyed_file_count": 1}',
+        )
+        session.add_all([source, account, batch, source_file, event])
+        session.commit()
+
+        persisted_event = session.scalar(select(ImportBatchEvent).where(ImportBatchEvent.import_batch_id == batch.id))
+        assert persisted_event is not None
+        assert persisted_event.event_type == "files_destroyed"
+        assert json.loads(persisted_event.metadata_json)["destroyed_file_count"] == 1
+        assert source_file.storage_status == "destroyed"
 
 
 def test_imported_rows_are_immutable_after_insert(tmp_path):

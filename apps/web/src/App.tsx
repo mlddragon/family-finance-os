@@ -32,6 +32,7 @@ import {
   scanInbox,
   uploadSourceFile,
   validateImportBatch,
+  voidImportBatch,
 } from "./api";
 import type {
   Artifact,
@@ -281,6 +282,9 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedUploadSourceKey, setSelectedUploadSourceKey] = useState(profiles[0]?.source_key ?? "");
   const [batchActionStatus, setBatchActionStatus] = useState<string | null>(null);
+  const [voidTarget, setVoidTarget] = useState<ImportBatch | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [destroyStoredFiles, setDestroyStoredFiles] = useState(false);
   const uploadSourceKey = selectedUploadSourceKey || profiles[0]?.source_key || "";
 
   useEffect(() => {
@@ -346,9 +350,48 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
     },
     onError: (error) => setBatchActionStatus(formatApiError(error, "Batch acceptance blocked")),
   });
+  const voidMutation = useMutation({
+    mutationFn: voidImportBatch,
+    onSuccess: (body, variables) => {
+      updateCachedBatch(body.import_batch);
+      setBatchActionStatus(
+        variables.destroyFiles ? "Upload voided and stored files destroyed" : "Upload voided; stored files preserved",
+      );
+      setVoidTarget(null);
+      setVoidReason("");
+      setDestroyStoredFiles(false);
+      refreshImportState();
+    },
+    onError: (error) => setBatchActionStatus(formatApiError(error, "Upload void blocked")),
+  });
 
   const blockedBatches = inbox.filter((batch) => batch.status === "blocked" || batch.validation_status === "blocked");
-  const batchActionPending = validateMutation.isPending || acceptMutation.isPending;
+  const batchActionPending = validateMutation.isPending || acceptMutation.isPending || voidMutation.isPending;
+
+  function openVoidDialog(batch: ImportBatch) {
+    setVoidTarget(batch);
+    setVoidReason("");
+    setDestroyStoredFiles(false);
+    setBatchActionStatus(null);
+  }
+
+  function closeVoidDialog() {
+    setVoidTarget(null);
+    setVoidReason("");
+    setDestroyStoredFiles(false);
+  }
+
+  function confirmVoidUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!voidTarget || !voidReason.trim()) {
+      return;
+    }
+    voidMutation.mutate({
+      batchId: voidTarget.id,
+      reason: voidReason.trim(),
+      destroyFiles: destroyStoredFiles,
+    });
+  }
 
   return (
     <section className="screen" aria-labelledby="sources-heading">
@@ -425,6 +468,16 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
                     >
                       Accept batch
                     </button>
+                    {row.original.status !== "accepted" && row.original.status !== "voided" ? (
+                      <button
+                        type="button"
+                        className="link-button danger-link"
+                        disabled={batchActionPending}
+                        onClick={() => openVoidDialog(row.original)}
+                      >
+                        Void upload
+                      </button>
+                    ) : null}
                   </div>
                 ),
               },
@@ -475,6 +528,7 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
             { header: "Batch", cell: ({ row }) => row.original.batch.id.slice(0, 8) },
             { header: "Source", cell: ({ row }) => row.original.batch.source_key ?? "unmatched" },
             { header: "Status", accessorKey: "validation_status" },
+            { header: "Storage", cell: ({ row }) => formatStatus(row.original.storage_status ?? "present") },
             { header: "Rows", accessorKey: "row_count" },
           ]}
         />
@@ -497,6 +551,40 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
           <p className="empty-state">No quarantined files</p>
         )}
       </section>
+
+      {voidTarget ? (
+        <div className="modal-backdrop">
+          <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="void-upload-title">
+            <h3 id="void-upload-title">Void upload</h3>
+            <p className="modal-copy">
+              Batch {voidTarget.id.slice(0, 8)} will be removed from the active import workflow. Stored files are
+              preserved unless destruction is explicitly selected.
+            </p>
+            <form className="modal-form" onSubmit={confirmVoidUpload}>
+              <label>
+                Reason
+                <textarea value={voidReason} onChange={(event) => setVoidReason(event.target.value)} />
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={destroyStoredFiles}
+                  onChange={(event) => setDestroyStoredFiles(event.target.checked)}
+                />
+                <span>Destroy stored files</span>
+              </label>
+              <div className="button-row">
+                <button type="button" onClick={closeVoidDialog} disabled={voidMutation.isPending}>
+                  Cancel
+                </button>
+                <button type="submit" className="danger-button" disabled={!voidReason.trim() || voidMutation.isPending}>
+                  Confirm void
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }

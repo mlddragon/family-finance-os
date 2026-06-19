@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from dillon_finances.database import create_sqlite_engine
 from dillon_finances.import_validation import VALIDATION_CODES
 from dillon_finances.main import create_app
-from dillon_finances.models import SourceFile, ValidationFinding
+from dillon_finances.models import ImportBatch, ImportBatchEvent, SourceFile, ValidationFinding
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -147,6 +147,129 @@ def test_blocking_validation_prevents_accept_and_quarantines_file(tmp_path):
     reason_files = list((tmp_path / "quarantine").glob("**/*.reason.json"))
     assert quarantine_files
     assert reason_files
+
+
+def test_void_import_batch_preserves_files_and_resolves_batch_findings(tmp_path):
+    inbox_file = write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_void_wrong_header.csv",
+        "Wrong,Header\n2026-06-01,12.34\n",
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        assert validate_response.status_code == 200
+        assert validate_response.json()["findings"][0]["code"] == "schema_mismatch"
+
+        void_response = client.post(
+            f"/api/import-batches/{batch_id}/void",
+            json={
+                "actor": "mason",
+                "reason": "Wrong source selected during upload",
+                "destroy_files": False,
+            },
+        )
+        validation_response = client.get("/api/validation-findings")
+        scan_again_response = client.post("/api/inbox/scan")
+
+    assert void_response.status_code == 200
+    body = void_response.json()
+    assert body["import_batch"]["status"] == "voided"
+    assert body["import_batch"]["validation_status"] == "voided"
+    assert body["import_batch"]["source_files"][0]["validation_status"] == "voided"
+    assert body["import_batch"]["source_files"][0]["storage_status"] == "preserved"
+    preserved_path = Path(body["import_batch"]["source_files"][0]["stored_path"])
+    assert not inbox_file.exists()
+    assert preserved_path.exists()
+    assert preserved_path.is_relative_to(tmp_path / "processed" / "voided")
+    assert [
+        finding
+        for finding in validation_response.json()["findings"]
+        if finding["target_id"] == batch_id and finding["status"] == "open"
+    ] == []
+    assert [batch["id"] for batch in scan_again_response.json()["import_batches"]] == []
+
+
+def test_void_import_batch_can_destroy_files_for_unaccepted_upload(tmp_path):
+    inbox_file = write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_destroy_wrong_header.csv",
+        "Wrong,Header\n2026-06-01,12.34\n",
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        client.post(f"/api/import-batches/{batch_id}/validate")
+        void_response = client.post(
+            f"/api/import-batches/{batch_id}/void",
+            json={
+                "actor": "mason",
+                "reason": "Uploaded the wrong export file",
+                "destroy_files": True,
+            },
+        )
+
+    assert void_response.status_code == 200
+    body = void_response.json()
+    source_file_body = body["import_batch"]["source_files"][0]
+    assert source_file_body["storage_status"] == "destroyed"
+    assert source_file_body["destroyed_at"]
+    assert source_file_body["destroyed_by"] == "mason"
+    assert source_file_body["destroyed_reason"] == "Uploaded the wrong export file"
+    assert not inbox_file.exists()
+    assert not Path(source_file_body["stored_path"]).exists()
+
+    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        source_file = session.scalar(select(SourceFile).where(SourceFile.import_batch_id == batch_id))
+        event = session.scalar(
+            select(ImportBatchEvent).where(
+                ImportBatchEvent.import_batch_id == batch_id,
+                ImportBatchEvent.event_type == "files_destroyed",
+            )
+        )
+        assert source_file is not None
+        assert source_file.storage_status == "destroyed"
+        assert source_file.destroyed_by == "mason"
+        assert event is not None
+
+
+def test_void_import_batch_rejects_accepted_batches(tmp_path):
+    write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_accepted_cannot_void.csv",
+        CHASE_HEADER + fresh_chase_row(),
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        accepted = accept_latest_batch(client)
+        response = client.post(
+            f"/api/import-batches/{accepted['id']}/void",
+            json={
+                "actor": "mason",
+                "reason": "Test accepted protection",
+                "destroy_files": True,
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "accepted_import_void_blocked"
+
+    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        batch = session.get(ImportBatch, accepted["id"])
+        source_file = session.scalar(select(SourceFile).where(SourceFile.import_batch_id == accepted["id"]))
+        assert batch is not None
+        assert source_file is not None
+        assert batch.status == "accepted"
+        assert source_file.storage_status == "present"
+        assert Path(source_file.stored_path).exists()
 
 
 def test_warnings_require_acknowledgment_before_accept(tmp_path):

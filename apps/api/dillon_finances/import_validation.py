@@ -15,11 +15,13 @@ from sqlalchemy.orm import Session
 
 from dillon_finances.models import (
     ImportBatch,
+    ImportBatchEvent,
     Setting,
     Source,
     SourceAccount,
     SourceFile,
     ValidationFinding,
+    utc_now_iso,
 )
 from dillon_finances.ledger_normalization import normalize_import_batch
 from dillon_finances.source_profiles import SourceProfile, get_source_profile, list_source_profiles
@@ -141,6 +143,10 @@ def _serialize_source_file(source_file: SourceFile) -> dict[str, Any]:
         "file_sha256": source_file.file_sha256,
         "byte_size": source_file.byte_size,
         "validation_status": source_file.validation_status,
+        "storage_status": source_file.storage_status,
+        "destroyed_at": source_file.destroyed_at,
+        "destroyed_by": source_file.destroyed_by,
+        "destroyed_reason": source_file.destroyed_reason,
         "row_count": source_file.row_count,
         "parser_version": source_file.parser_version,
     }
@@ -589,6 +595,34 @@ def _ensure_safe_storage_directory(data_root: Path, directory: Path) -> Path:
     return directory
 
 
+def _ensure_managed_storage_path(data_root: Path, path: Path) -> Path:
+    resolved_data_root = data_root.resolve()
+    try:
+        if path.exists():
+            resolved_path = path.resolve()
+            if not resolved_path.is_relative_to(resolved_data_root):
+                raise ImportValidationError(
+                    "storage_path_unsafe",
+                    _storage_path_unsafe_message(path),
+                    status_code=409,
+                )
+            return resolved_path
+        resolved_parent = path.parent.resolve()
+        if not resolved_parent.is_relative_to(resolved_data_root):
+            raise ImportValidationError(
+                "storage_path_unsafe",
+                _storage_path_unsafe_message(path),
+                status_code=409,
+            )
+        return path
+    except OSError as exc:
+        raise ImportValidationError(
+            "storage_path_unsafe",
+            _storage_path_unsafe_message(path),
+            status_code=409,
+        ) from exc
+
+
 def _non_regular_source_message(filename: str) -> str:
     return f"{filename} must be a regular source export file, not a symlink or special filesystem item."
 
@@ -809,6 +843,26 @@ def _open_findings(session: Session, batch_id: str) -> list[ValidationFinding]:
     ).all()
 
 
+def _record_import_batch_event(
+    session: Session,
+    batch: ImportBatch,
+    *,
+    event_type: str,
+    actor: str,
+    notes: str,
+    metadata: dict[str, Any],
+) -> ImportBatchEvent:
+    event = ImportBatchEvent(
+        import_batch=batch,
+        event_type=event_type,
+        actor=actor,
+        notes=notes,
+        metadata_json=json.dumps(metadata, sort_keys=True),
+    )
+    session.add(event)
+    return event
+
+
 def _quarantine_batch(data_root: Path, batch: ImportBatch, findings: list[ValidationFinding]) -> None:
     quarantine_dir = _ensure_safe_storage_directory(data_root, data_root / "quarantine" / batch.id)
     reason_path = quarantine_dir / "validation.reason.json"
@@ -832,6 +886,97 @@ def _quarantine_batch(data_root: Path, batch: ImportBatch, findings: list[Valida
             source_file.validation_status = "blocked"
     batch.status = "blocked"
     batch.validation_status = "blocked"
+
+
+def void_import_batch(
+    session: Session,
+    data_root: Path,
+    batch_id: str,
+    *,
+    actor: str,
+    reason: str,
+    destroy_files: bool = False,
+) -> dict[str, Any]:
+    batch = session.get(ImportBatch, batch_id)
+    if batch is None:
+        raise ImportValidationError("file_missing", "Import batch not found", status_code=404)
+    if batch.status == "accepted" or batch.imported_rows:
+        raise ImportValidationError(
+            "accepted_import_void_blocked",
+            "Accepted import batches cannot be voided in v1.",
+            status_code=409,
+        )
+
+    active_findings = _open_findings(session, batch.id)
+    for finding in active_findings:
+        finding.status = "resolved"
+
+    destroyed_file_count = 0
+    preserved_file_count = 0
+    void_dir = _ensure_safe_storage_directory(data_root, data_root / "processed" / "voided" / batch.id)
+    timestamp = utc_now_iso()
+    for source_file in batch.source_files:
+        source_path = Path(source_file.stored_path)
+        _ensure_managed_storage_path(data_root, source_path)
+        if destroy_files:
+            if source_path.is_symlink() or (source_path.exists() and not source_path.is_file()):
+                raise ImportValidationError(
+                    "file_not_regular",
+                    _non_regular_source_message(source_file.original_filename),
+                    status_code=409,
+                )
+            if source_path.exists():
+                source_path.unlink()
+                destroyed_file_count += 1
+            source_file.storage_status = "destroyed"
+            source_file.destroyed_at = timestamp
+            source_file.destroyed_by = actor
+            source_file.destroyed_reason = reason
+        else:
+            if source_path.is_symlink() or (source_path.exists() and not source_path.is_file()):
+                raise ImportValidationError(
+                    "file_not_regular",
+                    _non_regular_source_message(source_file.original_filename),
+                    status_code=409,
+                )
+            destination = void_dir / source_file.original_filename
+            if source_path.exists() and source_path.resolve() != destination.resolve():
+                if destination.exists():
+                    destination = void_dir / f"{source_file.id}-{source_file.original_filename}"
+                shutil.move(str(source_path), str(destination))
+            source_file.stored_path = str(destination)
+            source_file.storage_status = "preserved"
+            preserved_file_count += 1
+        source_file.validation_status = "voided"
+
+    batch.status = "voided"
+    batch.validation_status = "voided"
+    _record_import_batch_event(
+        session,
+        batch,
+        event_type="voided",
+        actor=actor,
+        notes=reason,
+        metadata={
+            "destroy_files": destroy_files,
+            "preserved_file_count": preserved_file_count,
+            "destroyed_file_count": destroyed_file_count,
+            "resolved_finding_count": len(active_findings),
+        },
+    )
+    if destroy_files:
+        _record_import_batch_event(
+            session,
+            batch,
+            event_type="files_destroyed",
+            actor=actor,
+            notes=reason,
+            metadata={"destroyed_file_count": destroyed_file_count},
+        )
+    refresh_source_coverage_findings(session)
+    session.commit()
+    session.refresh(batch)
+    return {"import_batch": serialize_import_batch(batch)}
 
 
 def accept_import_batch(

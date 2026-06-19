@@ -162,6 +162,26 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
         canonical_transactions_created: 2,
       });
     }
+    if (path === "/api/import-batches/batch-1/void" && init?.method === "POST") {
+      return response({
+        import_batch: {
+          id: "batch-1",
+          status: "voided",
+          validation_status: "voided",
+          row_count: 2,
+          source_key: "chase_prime_visa",
+          source_files: [
+            {
+              id: "file-1",
+              original_filename: "SYNTHETIC_chase_summary.csv",
+              validation_status: "voided",
+              storage_status: "destroyed",
+              row_count: 2,
+            },
+          ],
+        },
+      });
+    }
     if (path === "/api/uploads" && init?.method === "POST") {
       return response({
         import_batch: {
@@ -491,6 +511,42 @@ test("sources screen shows structured backend reasons when import acceptance is 
       "Batch acceptance blocked: Warnings require explicit acknowledgment before acceptance. (warning_acknowledgment_required)",
     ),
   ).toBeInTheDocument();
+});
+
+test("sources screen voids an upload with confirmation and optional file destruction", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Sources" }));
+  expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
+  expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Void upload" }));
+  const dialog = await screen.findByRole("dialog", { name: "Void upload" });
+  const destroyCheckbox = screen.getByLabelText("Destroy stored files");
+  expect(dialog).toBeInTheDocument();
+  expect(destroyCheckbox).not.toBeChecked();
+
+  fireEvent.change(screen.getByLabelText("Reason"), {
+    target: { value: "Wrong export file uploaded" },
+  });
+  fireEvent.click(destroyCheckbox);
+  fireEvent.click(screen.getByRole("button", { name: "Confirm void" }));
+
+  await waitFor(() => {
+    const voidCall = fetchMock.mock.calls.find(
+      ([input, init]) => pathFor(input) === "/api/import-batches/batch-1/void" && init?.method === "POST",
+    );
+    expect(voidCall).toBeTruthy();
+    const body = JSON.parse(String(voidCall?.[1]?.body));
+    expect(body).toEqual({
+      actor: "mason",
+      reason: "Wrong export file uploaded",
+      destroy_files: true,
+    });
+  });
+  expect(await screen.findByText("Upload voided and stored files destroyed")).toBeInTheDocument();
 });
 
 test("sources upload sends selected source profile with the file", async () => {

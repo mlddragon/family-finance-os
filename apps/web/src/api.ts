@@ -96,6 +96,18 @@ export function acceptImportBatch(batchId: string) {
   });
 }
 
+export function voidImportBatch(payload: { batchId: string; reason: string; destroyFiles: boolean }) {
+  return apiJson<{ import_batch: ImportBatch }>(`/api/import-batches/${payload.batchId}/void`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: "mason",
+      reason: payload.reason,
+      destroy_files: payload.destroyFiles,
+    }),
+  });
+}
+
 export function fetchValidationFindings() {
   return apiJson<{ findings: ValidationFinding[] }>("/api/validation-findings");
 }
