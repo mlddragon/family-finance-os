@@ -62,6 +62,8 @@ const blockedTransaction = {
   id: "tx-2",
   raw_description: "SYNTHETIC DUPLICATE",
   amount: "12.34",
+  initial_category: "Utilities",
+  category_current: "Utilities",
   validation_status: "blocked",
   imported_fact_count: 2,
 };
@@ -664,12 +666,20 @@ test("review controls are labelled, focusable, and save append-only decisions", 
   const approvedCategory = screen.getByLabelText("Approved category");
   approvedCategory.focus();
   expect(approvedCategory).toHaveFocus();
-  fireEvent.change(approvedCategory, { target: { value: "Groceries" } });
-  await waitFor(() => {
-    expect(approvedCategory).toHaveValue("Groceries");
-  });
+  expect(approvedCategory).toBeInstanceOf(HTMLSelectElement);
+  const categoryOptions = Array.from((approvedCategory as HTMLSelectElement).options).map((option) => option.text);
+  expect(categoryOptions).toEqual(["Food", "Utilities", "Other"]);
+
+  fireEvent.change(approvedCategory, { target: { value: "__other__" } });
+  await waitFor(() => expect(approvedCategory).toHaveValue("__other__"));
 
   const saveButton = screen.getByRole("button", { name: "Save decision" });
+  await waitFor(() => expect(saveButton).toBeDisabled());
+
+  fireEvent.change(screen.getByLabelText("Other category"), { target: { value: "Groceries" } });
+  await waitFor(() => expect(saveButton).toBeDisabled());
+
+  fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Creating a new category from review." } });
   saveButton.focus();
   expect(saveButton).toHaveFocus();
   fireEvent.click(saveButton);
@@ -689,6 +699,7 @@ test("review controls are labelled, focusable, and save append-only decisions", 
     field_name: "category",
     approved_value: "Groceries",
     explicit_user_action: true,
+    notes: "Creating a new category from review.",
   });
 });
 

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   QueryClient,
   QueryClientProvider,
@@ -60,6 +60,9 @@ const screens: Array<{ key: ScreenKey; label: string }> = [
   { key: "settings", label: "Settings" },
 ];
 
+const OTHER_LIST_VALUE = "__other__";
+const OTHER_LIST_LABEL = "Other";
+
 const emptySummary: OperatorSummary = {
   runtime: {
     app: "Dillon Finances",
@@ -108,6 +111,24 @@ const emptySummary: OperatorSummary = {
     label: "Load local operating state",
   },
 };
+
+function uniqueExistingListValues(values: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed || trimmed.toLowerCase() === OTHER_LIST_LABEL.toLowerCase()) {
+      continue;
+    }
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result.sort((left, right) => left.localeCompare(right));
+}
 
 function createQueryClient() {
   return new QueryClient({
@@ -742,15 +763,51 @@ function ReviewScreen({
   const [statusFilter, setStatusFilter] = useState("all");
   const [validationFilter, setValidationFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [approvedCategory, setApprovedCategory] = useState("");
+  const [categorySelection, setCategorySelection] = useState("");
+  const [otherCategory, setOtherCategory] = useState("");
   const [notes, setNotes] = useState("");
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const lastInitializedTransactionId = useRef<string | null>(null);
+  const categoryOptions = useMemo(
+    () =>
+      uniqueExistingListValues([
+        ...transactions.flatMap((transaction) => [transaction.category_current, transaction.initial_category]),
+        selectedTransaction?.category_current,
+        selectedTransaction?.initial_category,
+        ...(hasImportedFacts(selectedTransaction)
+          ? selectedTransaction.imported_facts?.map((fact) => fact.initial_category) ?? []
+          : []),
+      ]),
+    [selectedTransaction, transactions],
+  );
 
   useLayoutEffect(() => {
-    setApprovedCategory(selectedTransaction?.category_current ?? "");
+    const currentCategory = selectedTransaction?.category_current?.trim() ?? "";
+    if (!selectedTransaction) {
+      lastInitializedTransactionId.current = null;
+      setCategorySelection("");
+      setOtherCategory("");
+      setNotes("");
+      setSaveStatus(null);
+      return;
+    }
+    if (lastInitializedTransactionId.current === selectedTransaction.id) {
+      return;
+    }
+    lastInitializedTransactionId.current = selectedTransaction.id;
+    if (currentCategory && categoryOptions.includes(currentCategory)) {
+      setCategorySelection(currentCategory);
+      setOtherCategory("");
+    } else if (currentCategory) {
+      setCategorySelection(OTHER_LIST_VALUE);
+      setOtherCategory(currentCategory);
+    } else {
+      setCategorySelection(categoryOptions[0] ?? OTHER_LIST_VALUE);
+      setOtherCategory("");
+    }
     setNotes("");
     setSaveStatus(null);
-  }, [selectedTransaction?.id]);
+  }, [categoryOptions, selectedTransaction]);
 
   const filteredTransactions = useMemo(
     () =>
@@ -766,6 +823,10 @@ function ReviewScreen({
       }),
     [search, statusFilter, transactions, validationFilter],
   );
+
+  const otherCategorySelected = categorySelection === OTHER_LIST_VALUE;
+  const approvedCategory = otherCategorySelected ? otherCategory.trim() : categorySelection.trim();
+  const otherCategoryRequiresNote = otherCategorySelected;
 
   const decisionMutation = useMutation({
     mutationFn: saveCategoryDecision,
@@ -794,6 +855,13 @@ function ReviewScreen({
     onError: (error) => setSaveStatus(formatApiError(error, "Decision blocked")),
   });
 
+  const saveDecisionDisabled =
+    !selectedTransaction ||
+    selectedTransaction.validation_status === "blocked" ||
+    decisionMutation.isPending ||
+    !approvedCategory ||
+    (otherCategoryRequiresNote && !notes.trim());
+
   const columns = useMemo<ColumnDef<Transaction>[]>(
     () => [
       { header: "Date", accessorKey: "posted_date" },
@@ -816,17 +884,15 @@ function ReviewScreen({
 
   function saveDecision(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedTransaction || !approvedCategory.trim()) {
+    if (!selectedTransaction || !approvedCategory || (otherCategoryRequiresNote && !notes.trim())) {
       return;
     }
     decisionMutation.mutate({
       transactionId: selectedTransaction.id,
-      approvedCategory: approvedCategory.trim(),
-      notes,
+      approvedCategory,
+      notes: otherCategoryRequiresNote ? notes.trim() : notes,
     });
   }
-
-  const selectedIsBlocked = selectedTransaction?.validation_status === "blocked";
 
   return (
     <section className="screen" aria-labelledby="review-heading">
@@ -894,12 +960,34 @@ function ReviewScreen({
 
           <label>
             Approved category
-            <input type="text" value={approvedCategory} onChange={(event) => setApprovedCategory(event.target.value)} />
+            <select
+              value={categorySelection}
+              onChange={(event) => {
+                setCategorySelection(event.target.value);
+                if (event.target.value !== OTHER_LIST_VALUE) {
+                  setOtherCategory("");
+                }
+              }}
+            >
+              {categoryOptions.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+              <option value={OTHER_LIST_VALUE}>{OTHER_LIST_LABEL}</option>
+            </select>
           </label>
+
+          {otherCategorySelected ? (
+            <label>
+              Other category
+              <input type="text" value={otherCategory} onChange={(event) => setOtherCategory(event.target.value)} />
+            </label>
+          ) : null}
 
           <label>
             Notes
-            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} />
+            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} required={otherCategoryRequiresNote} />
           </label>
 
           <div className="audit-preview" aria-label="Audit preview">
@@ -908,7 +996,7 @@ function ReviewScreen({
             <span>Source: owner</span>
           </div>
 
-          <button type="submit" disabled={!selectedTransaction || selectedIsBlocked || decisionMutation.isPending}>
+          <button type="submit" disabled={saveDecisionDisabled}>
             Save decision
           </button>
           {saveStatus ? <p className={saveStatus === "Decision saved" ? "form-status ok-text" : "form-status danger-text"}>{saveStatus}</p> : null}
@@ -1398,6 +1486,10 @@ function affectedReports(finding: ValidationFinding) {
 
 function hasDecisionHistory(transaction: TransactionDetail | Transaction | null): transaction is TransactionDetail {
   return Boolean(transaction && "decision_history" in transaction);
+}
+
+function hasImportedFacts(transaction: TransactionDetail | Transaction | null): transaction is TransactionDetail {
+  return Boolean(transaction && "imported_facts" in transaction);
 }
 
 function formatStatus(status: string) {
