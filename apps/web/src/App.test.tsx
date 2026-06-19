@@ -734,6 +734,22 @@ test("review save approves unchanged category as a reviewed decision", async () 
   });
 });
 
+test("blocked validation filter selects blocked transaction and explains review save is blocked", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Review" }));
+  expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Validation status"), { target: { value: "blocked" } });
+
+  expect(await screen.findByText("SYNTHETIC DUPLICATE")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByLabelText("Current category")).toHaveValue("Utilities"));
+  expect(screen.getByText("Blocked transactions must be resolved in Validation Issues before review decisions can be saved.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Resolve validation first" })).toBeDisabled();
+});
+
 test("reports screen runs artifacts and close/export actions", async () => {
   const fetchMock = installApiMock();
 

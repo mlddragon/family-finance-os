@@ -825,10 +825,21 @@ function ReviewScreen({
     [search, statusFilter, transactions, validationFilter],
   );
 
+  useEffect(() => {
+    if (!filteredTransactions.length) {
+      return;
+    }
+    const selectedIsVisible = filteredTransactions.some((transaction) => transaction.id === selectedTransactionId);
+    if (!selectedIsVisible) {
+      onSelectTransaction(filteredTransactions[0].id);
+    }
+  }, [filteredTransactions, onSelectTransaction, selectedTransactionId]);
+
   const otherCategorySelected = categorySelection === OTHER_LIST_VALUE;
   const approvedCategory = otherCategorySelected ? otherCategory.trim() : categorySelection.trim();
   const otherCategoryRequiresNote = otherCategorySelected;
   const currentCategory = selectedTransaction?.category_current?.trim() ?? "";
+  const selectedTransactionBlocked = selectedTransaction?.validation_status === "blocked";
   const categoryChanged = Boolean(selectedTransaction) && approvedCategory !== currentCategory;
   const reviewAlreadyComplete = ["reviewed", "approved"].includes(selectedTransaction?.review_status ?? "");
   const reviewApprovalNeeded = Boolean(selectedTransaction) && !categoryChanged && !reviewAlreadyComplete;
@@ -878,7 +889,7 @@ function ReviewScreen({
 
   const saveDecisionDisabled =
     !selectedTransaction ||
-    selectedTransaction.validation_status === "blocked" ||
+    selectedTransactionBlocked ||
     decisionMutation.isPending ||
     !approvedCategory ||
     (otherCategoryRequiresNote && !notes.trim()) ||
@@ -1019,8 +1030,14 @@ function ReviewScreen({
             <span>Source: owner</span>
           </div>
 
+          {selectedTransactionBlocked ? (
+            <p className="form-status danger-text">
+              Blocked transactions must be resolved in Validation Issues before review decisions can be saved.
+            </p>
+          ) : null}
+
           <button type="submit" disabled={saveDecisionDisabled}>
-            Save decision
+            {selectedTransactionBlocked ? "Resolve validation first" : "Save decision"}
           </button>
           {saveStatus ? <p className={saveStatus === "Decision saved" ? "form-status ok-text" : "form-status danger-text"}>{saveStatus}</p> : null}
         </form>
