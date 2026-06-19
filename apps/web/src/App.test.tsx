@@ -442,6 +442,9 @@ test("review controls are labelled, focusable, and save append-only decisions", 
   approvedCategory.focus();
   expect(approvedCategory).toHaveFocus();
   fireEvent.change(approvedCategory, { target: { value: "Groceries" } });
+  await waitFor(() => {
+    expect(approvedCategory).toHaveValue("Groceries");
+  });
 
   const saveButton = screen.getByRole("button", { name: "Save decision" });
   saveButton.focus();
@@ -455,8 +458,8 @@ test("review controls are labelled, focusable, and save append-only decisions", 
     );
   });
   expect(await screen.findByText("Decision saved" )).toBeInTheDocument();
-  const decisionCall = fetchMock.mock.calls.find((call) => pathFor(call[0]) === "/api/decision-events");
-  expect(JSON.parse(decisionCall?.[1]?.body as string)).toMatchObject({
+  const decisionCalls = fetchMock.mock.calls.filter((call) => pathFor(call[0]) === "/api/decision-events");
+  expect(JSON.parse(decisionCalls.at(-1)?.[1]?.body as string)).toMatchObject({
     target_type: "canonical_transaction",
     target_id: "tx-1",
     decision_type: "category_change",
