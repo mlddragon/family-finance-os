@@ -94,8 +94,24 @@ function pathFor(input: RequestInfo | URL) {
 
 function installApiMock(options: { acceptImportError?: boolean } = {}) {
   let importBatchVoided = false;
+  let validationFindingCleared = false;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = pathFor(input);
+    if (path === "/api/validation-findings/finding-warning/resolve" && init?.method === "POST") {
+      validationFindingCleared = true;
+      return response({
+        finding: {
+          id: "finding-warning",
+          severity: "warning",
+          code: "source_stale",
+          target_type: "import_batch",
+          target_id: "batch-1",
+          message: "This source appears stale against its freshness threshold.",
+          status: "resolved",
+          created_at: "2026-06-18T00:00:01Z",
+        },
+      });
+    }
     if (path === "/api/settings" && init?.method === "PATCH") {
       const patchBody = JSON.parse(String(init.body));
       const changedSetting = patchBody.changes?.[0];
@@ -326,6 +342,16 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
             message: "File headers do not match an approved v1 source profile.",
             status: "open",
             created_at: "2026-06-18T00:00:00Z",
+          },
+          {
+            id: "finding-warning",
+            severity: "warning",
+            code: "source_stale",
+            target_type: "import_batch",
+            target_id: "batch-1",
+            message: "This source appears stale against its freshness threshold.",
+            status: validationFindingCleared ? "resolved" : "open",
+            created_at: "2026-06-18T00:00:01Z",
           },
         ],
       },
@@ -588,6 +614,43 @@ test("sources upload sends selected source profile with the file", async () => {
     expect((body as FormData).get("file")).toBeInstanceOf(File);
   });
   expect(await screen.findByText("File uploaded to inbox")).toBeInTheDocument();
+});
+
+test("validation screen clears acknowledged findings from the default open queue", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Validation Issues" }));
+  expect(await screen.findByRole("heading", { name: "Validation Issues" })).toBeInTheDocument();
+  expect(await screen.findByText("schema_mismatch")).toBeInTheDocument();
+  expect(await screen.findByText("source_stale")).toBeInTheDocument();
+  expect(screen.getByText("Active blockers must be fixed or voided before they can be cleared.")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear source_stale import_batch:batch-1" }));
+  const dialog = await screen.findByRole("dialog", { name: "Clear validation finding" });
+  expect(dialog).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Clear note"), {
+    target: { value: "Acknowledged stale source while waiting for next export." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm clear" }));
+
+  await waitFor(() => {
+    const clearCall = fetchMock.mock.calls.find(
+      ([input, init]) => pathFor(input) === "/api/validation-findings/finding-warning/resolve" && init?.method === "POST",
+    );
+    expect(clearCall).toBeTruthy();
+    expect(JSON.parse(String(clearCall?.[1]?.body))).toEqual({
+      actor: "mason",
+      note: "Acknowledged stale source while waiting for next export.",
+    });
+  });
+  expect(await screen.findByText("Validation finding cleared")).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByText("source_stale")).not.toBeInTheDocument());
+
+  fireEvent.click(screen.getByLabelText("Show cleared"));
+  expect(await screen.findByText("source_stale")).toBeInTheDocument();
+  expect(screen.getByText("resolved")).toBeInTheDocument();
 });
 
 test("review controls are labelled, focusable, and save append-only decisions", async () => {

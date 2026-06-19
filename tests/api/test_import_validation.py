@@ -10,12 +10,20 @@ from sqlalchemy.orm import sessionmaker
 from dillon_finances.database import create_sqlite_engine
 from dillon_finances.import_validation import VALIDATION_CODES
 from dillon_finances.main import create_app
-from dillon_finances.models import ImportBatch, ImportBatchEvent, SourceFile, ValidationFinding
+from dillon_finances.models import (
+    ImportedRow,
+    ImportBatch,
+    ImportBatchEvent,
+    SourceFile,
+    ValidationFinding,
+    ValidationFindingEvent,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "synthetic"
 CHASE_HEADER = "Transaction Date,Post Date,Description,Category,Amount\n"
+CHASE_REAL_EXPORT_HEADER = "Transaction Date,Post Date,Description,Category,Type,Amount,Memo\n"
 
 
 def fresh_chase_row(amount: str = "12.34") -> str:
@@ -24,6 +32,15 @@ def fresh_chase_row(amount: str = "12.34") -> str:
     return (
         f"{transaction_date.isoformat()},{post_date.isoformat()},"
         f"SYNTHETIC GROCERY,Food,{amount}\n"
+    )
+
+
+def fresh_chase_real_export_row(description: str, category: str, transaction_type: str, amount: str) -> str:
+    transaction_date = date.today() - timedelta(days=1)
+    post_date = date.today()
+    return (
+        f"{transaction_date.strftime('%m/%d/%Y')},{post_date.strftime('%m/%d/%Y')},"
+        f"{description},{category},{transaction_type},{amount},\n"
     )
 
 
@@ -547,6 +564,42 @@ def test_alliant_credit_card_export_money_and_us_dates_validate_and_accept(tmp_p
     assert {transaction["amount"] for transaction in transactions} == {"45.67", "-123.45"}
 
 
+def test_real_chase_export_with_type_and_memo_validates_and_keeps_credit_card_directions(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    content = (
+        CHASE_REAL_EXPORT_HEADER
+        + fresh_chase_real_export_row("SYNTHETIC CHASE CARD CHARGE", "Shopping", "Sale", "-45.67")
+        + fresh_chase_real_export_row("SYNTHETIC CHASE CARD PAYMENT", "Payment", "Payment", "123.45")
+    )
+
+    with TestClient(app) as client:
+        upload_response = client.post(
+            "/api/uploads",
+            data={"source_key": "chase_prime_visa"},
+            files={"file": ("Chase9789_Activity20260520_20260619_20260619.CSV", content.encode(), "text/csv")},
+        )
+        assert upload_response.status_code == 200
+        batch_id = upload_response.json()["import_batch"]["id"]
+
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+
+    assert validate_response.status_code == 200
+    assert validate_response.json()["source_key"] == "chase_prime_visa"
+    assert validate_response.json()["findings"] == []
+    assert accept_response.status_code == 200
+
+    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        rows = session.scalars(select(ImportedRow).order_by(ImportedRow.raw_description)).all()
+
+    assert [(row.raw_description, str(row.amount), row.direction) for row in rows] == [
+        ("SYNTHETIC CHASE CARD CHARGE", "-45.67", "outflow"),
+        ("SYNTHETIC CHASE CARD PAYMENT", "123.45", "inflow"),
+    ]
+
+
 def test_upload_rejects_path_like_filename_without_writing_outside_inbox(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
@@ -748,6 +801,86 @@ def test_validation_findings_endpoint_lists_current_findings(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["findings"][0]["code"] == "amount_parse_failed"
+
+
+def test_warning_validation_finding_can_be_acknowledged_with_audit_event(tmp_path):
+    write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_stale_for_acknowledgment.csv",
+        CHASE_HEADER + stale_chase_row(),
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        finding_id = validate_response.json()["findings"][0]["id"]
+
+        resolve_response = client.post(
+            f"/api/validation-findings/{finding_id}/resolve",
+            json={"actor": "mason", "note": "Acknowledged stale source while testing upload flow."},
+        )
+        findings_response = client.get("/api/validation-findings")
+
+    assert resolve_response.status_code == 200
+    resolved_finding = resolve_response.json()["finding"]
+    assert resolved_finding["id"] == finding_id
+    assert resolved_finding["status"] == "resolved"
+
+    stale_findings = [
+        finding
+        for finding in findings_response.json()["findings"]
+        if finding["id"] == finding_id
+    ]
+    assert stale_findings[0]["status"] == "resolved"
+
+    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        finding = session.get(ValidationFinding, finding_id)
+        event = session.scalar(
+            select(ValidationFindingEvent).where(ValidationFindingEvent.validation_finding_id == finding_id)
+        )
+
+    assert finding is not None
+    assert event is not None
+    assert finding.resolution_event_id == event.id
+    assert event.actor == "mason"
+    assert event.notes == "Acknowledged stale source while testing upload flow."
+
+
+def test_active_blocking_validation_finding_cannot_be_acknowledged_or_used_to_bypass_accept(tmp_path):
+    write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_blocked_for_acknowledgment.csv",
+        "Wrong,Header\n2026-06-01,12.34\n",
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        finding_id = validate_response.json()["findings"][0]["id"]
+
+        resolve_response = client.post(
+            f"/api/validation-findings/{finding_id}/resolve",
+            json={"actor": "mason", "note": "Do not hide active blockers."},
+        )
+
+        engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+        Session = sessionmaker(bind=engine)
+        with Session() as session:
+            finding = session.get(ValidationFinding, finding_id)
+            assert finding is not None
+            finding.status = "resolved"
+            session.commit()
+
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+
+    assert resolve_response.status_code == 409
+    assert resolve_response.json()["detail"]["code"] == "active_blocking_validation_finding"
+    assert accept_response.status_code == 409
+    assert accept_response.json()["detail"]["code"] == "blocking_validation_findings"
 
 
 def test_missing_file_creates_blocking_finding(tmp_path):

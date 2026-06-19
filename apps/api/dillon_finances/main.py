@@ -22,6 +22,7 @@ from dillon_finances.import_validation import (
     accept_import_batch,
     list_validation_findings,
     refresh_source_coverage_findings,
+    resolve_validation_finding,
     save_upload,
     scan_inbox,
     serialize_import_batch,
@@ -64,6 +65,11 @@ class VoidImportBatchRequest(BaseModel):
     actor: str = Field(min_length=1)
     reason: str = Field(min_length=1)
     destroy_files: bool = False
+
+
+class ResolveValidationFindingRequest(BaseModel):
+    actor: str = Field(min_length=1)
+    note: str = Field(min_length=1)
 
 
 def _default_data_root() -> Path:
@@ -236,6 +242,19 @@ def create_app(
     def get_validation_findings() -> Dict[str, Any]:
         with create_session() as session:
             return {"findings": list_validation_findings(session)}
+
+    @app.post("/api/validation-findings/{finding_id}/resolve")
+    def resolve_finding(finding_id: str, payload: ResolveValidationFindingRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return resolve_validation_finding(
+                    session,
+                    finding_id,
+                    actor=payload.actor,
+                    note=payload.note,
+                )
+            except ImportValidationError as exc:
+                raise import_validation_http_error(exc) from exc
 
     @app.get("/api/transactions")
     def get_transactions() -> Dict[str, Any]:

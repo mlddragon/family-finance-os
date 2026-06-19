@@ -112,6 +112,17 @@ export function fetchValidationFindings() {
   return apiJson<{ findings: ValidationFinding[] }>("/api/validation-findings");
 }
 
+export function resolveValidationFinding(payload: { findingId: string; note: string }) {
+  return apiJson<{ finding: ValidationFinding; event?: unknown }>(`/api/validation-findings/${payload.findingId}/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: "mason",
+      note: payload.note.trim(),
+    }),
+  });
+}
+
 export function fetchTransactions() {
   return apiJson<{ transactions: Transaction[] }>("/api/transactions");
 }

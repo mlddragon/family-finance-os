@@ -188,6 +188,20 @@ class ValidationFinding(TimestampedModel):
     status: Mapped[str] = mapped_column(String(40), default="open", nullable=False)
     resolution_event_id: Mapped[Optional[str]] = mapped_column(String(36))
 
+    events: Mapped[list["ValidationFindingEvent"]] = relationship(back_populates="validation_finding")
+
+
+class ValidationFindingEvent(TimestampedModel):
+    __tablename__ = "validation_finding_events"
+
+    validation_finding_id: Mapped[str] = mapped_column(ForeignKey("validation_findings.id"), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text)
+
+    validation_finding: Mapped[ValidationFinding] = relationship(back_populates="events")
+
 
 class Setting(TimestampedModel):
     __tablename__ = "settings"

@@ -21,6 +21,7 @@ from dillon_finances.models import (
     SourceFile,
     ValidationFinding,
 )
+from dillon_finances.source_profiles import get_source_profile
 
 
 @dataclass(frozen=True)
@@ -49,12 +50,23 @@ def _description_fingerprint(description: str) -> str:
     return re.sub(r"\s+", " ", normalized)
 
 
-def _direction(amount: Decimal, account_type: str) -> str:
+def _direction(amount: Decimal, account_type: str, amount_sign_policy: str) -> str:
     if amount == 0:
         return "neutral"
     if account_type == "credit_card":
+        if amount_sign_policy == "charges_negative_payments_positive":
+            return "outflow" if amount < 0 else "inflow"
         return "outflow" if amount > 0 else "inflow"
     return "inflow" if amount > 0 else "outflow"
+
+
+def _amount_sign_policy(source_file: SourceFile) -> str:
+    if source_file.source is not None:
+        try:
+            return get_source_profile(source_file.source.source_key).amount_sign_policy
+        except KeyError:
+            pass
+    return "charges_positive_payments_negative" if source_file.source_account and source_file.source_account.account_type == "credit_card" else "debits_negative_credits_positive"
 
 
 def imported_row_hash(row: NormalizedLedgerRow) -> str:
@@ -112,6 +124,7 @@ def parse_source_file(source_file: SourceFile) -> list[NormalizedLedgerRow]:
         return []
 
     account_type = source_file.source_account.account_type
+    amount_sign_policy = _amount_sign_policy(source_file)
     parser_version = source_file.parser_version or "unknown"
     normalized_rows: list[NormalizedLedgerRow] = []
     for row_number, row in enumerate(_read_csv(Path(source_file.stored_path)), start=2):
@@ -131,7 +144,7 @@ def parse_source_file(source_file: SourceFile) -> list[NormalizedLedgerRow]:
                 raw_description=raw_description,
                 normalized_merchant=_description_fingerprint(raw_description) or None,
                 amount=decimal_string(amount),
-                direction=_direction(amount, account_type),
+                direction=_direction(amount, account_type, amount_sign_policy),
                 balance=decimal_string(parse_money(balance)) if balance is not None else None,
                 initial_category=_first_present(row, "Category"),
                 initial_subcategory=_first_present(row, "Subcategory"),

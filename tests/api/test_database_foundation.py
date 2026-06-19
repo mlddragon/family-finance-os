@@ -29,6 +29,7 @@ from dillon_finances.models import (
     SourceAccount,
     SourceFile,
     ValidationFinding,
+    ValidationFindingEvent,
 )
 
 
@@ -41,6 +42,7 @@ EXPECTED_TABLES = {
     "imported_rows",
     "canonical_transactions",
     "validation_findings",
+    "validation_finding_events",
     "settings",
     "settings_events",
     "decision_events",
@@ -170,6 +172,13 @@ def test_models_insert_and_query_v1_audit_records(tmp_path):
             target_id=batch.id,
             status="open",
         )
+        validation_event = ValidationFindingEvent(
+            validation_finding=finding,
+            event_type="resolved",
+            actor="mason",
+            notes="Synthetic validation finding resolved.",
+            metadata_json='{"status": "resolved"}',
+        )
         setting = Setting(
             domain="freshness",
             setting_key="chase_prime_visa.max_age_days",
@@ -237,6 +246,7 @@ def test_models_insert_and_query_v1_audit_records(tmp_path):
                 canonical,
                 imported_row,
                 finding,
+                validation_event,
                 setting,
                 setting_event,
                 decision_event,
@@ -255,6 +265,7 @@ def test_models_insert_and_query_v1_audit_records(tmp_path):
             canonical.id,
             imported_row.id,
             finding.id,
+            validation_event.id,
             setting.id,
             setting_event.id,
             decision_event.id,
@@ -266,6 +277,7 @@ def test_models_insert_and_query_v1_audit_records(tmp_path):
         assert all(UUID(value) for value in ids)
         assert all(record.created_at.endswith("+00:00") for record in [source, batch, job])
         assert session.scalar(select(Source).where(Source.source_key == "chase_prime_visa")) == source
+        assert session.scalar(select(ValidationFindingEvent).where(ValidationFindingEvent.validation_finding_id == finding.id)) == validation_event
         assert session.scalar(select(Job).where(Job.job_type == "import")) == job
         assert session.scalar(select(MonthlyClose).where(MonthlyClose.month == "2026-01")) == close
 

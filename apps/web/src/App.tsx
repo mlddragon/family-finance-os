@@ -26,6 +26,7 @@ import {
   fetchValidationFindings,
   finalizeMonthlyClose,
   formatApiError,
+  resolveValidationFinding,
   runReports,
   saveCategoryDecision,
   saveSettingChange,
@@ -594,6 +595,56 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
 }
 
 function ValidationScreen({ findings }: { findings: ValidationFinding[] }) {
+  const queryClient = useQueryClient();
+  const [showCleared, setShowCleared] = useState(false);
+  const [clearTarget, setClearTarget] = useState<ValidationFinding | null>(null);
+  const [clearNote, setClearNote] = useState("");
+  const [clearStatus, setClearStatus] = useState<string | null>(null);
+  const visibleFindings = useMemo(
+    () => (showCleared ? findings : findings.filter((finding) => finding.status === "open")),
+    [findings, showCleared],
+  );
+  const clearMutation = useMutation({
+    mutationFn: resolveValidationFinding,
+    onSuccess: (body) => {
+      setClearStatus("Validation finding cleared");
+      setClearTarget(null);
+      setClearNote("");
+      queryClient.setQueryData<{ findings: ValidationFinding[] }>(["validation-findings"], (current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          findings: current.findings.map((finding) =>
+            finding.id === body.finding.id ? body.finding : finding,
+          ),
+        };
+      });
+      void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["validation-findings"] });
+    },
+    onError: (error) => setClearStatus(formatApiError(error, "Validation finding clear blocked")),
+  });
+
+  function openClearDialog(finding: ValidationFinding) {
+    setClearTarget(finding);
+    setClearNote("");
+    setClearStatus(null);
+  }
+
+  function closeClearDialog() {
+    setClearTarget(null);
+    setClearNote("");
+  }
+
+  function confirmClearFinding(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!clearTarget || !clearNote.trim()) {
+      return;
+    }
+    clearMutation.mutate({ findingId: clearTarget.id, note: clearNote });
+  }
+
   const columns = useMemo<ColumnDef<ValidationFinding>[]>(
     () => [
       { header: "Severity", accessorKey: "severity" },
@@ -602,8 +653,36 @@ function ValidationScreen({ findings }: { findings: ValidationFinding[] }) {
       { header: "Message", accessorKey: "message" },
       { header: "Status", accessorKey: "status" },
       { header: "Affected reports", cell: ({ row }) => affectedReports(row.original) },
+      {
+        header: "Action",
+        cell: ({ row }) => {
+          const finding = row.original;
+          const targetLabel = `${finding.target_type}:${finding.target_id ?? "none"}`;
+          if (finding.status !== "open") {
+            return <span className="muted-text">Cleared</span>;
+          }
+          if (finding.severity === "blocking") {
+            return (
+              <span className="muted-text">
+                Active blockers must be fixed or voided before they can be cleared.
+              </span>
+            );
+          }
+          return (
+            <button
+              type="button"
+              className="link-button"
+              aria-label={`Clear ${finding.code} ${targetLabel}`}
+              onClick={() => openClearDialog(finding)}
+              disabled={clearMutation.isPending}
+            >
+              Clear {finding.code}
+            </button>
+          );
+        },
+      },
     ],
-    [],
+    [clearMutation.isPending],
   );
 
   return (
@@ -612,7 +691,38 @@ function ValidationScreen({ findings }: { findings: ValidationFinding[] }) {
         <p className="product-label">Validation queue</p>
         <h2 id="validation-heading">Validation Issues</h2>
       </div>
-      <DataTable data={findings} columns={columns} emptyLabel="No validation findings" />
+      <div className="action-row">
+        <label className="checkbox-row inline-checkbox">
+          <input type="checkbox" checked={showCleared} onChange={(event) => setShowCleared(event.target.checked)} />
+          <span>Show cleared</span>
+        </label>
+      </div>
+      {clearStatus ? <p className={clearStatus === "Validation finding cleared" ? "form-status ok-text" : "form-status danger-text"}>{clearStatus}</p> : null}
+      <DataTable data={visibleFindings} columns={columns} emptyLabel="No open validation findings" />
+      {clearTarget ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="clear-validation-title">
+            <h3 id="clear-validation-title">Clear validation finding</h3>
+            <p className="modal-copy">
+              This records an acknowledgment event and removes the finding from the default open queue.
+            </p>
+            <form className="modal-form" onSubmit={confirmClearFinding}>
+              <label>
+                Clear note
+                <textarea value={clearNote} onChange={(event) => setClearNote(event.target.value)} />
+              </label>
+              <div className="button-row">
+                <button type="button" onClick={closeClearDialog} disabled={clearMutation.isPending}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={!clearNote.trim() || clearMutation.isPending}>
+                  Confirm clear
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

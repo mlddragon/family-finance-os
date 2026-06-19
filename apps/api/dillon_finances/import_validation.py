@@ -22,6 +22,7 @@ from dillon_finances.models import (
     SourceAccount,
     SourceFile,
     ValidationFinding,
+    ValidationFindingEvent,
     utc_now_iso,
 )
 from dillon_finances.ledger_normalization import normalize_import_batch
@@ -52,6 +53,8 @@ VALIDATION_CODES = {
     "source_stale",
     "required_source_missing",
     "batch_validation_incomplete",
+    "active_blocking_validation_finding",
+    "validation_finding_not_found",
 }
 
 BLOCKING = "blocking"
@@ -167,6 +170,17 @@ def serialize_finding(finding: ValidationFinding) -> dict[str, Any]:
     }
 
 
+def serialize_finding_event(event: ValidationFindingEvent) -> dict[str, Any]:
+    return {
+        "id": event.id,
+        "validation_finding_id": event.validation_finding_id,
+        "event_type": event.event_type,
+        "actor": event.actor,
+        "notes": event.notes,
+        "created_at": event.created_at,
+    }
+
+
 def _create_finding(
     session: Session,
     *,
@@ -254,6 +268,15 @@ def _profile_filename_tokens(profile: SourceProfile) -> set[str]:
     }
 
 
+def _headers_match_profile(headers: list[str], profile: SourceProfile) -> bool:
+    expected_headers = list(profile.expected_headers)
+    allowed_headers = set(profile.expected_headers) | set(profile.optional_headers)
+    if any(header not in allowed_headers for header in headers):
+        return False
+    required_headers_in_file = [header for header in headers if header in profile.expected_headers]
+    return required_headers_in_file == expected_headers
+
+
 def _detect_profile(headers: list[str], *, filename: str = "", source_key_hint: Optional[str] = None) -> Optional[SourceProfile]:
     if source_key_hint:
         try:
@@ -263,9 +286,9 @@ def _detect_profile(headers: list[str], *, filename: str = "", source_key_hint: 
                 "source_account_unconfirmed",
                 "Selected source profile is not approved for v1 import.",
             ) from exc
-        return hinted_profile if list(hinted_profile.expected_headers) == headers else None
+        return hinted_profile if _headers_match_profile(headers, hinted_profile) else None
 
-    matches = [profile for profile in list_source_profiles() if list(profile.expected_headers) == headers]
+    matches = [profile for profile in list_source_profiles() if _headers_match_profile(headers, profile)]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -458,7 +481,7 @@ def _validate_rows(
                         target_id=batch.id,
                     )
                 )
-            if profile.amount_sign_policy == "charges_positive_payments_negative" and amount == 0:
+            if profile.amount_sign_policy.startswith("charges_") and amount == 0:
                 findings.append(
                     _create_finding(
                         session,
@@ -817,6 +840,64 @@ def list_validation_findings(session: Session) -> list[dict[str, Any]]:
     return [serialize_finding(finding) for finding in findings]
 
 
+def _finding_targets_closed_import_batch(session: Session, finding: ValidationFinding) -> bool:
+    if finding.target_type != "import_batch" or finding.target_id is None:
+        return False
+    batch = session.get(ImportBatch, finding.target_id)
+    if batch is None:
+        return False
+    return batch.status in {"accepted", "voided"} or batch.validation_status in {
+        "accepted",
+        "accepted_with_warnings",
+        "voided",
+    }
+
+
+def resolve_validation_finding(
+    session: Session,
+    finding_id: str,
+    *,
+    actor: str,
+    note: str,
+) -> dict[str, Any]:
+    finding = session.get(ValidationFinding, finding_id)
+    if finding is None:
+        raise ImportValidationError("validation_finding_not_found", "Validation finding not found.", status_code=404)
+    if finding.status != "open":
+        return {"finding": serialize_finding(finding), "event": None}
+    if finding.severity == BLOCKING and not _finding_targets_closed_import_batch(session, finding):
+        raise ImportValidationError(
+            "active_blocking_validation_finding",
+            "Active blocking findings must be fixed or voided before they can be cleared.",
+            status_code=409,
+        )
+
+    event = ValidationFindingEvent(
+        validation_finding=finding,
+        event_type="resolved",
+        actor=actor,
+        notes=note,
+        metadata_json=json.dumps(
+            {
+                "previous_status": finding.status,
+                "new_status": "resolved",
+                "severity": finding.severity,
+                "code": finding.code,
+            },
+            sort_keys=True,
+        ),
+    )
+    session.add(event)
+    session.flush()
+    finding.status = "resolved"
+    finding.resolution_event_id = event.id
+    refresh_source_coverage_findings(session)
+    session.commit()
+    session.refresh(finding)
+    session.refresh(event)
+    return {"finding": serialize_finding(finding), "event": serialize_finding_event(event)}
+
+
 def refresh_source_coverage_findings(session: Session) -> None:
     required_keys = _required_source_keys(session)
     accepted_keys = _accepted_source_keys(session)
@@ -826,8 +907,11 @@ def refresh_source_coverage_findings(session: Session) -> None:
         .where(ValidationFinding.code == "required_source_missing")
         .order_by(ValidationFinding.created_at)
     ).all()
+    existing_by_source: dict[str, list[ValidationFinding]] = {}
     open_by_source: dict[str, list[ValidationFinding]] = {}
     for finding in existing:
+        if finding.target_id:
+            existing_by_source.setdefault(finding.target_id, []).append(finding)
         if finding.status == "open" and finding.target_id:
             open_by_source.setdefault(finding.target_id, []).append(finding)
 
@@ -841,6 +925,8 @@ def refresh_source_coverage_findings(session: Session) -> None:
 
     for source_key in sorted(missing_keys):
         if source_key in open_by_source:
+            continue
+        if any(finding.status == "resolved" for finding in existing_by_source.get(source_key, [])):
             continue
         _create_finding(
             session,
@@ -1077,8 +1163,9 @@ def accept_import_batch(
         raise ImportValidationError(finding.code, finding.message, status_code=409)
 
     blocking_findings = [finding for finding in findings if finding.severity == BLOCKING]
-    if blocking_findings:
-        _quarantine_batch(data_root, batch, blocking_findings)
+    if batch.validation_status == "blocked" or blocking_findings:
+        if blocking_findings:
+            _quarantine_batch(data_root, batch, blocking_findings)
         session.commit()
         raise ImportValidationError(
             "blocking_validation_findings",

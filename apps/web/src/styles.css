@@ -605,6 +605,13 @@ input[readonly] {
   text-transform: none;
 }
 
+.inline-checkbox {
+  width: fit-content;
+  color: #425048;
+  font-size: 13px;
+  font-weight: 760;
+}
+
 .ok-text {
   color: #24533a;
 }
