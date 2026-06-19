@@ -322,12 +322,13 @@ Before implementation planning starts, the following gates apply:
 - Completed: import validation contract has been approved in `planning/import_validation_contract_v1.md`.
 - Completed: report and monthly close artifact detail has been approved in `planning/report_monthly_close_artifacts_v1.md`.
 - Completed: settings/config audit design has been approved in `planning/settings_config_audit_design_v1.md`.
-- Drafted for review: controlled decision event model has been captured in `planning/controlled_decision_event_model_v1.md`.
+- Completed: controlled decision event model has been approved in `planning/controlled_decision_event_model_v1.md`.
 - Completed: test and validation strategy has been approved in `planning/test_validation_strategy_v1.md`.
+- Drafted for review: v1 implementation plan has been captured in `planning/v1_implementation_plan.md`.
 
 ## Next Recommended Work
 
 The next planning work should be one of:
 
-1. Owner review of `planning/controlled_decision_event_model_v1.md`.
-2. Implementation plan after the above gate is approved.
+1. Owner review of `planning/v1_implementation_plan.md`.
+2. App implementation after the implementation plan is approved and merged.
