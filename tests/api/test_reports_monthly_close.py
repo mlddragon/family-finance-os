@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -80,6 +82,21 @@ def artifact_paths(body: dict) -> list[Path]:
     return [Path(artifact["path"]) for artifact in body["artifacts"]]
 
 
+def assert_artifact_registry_integrity(artifact: dict, *, expected_root: Path, expected_job_id: str) -> None:
+    path = Path(artifact["path"])
+    content = path.read_bytes()
+
+    assert path.exists()
+    assert path.is_relative_to(expected_root)
+    assert artifact["sha256"] == hashlib.sha256(content).hexdigest()
+    assert artifact["byte_size"] == len(content)
+    assert artifact["producing_job_id"] == expected_job_id
+    assert artifact["source_inputs"]["month"]
+    assert artifact["source_inputs"]["validation_summary"]
+    assert artifact["retention_category"] == "v1_operational_artifact"
+    assert artifact["sensitivity"].startswith("household_financial_")
+
+
 def test_report_run_generates_registered_core_artifacts(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
@@ -114,6 +131,32 @@ def test_report_run_generates_registered_core_artifacts(tmp_path):
     }
 
 
+def test_report_artifacts_include_integrity_and_source_input_metadata(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        accepted_batch = create_accepted_chase_batch(client, tmp_path)
+        response = client.post("/api/reports/run", json={"actor": "mason"})
+
+    assert response.status_code == 200
+    body = response.json()
+    expected_job_id = body["job"]["id"]
+    for artifact in body["artifacts"]:
+        assert_artifact_registry_integrity(
+            artifact,
+            expected_root=tmp_path / "reports",
+            expected_job_id=expected_job_id,
+        )
+        assert artifact["source_inputs"]["import_batch_ids"] == [accepted_batch["id"]]
+        assert artifact["source_inputs"]["validation_summary"]["accepted_import_batch_ids"] == [
+            accepted_batch["id"]
+        ]
+
+    artifact_by_type = {artifact["artifact_type"]: artifact for artifact in body["artifacts"]}
+    assert artifact_by_type["reviewed_transactions_export"]["sensitivity"] == "household_financial_export"
+    assert artifact_by_type["import_validation_summary"]["sensitivity"] == "household_financial_summary"
+
+
 def test_monthly_close_draft_writes_provisional_manifest_and_bundle(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
@@ -137,6 +180,41 @@ def test_monthly_close_draft_writes_provisional_manifest_and_bundle(tmp_path):
     assert manifest.exists()
     assert manifest.is_relative_to(tmp_path / "monthly_close")
     assert '"status":"draft"' in manifest.read_text()
+
+
+def test_monthly_close_manifest_references_registered_bundle_artifacts(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        create_accepted_chase_batch(client, tmp_path)
+        response = client.post("/api/monthly-close/draft", json={"actor": "mason"})
+
+    assert response.status_code == 200
+    body = response.json()
+    expected_job_id = body["job"]["id"]
+    artifact_by_type = {artifact["artifact_type"]: artifact for artifact in body["artifacts"]}
+    manifest_artifact = artifact_by_type["monthly_close_manifest"]
+    manifest = json.loads(Path(manifest_artifact["path"]).read_text())
+
+    for artifact in body["artifacts"]:
+        assert_artifact_registry_integrity(
+            artifact,
+            expected_root=tmp_path / "monthly_close",
+            expected_job_id=expected_job_id,
+        )
+        assert artifact["source_inputs"]["monthly_close_id"] == body["monthly_close"]["id"]
+        assert artifact["source_inputs"]["validation_summary"] == body["validation_summary"]
+
+    manifest_artifact_ids = {artifact["id"] for artifact in manifest["artifacts"]}
+    expected_bundle_artifact_ids = {
+        artifact_by_type["monthly_close_memo"]["id"],
+        artifact_by_type["settings_snapshot"]["id"],
+        artifact_by_type["decision_event_export"]["id"],
+    }
+    assert manifest["monthly_close_id"] == body["monthly_close"]["id"]
+    assert manifest["status"] == "draft"
+    assert manifest["validation_summary"] == body["validation_summary"]
+    assert manifest_artifact_ids == expected_bundle_artifact_ids
 
 
 def test_final_close_blocks_missing_required_source_coverage(tmp_path):
@@ -205,6 +283,32 @@ def test_advisor_export_is_explicit_owner_action_and_carries_validation_state(tm
     artifact_types = {artifact["artifact_type"] for artifact in body["artifacts"]}
     assert {"advisor_summary", "advisor_transactions_export"}.issubset(artifact_types)
     assert all(path.exists() and path.is_relative_to(tmp_path / "exports") for path in artifact_paths(body))
+
+
+def test_advisor_export_artifacts_include_integrity_and_validation_metadata(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        accepted_batch = create_accepted_chase_batch(client, tmp_path)
+        response = client.post("/api/exports/advisor", json={"actor": "mason"})
+
+    assert response.status_code == 200
+    body = response.json()
+    expected_job_id = body["job"]["id"]
+    artifact_by_type = {artifact["artifact_type"]: artifact for artifact in body["artifacts"]}
+
+    for artifact in body["artifacts"]:
+        assert_artifact_registry_integrity(
+            artifact,
+            expected_root=tmp_path / "exports",
+            expected_job_id=expected_job_id,
+        )
+        assert artifact["source_inputs"]["import_batch_ids"] == [accepted_batch["id"]]
+        assert artifact["source_inputs"]["validation_summary"] == body["validation_summary"]
+
+    advisor_summary = json.loads(Path(artifact_by_type["advisor_summary"]["path"]).read_text())
+    assert advisor_summary["validation_summary"] == body["validation_summary"]
+    assert artifact_by_type["advisor_transactions_export"]["sensitivity"] == "household_financial_export"
 
 
 def test_artifact_download_returns_registered_artifact_file(tmp_path):
