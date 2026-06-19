@@ -9,6 +9,8 @@ from dillon_finances.import_validation import VALIDATION_CODES
 from dillon_finances.main import create_app
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "synthetic"
 CHASE_HEADER = "Transaction Date,Post Date,Description,Category,Amount\n"
 
 
@@ -35,6 +37,33 @@ def write_inbox_file(data_root: Path, filename: str, content: str) -> Path:
     inbox_path.parent.mkdir(parents=True, exist_ok=True)
     inbox_path.write_text(content)
     return inbox_path
+
+
+def rendered_fixture(name: str) -> str:
+    fresh_date = date.today() - timedelta(days=1)
+    fresh_post_date = date.today()
+    return (
+        (FIXTURE_DIR / name)
+        .read_text()
+        .replace("{{FRESH_DATE}}", fresh_date.isoformat())
+        .replace("{{FRESH_POST_DATE}}", fresh_post_date.isoformat())
+    )
+
+
+def write_rendered_fixture(data_root: Path, fixture_name: str) -> Path:
+    return write_inbox_file(data_root, fixture_name, rendered_fixture(fixture_name))
+
+
+def accept_latest_batch(client: TestClient, *, acknowledge_warnings: bool = False) -> dict:
+    batch_id = client.post("/api/inbox/scan").json()["import_batches"][-1]["id"]
+    validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+    assert validate_response.status_code == 200
+    accept_response = client.post(
+        f"/api/import-batches/{batch_id}/accept",
+        json={"acknowledge_warnings": acknowledge_warnings},
+    )
+    assert accept_response.status_code == 200
+    return accept_response.json()
 
 
 def test_validation_code_registry_covers_pr5_required_codes():
@@ -248,6 +277,45 @@ def test_stale_source_creates_warning_finding(tmp_path):
     assert response.status_code == 200
     assert response.json()["findings"][0]["severity"] == "warning"
     assert response.json()["findings"][0]["code"] == "source_stale"
+
+
+def test_missing_required_sources_are_first_class_validation_findings_and_resolve(tmp_path):
+    write_rendered_fixture(tmp_path, "v1_valid_chase_prime_visa.csv")
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        accept_latest_batch(client)
+        missing_response = client.get("/api/validation-findings")
+
+        for fixture_name in [
+            "v1_valid_alliant_checking.csv",
+            "v1_valid_alliant_savings.csv",
+            "v1_valid_alliant_credit_card.csv",
+        ]:
+            write_rendered_fixture(tmp_path, fixture_name)
+            accept_latest_batch(client)
+
+        resolved_response = client.get("/api/validation-findings")
+
+    assert missing_response.status_code == 200
+    missing_source_findings = [
+        finding
+        for finding in missing_response.json()["findings"]
+        if finding["status"] == "open" and finding["code"] == "required_source_missing"
+    ]
+    assert {finding["target_id"] for finding in missing_source_findings} == {
+        "alliant_checking",
+        "alliant_savings",
+        "alliant_credit_card",
+    }
+    assert {finding["severity"] for finding in missing_source_findings} == {"warning"}
+
+    assert resolved_response.status_code == 200
+    assert [
+        finding
+        for finding in resolved_response.json()["findings"]
+        if finding["status"] == "open" and finding["code"] == "required_source_missing"
+    ] == []
 
 
 def test_duplicate_file_hash_warns_without_silent_dedupe(tmp_path):

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from dillon_finances.models import (
     ImportBatch,
+    Setting,
     Source,
     SourceAccount,
     SourceFile,
@@ -523,8 +524,56 @@ def validate_import_batch(session: Session, batch_id: str) -> dict[str, Any]:
 
 
 def list_validation_findings(session: Session) -> list[dict[str, Any]]:
+    refresh_source_coverage_findings(session)
+    session.commit()
     findings = session.scalars(select(ValidationFinding).order_by(ValidationFinding.created_at)).all()
     return [serialize_finding(finding) for finding in findings]
+
+
+def refresh_source_coverage_findings(session: Session) -> None:
+    required_keys = _required_source_keys(session)
+    accepted_keys = _accepted_source_keys(session)
+    missing_keys = required_keys - accepted_keys
+    existing = session.scalars(
+        select(ValidationFinding).where(ValidationFinding.code == "required_source_missing")
+    ).all()
+    open_by_source = {finding.target_id: finding for finding in existing if finding.status == "open"}
+
+    for source_key, finding in open_by_source.items():
+        if source_key not in missing_keys:
+            finding.status = "resolved"
+
+    for source_key in sorted(missing_keys):
+        if source_key in open_by_source:
+            continue
+        _create_finding(
+            session,
+            severity=WARNING,
+            code="required_source_missing",
+            message=f"Required source {source_key} has not been accepted for the current close cycle.",
+            target_type="source",
+            target_id=source_key,
+        )
+
+
+def _required_source_keys(session: Session) -> set[str]:
+    required: set[str] = set()
+    for profile in list_source_profiles():
+        required_setting = session.scalar(
+            select(Setting).where(
+                Setting.domain == "sources",
+                Setting.setting_key == f"sources.{profile.source_key}.required",
+            )
+        )
+        required_value = json.loads(required_setting.value_json) if required_setting else profile.required
+        if required_value:
+            required.add(profile.source_key)
+    return required
+
+
+def _accepted_source_keys(session: Session) -> set[str]:
+    accepted_batches = session.scalars(select(ImportBatch).where(ImportBatch.status == "accepted")).all()
+    return {batch.source.source_key for batch in accepted_batches if batch.source is not None}
 
 
 def _open_findings(session: Session, batch_id: str) -> list[ValidationFinding]:
@@ -619,6 +668,7 @@ def accept_import_batch(
     batch.status = "accepted"
     batch.validation_status = "accepted_with_warnings" if warning_findings else "accepted"
     normalize_import_batch(session, batch)
+    refresh_source_coverage_findings(session)
     session.commit()
     session.refresh(batch)
     return serialize_import_batch(batch)

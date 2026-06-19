@@ -21,6 +21,7 @@ from dillon_finances.import_validation import (
     ImportValidationError,
     accept_import_batch,
     list_validation_findings,
+    refresh_source_coverage_findings,
     save_upload,
     scan_inbox,
     serialize_import_batch,
@@ -137,6 +138,8 @@ def create_app(
     @app.get("/api/operator-summary")
     def operator_summary() -> Dict[str, Any]:
         with create_session() as session:
+            refresh_source_coverage_findings(session)
+            session.commit()
             return operator_summary_payload(session, runtime=status_payload())
 
     def import_validation_http_error(exc: ImportValidationError) -> HTTPException:
@@ -251,6 +254,8 @@ def create_app(
         with create_session() as session:
             try:
                 events = apply_settings_patch(session, payload)
+                refresh_source_coverage_findings(session)
+                session.commit()
                 return {
                     **settings_payload(
                         session,
