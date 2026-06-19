@@ -145,6 +145,18 @@ async function mockApi(page: Page, onDecision?: (payload: unknown) => void) {
         settings: [],
         settings_events: [],
       },
+      "/api/artifacts": {
+        artifacts: [
+          {
+            id: "artifact-existing-1",
+            artifact_type: "import_validation_summary",
+            title: "Import And Validation Summary",
+            path: "/tmp/reports/import_validation_summary.json",
+            sensitivity: "financial_sensitive",
+            download_url: "/api/artifacts/artifact-existing-1/download",
+          },
+        ],
+      },
     };
 
     await route.fulfill({ json: responses[path] ?? {} });
@@ -167,7 +179,8 @@ test("navigates operator screens and shows local-only status", async ({ page }) 
 
   await page.getByRole("link", { name: "Reports" }).click();
   await expect(page.getByRole("heading", { name: "Reports & Monthly Close" })).toBeVisible();
-  await expect(page.getByText("Pending reports milestone")).toBeVisible();
+  await expect(page.getByText("Artifact registry")).toBeVisible();
+  await expect(page.getByText("Import And Validation Summary")).toBeVisible();
 });
 
 test("saves a category decision through the browser flow", async ({ page }) => {

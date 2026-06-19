@@ -28,6 +28,17 @@ from dillon_finances.import_validation import (
 )
 from dillon_finances.ledger_normalization import get_transaction, list_transactions
 from dillon_finances.operator_summary import operator_summary_payload
+from dillon_finances.reporting import (
+    AdvisorExportRequest,
+    MonthlyCloseRequest,
+    ReportRunRequest,
+    ReportingError,
+    artifact_download_path,
+    create_advisor_export,
+    create_monthly_close,
+    list_artifacts,
+    run_reports,
+)
 from dillon_finances.runtime import bootstrap_data_root
 from dillon_finances.settings_service import (
     SettingsPatchRequest,
@@ -253,6 +264,62 @@ def create_app(
                     status_code=422,
                     detail=[{"code": exc.code, "message": exc.message}],
                 ) from exc
+
+    def reporting_http_error(exc: ReportingError) -> HTTPException:
+        return HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message, **exc.detail},
+        )
+
+    @app.post("/api/reports/run")
+    def post_reports_run(payload: ReportRunRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            try:
+                return run_reports(session, active_data_root, payload)
+            except ReportingError as exc:
+                raise reporting_http_error(exc) from exc
+
+    @app.post("/api/monthly-close/draft")
+    def post_monthly_close_draft(payload: MonthlyCloseRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            try:
+                return create_monthly_close(session, active_data_root, payload, status="draft")
+            except ReportingError as exc:
+                raise reporting_http_error(exc) from exc
+
+    @app.post("/api/monthly-close/finalize")
+    def post_monthly_close_finalize(payload: MonthlyCloseRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            try:
+                return create_monthly_close(session, active_data_root, payload, status="final")
+            except ReportingError as exc:
+                raise reporting_http_error(exc) from exc
+
+    @app.post("/api/exports/advisor")
+    def post_advisor_export(payload: AdvisorExportRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            try:
+                return create_advisor_export(session, active_data_root, payload)
+            except ReportingError as exc:
+                raise reporting_http_error(exc) from exc
+
+    @app.get("/api/artifacts")
+    def get_artifacts() -> Dict[str, Any]:
+        with create_session() as session:
+            return {"artifacts": list_artifacts(session)}
+
+    @app.get("/api/artifacts/{artifact_id}/download")
+    def download_artifact(artifact_id: str) -> FileResponse:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            try:
+                return FileResponse(artifact_download_path(session, active_data_root, artifact_id))
+            except ReportingError as exc:
+                raise reporting_http_error(exc) from exc
 
     if STATIC_DIR.exists():
         app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")

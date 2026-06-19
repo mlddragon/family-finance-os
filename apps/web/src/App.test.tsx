@@ -78,6 +78,52 @@ function installApiMock() {
         current_state: { category_current: "Groceries", review_status: "unreviewed" },
       });
     }
+    if (path === "/api/reports/run" && init?.method === "POST") {
+      return response({
+        job: { id: "job-report", status: "completed" },
+        report_run: { id: "report-run-1", status: "completed", validation_status: "passed_with_warnings" },
+        validation_summary: { missing_required_count: 3 },
+        artifacts: [
+          {
+            id: "artifact-report-1",
+            artifact_type: "cashflow_summary",
+            title: "Cashflow Summary",
+            path: "/tmp/reports/cashflow_summary.json",
+            download_url: "/api/artifacts/artifact-report-1/download",
+          },
+        ],
+      });
+    }
+    if (path === "/api/monthly-close/draft" && init?.method === "POST") {
+      return response({
+        monthly_close: { id: "close-1", status: "draft", provisional: true },
+        validation_summary: { missing_required_count: 3 },
+        artifacts: [
+          {
+            id: "artifact-close-1",
+            artifact_type: "monthly_close_manifest",
+            title: "Monthly Close Manifest",
+            path: "/tmp/monthly_close/manifest.json",
+            download_url: "/api/artifacts/artifact-close-1/download",
+          },
+        ],
+      });
+    }
+    if (path === "/api/exports/advisor" && init?.method === "POST") {
+      return response({
+        job: { id: "job-advisor", job_type: "advisor_export", status: "completed" },
+        validation_summary: { missing_required_count: 3 },
+        artifacts: [
+          {
+            id: "artifact-advisor-1",
+            artifact_type: "advisor_summary",
+            title: "Advisor Summary",
+            path: "/tmp/exports/advisor_summary.json",
+            download_url: "/api/artifacts/artifact-advisor-1/download",
+          },
+        ],
+      });
+    }
 
     const responses: Record<string, unknown> = {
       "/api/operator-summary": {
@@ -218,6 +264,17 @@ function installApiMock() {
           },
         ],
       },
+      "/api/artifacts": {
+        artifacts: [
+          {
+            id: "artifact-existing-1",
+            artifact_type: "import_validation_summary",
+            title: "Import And Validation Summary",
+            path: "/tmp/reports/import_validation_summary.json",
+            download_url: "/api/artifacts/artifact-existing-1/download",
+          },
+        ],
+      },
     };
 
     return response(responses[path] ?? {});
@@ -263,7 +320,7 @@ test("navigates through the PR8 operator screens", async () => {
 
   fireEvent.click(screen.getByRole("link", { name: "Reports" }));
   expect(await screen.findByRole("heading", { name: "Reports & Monthly Close" })).toBeInTheDocument();
-  expect(screen.getByText("Pending reports milestone")).toBeInTheDocument();
+  expect(await screen.findByText("Artifact registry")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("link", { name: "Settings" }));
   expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
@@ -305,4 +362,45 @@ test("review controls are labelled, focusable, and save append-only decisions", 
     approved_value: "Groceries",
     explicit_user_action: true,
   });
+});
+
+test("reports screen runs artifacts and close/export actions", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Reports" }));
+  expect(await screen.findByRole("heading", { name: "Reports & Monthly Close" })).toBeInTheDocument();
+  expect(await screen.findByText("Import And Validation Summary")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Run reports" }));
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/reports/run",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+  expect(await screen.findByText("Reports completed")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Draft close" }));
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/monthly-close/draft",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+  expect(await screen.findByText("Draft close created" )).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Advisor export" }));
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/exports/advisor",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+  expect(await screen.findByText("Advisor export created")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute(
+    "href",
+    "/api/artifacts/artifact-existing-1/download",
+  );
 });

@@ -174,3 +174,39 @@ export type DecisionEventResponse = {
     review_status?: string;
   };
 };
+
+export type Artifact = {
+  id: string;
+  artifact_type: string;
+  path: string;
+  sha256?: string;
+  byte_size?: number;
+  title: string | null;
+  description?: string | null;
+  producing_job_id?: string | null;
+  source_inputs?: unknown;
+  retention_category?: string | null;
+  sensitivity?: string;
+  download_url: string;
+  created_at?: string;
+};
+
+export type ArtifactActionResponse = {
+  job?: {
+    id: string;
+    job_type?: string;
+    status: string;
+  };
+  report_run?: {
+    id: string;
+    status: string;
+    validation_status: string;
+  };
+  monthly_close?: {
+    id: string;
+    status: string;
+    provisional: boolean;
+  };
+  validation_summary?: Record<string, unknown>;
+  artifacts: Artifact[];
+};

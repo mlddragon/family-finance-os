@@ -15,15 +15,21 @@ import {
 
 import {
   fetchOperatorSummary,
+  createAdvisorExport,
+  draftMonthlyClose,
+  fetchArtifacts,
   fetchSettings,
   fetchTransactionDetail,
   fetchTransactions,
   fetchValidationFindings,
+  finalizeMonthlyClose,
+  runReports,
   saveCategoryDecision,
   scanInbox,
   uploadSourceFile,
 } from "./api";
 import type {
+  Artifact,
   ImportBatch,
   OperatorSummary,
   SettingsPayload,
@@ -128,6 +134,7 @@ function OperatorApp() {
   const findingsQuery = useQuery({ queryKey: ["validation-findings"], queryFn: fetchValidationFindings });
   const transactionsQuery = useQuery({ queryKey: ["transactions"], queryFn: fetchTransactions });
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: fetchSettings });
+  const artifactsQuery = useQuery({ queryKey: ["artifacts"], queryFn: fetchArtifacts });
 
   const transactions = transactionsQuery.data?.transactions ?? [];
   useEffect(() => {
@@ -192,7 +199,9 @@ function OperatorApp() {
               onSelectTransaction={setSelectedTransactionId}
             />
           ) : null}
-          {activeScreen === "reports" ? <ReportsScreen summary={summary} /> : null}
+          {activeScreen === "reports" ? (
+            <ReportsScreen summary={summary} artifacts={artifactsQuery.data?.artifacts ?? []} />
+          ) : null}
           {activeScreen === "settings" ? <SettingsScreen settings={settings} profiles={summary.sources.profiles} /> : null}
         </main>
       </div>
@@ -659,7 +668,69 @@ function TransactionsScreen({
   );
 }
 
-function ReportsScreen({ summary }: { summary: OperatorSummary }) {
+function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artifacts: Artifact[] }) {
+  const queryClient = useQueryClient();
+  const [actionStatus, setActionStatus] = useState<string | null>(null);
+
+  const refreshReportState = () => {
+    void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
+    void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
+  };
+  const runReportsMutation = useMutation({
+    mutationFn: runReports,
+    onSuccess: () => {
+      setActionStatus("Reports completed");
+      refreshReportState();
+    },
+    onError: () => setActionStatus("Reports blocked"),
+  });
+  const draftCloseMutation = useMutation({
+    mutationFn: draftMonthlyClose,
+    onSuccess: () => {
+      setActionStatus("Draft close created");
+      refreshReportState();
+    },
+    onError: () => setActionStatus("Draft close blocked"),
+  });
+  const finalCloseMutation = useMutation({
+    mutationFn: finalizeMonthlyClose,
+    onSuccess: () => {
+      setActionStatus("Final close finalized");
+      refreshReportState();
+    },
+    onError: () => setActionStatus("Final close blocked"),
+  });
+  const advisorExportMutation = useMutation({
+    mutationFn: createAdvisorExport,
+    onSuccess: () => {
+      setActionStatus("Advisor export created");
+      refreshReportState();
+    },
+    onError: () => setActionStatus("Advisor export blocked"),
+  });
+  const actionPending =
+    runReportsMutation.isPending ||
+    draftCloseMutation.isPending ||
+    finalCloseMutation.isPending ||
+    advisorExportMutation.isPending;
+  const artifactColumns = useMemo<ColumnDef<Artifact>[]>(
+    () => [
+      { header: "Title", cell: ({ row }) => row.original.title ?? formatStatus(row.original.artifact_type) },
+      { header: "Type", cell: ({ row }) => formatStatus(row.original.artifact_type) },
+      { header: "Sensitivity", cell: ({ row }) => formatStatus(row.original.sensitivity ?? "financial_sensitive") },
+      { header: "Path", accessorKey: "path" },
+      {
+        header: "Action",
+        cell: ({ row }) => (
+          <a className="link-button" href={row.original.download_url}>
+            Download
+          </a>
+        ),
+      },
+    ],
+    [],
+  );
+
   return (
     <section className="screen" aria-labelledby="reports-heading">
       <div className="screen-heading split-heading">
@@ -673,12 +744,31 @@ function ReportsScreen({ summary }: { summary: OperatorSummary }) {
       <div className="metric-grid compact">
         <Metric label="Draft close" value={summary.monthly_close.ready_for_draft ? "Allowed" : "Blocked"} detail={summary.monthly_close.status} />
         <Metric label="Final close" value={summary.monthly_close.ready_for_final ? "Allowed" : "Blocked"} detail={`${summary.monthly_close.blockers.length} blocker(s)`} />
-        <Metric label="Artifacts" value={summary.artifacts?.generated_count ?? 0} detail="Generated files" />
+        <Metric label="Artifacts" value={artifacts.length || summary.artifacts?.generated_count || 0} detail="Generated files" />
       </div>
 
       <section className="work-panel">
-        <h3>Pending reports milestone</h3>
-        <p className="empty-state">Report generation, monthly close bundles, and advisor exports are scheduled for PR9.</p>
+        <h3>Report actions</h3>
+        <div className="action-row">
+          <button type="button" onClick={() => runReportsMutation.mutate()} disabled={actionPending}>
+            Run reports
+          </button>
+          <button type="button" onClick={() => draftCloseMutation.mutate()} disabled={actionPending}>
+            Draft close
+          </button>
+          <button type="button" onClick={() => finalCloseMutation.mutate()} disabled={actionPending}>
+            Final close
+          </button>
+          <button type="button" onClick={() => advisorExportMutation.mutate()} disabled={actionPending}>
+            Advisor export
+          </button>
+        </div>
+        {actionStatus ? <p className="save-status">{actionStatus}</p> : null}
+      </section>
+
+      <section className="work-panel">
+        <h3>Artifact registry</h3>
+        <DataTable data={artifacts} columns={artifactColumns} emptyLabel="No generated artifacts" />
       </section>
 
       <section className="work-panel">

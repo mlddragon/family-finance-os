@@ -6,7 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from dillon_finances.ledger_normalization import list_transactions
-from dillon_finances.models import ImportBatch, SourceFile, ValidationFinding
+from dillon_finances.models import Artifact, ImportBatch, MonthlyClose, SourceFile, ValidationFinding
+from dillon_finances.reporting import close_readiness
 from dillon_finances.source_profiles import list_source_profiles
 
 
@@ -23,15 +24,16 @@ def operator_summary_payload(
         .order_by(ImportBatch.created_at.desc())
     ).all()
     source_files = session.scalars(select(SourceFile)).all()
+    artifacts = session.scalars(select(Artifact)).all()
+    latest_monthly_close = session.scalar(select(MonthlyClose).order_by(MonthlyClose.created_at.desc(), MonthlyClose.id.desc()))
 
     latest_import = _latest_import_payload(import_batches)
     source_summary = _source_summary(import_batches)
     validation_summary = _validation_summary(findings)
     review_summary = _review_summary(transactions)
     monthly_close = _monthly_close_summary(
-        transaction_count=review_summary["total_transactions"],
-        open_blocking=validation_summary["open_blocking"],
-        missing_required_count=source_summary["missing_required_count"],
+        readiness=close_readiness(session),
+        latest_monthly_close=latest_monthly_close,
     )
 
     return {
@@ -42,8 +44,8 @@ def operator_summary_payload(
         "review": review_summary,
         "monthly_close": monthly_close,
         "artifacts": {
-            "generated_count": 0,
-            "status": "pending_reports_milestone",
+            "generated_count": len(artifacts),
+            "status": "available" if artifacts else "none",
         },
         "inbox": {
             "tracked_file_count": len(source_files),
@@ -147,21 +149,14 @@ def _review_summary(transactions: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _monthly_close_summary(
     *,
-    transaction_count: int,
-    open_blocking: int,
-    missing_required_count: int,
+    readiness: dict[str, Any],
+    latest_monthly_close: MonthlyClose | None,
 ) -> dict[str, Any]:
-    blockers: list[str] = []
-    if open_blocking:
-        blockers.append(f"{open_blocking} blocking validation finding")
-    if missing_required_count:
-        blockers.append(f"{missing_required_count} required source missing")
-
     return {
-        "status": "not_started",
-        "ready_for_draft": transaction_count > 0 and open_blocking == 0,
-        "ready_for_final": transaction_count > 0 and open_blocking == 0 and missing_required_count == 0,
-        "blockers": blockers,
+        "status": latest_monthly_close.status if latest_monthly_close else "not_started",
+        "ready_for_draft": readiness["ready_for_draft"],
+        "ready_for_final": readiness["ready_for_final"],
+        "blockers": readiness["blockers"],
     }
 
 

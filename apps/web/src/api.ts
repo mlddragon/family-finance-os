@@ -1,4 +1,6 @@
 import type {
+  Artifact,
+  ArtifactActionResponse,
   DecisionEventResponse,
   InboxScan,
   OperatorSummary,
@@ -70,4 +72,40 @@ export function saveCategoryDecision(payload: {
 
 export function fetchSettings() {
   return apiJson<SettingsPayload>("/api/settings");
+}
+
+export function fetchArtifacts() {
+  return apiJson<{ artifacts: Artifact[] }>("/api/artifacts");
+}
+
+export function runReports() {
+  return apiJson<ArtifactActionResponse>("/api/reports/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor: "mason" }),
+  });
+}
+
+export function draftMonthlyClose() {
+  return apiJson<ArtifactActionResponse>("/api/monthly-close/draft", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor: "mason" }),
+  });
+}
+
+export function finalizeMonthlyClose() {
+  return apiJson<ArtifactActionResponse>("/api/monthly-close/finalize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor: "mason" }),
+  });
+}
+
+export function createAdvisorExport() {
+  return apiJson<ArtifactActionResponse>("/api/exports/advisor", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actor: "mason" }),
+  });
 }

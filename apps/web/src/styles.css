@@ -479,6 +479,19 @@ input[readonly] {
   gap: 8px;
 }
 
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.save-status {
+  margin: 10px 0 0;
+  color: #24533a;
+  font-size: 13px;
+  font-weight: 760;
+}
+
 .upload-form {
   display: grid;
   gap: 12px;
