@@ -4,9 +4,13 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import sessionmaker
 
+from dillon_finances.database import create_sqlite_engine
 from dillon_finances.import_validation import VALIDATION_CODES
 from dillon_finances.main import create_app
+from dillon_finances.models import SourceFile
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -277,6 +281,88 @@ def test_stale_source_creates_warning_finding(tmp_path):
     assert response.status_code == 200
     assert response.json()["findings"][0]["severity"] == "warning"
     assert response.json()["findings"][0]["code"] == "source_stale"
+
+
+def test_ambiguous_source_headers_create_blocking_finding(tmp_path):
+    write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_alliant_export.csv",
+        "Date,Description,Amount,Balance\n"
+        f"{(date.today() - timedelta(days=1)).isoformat()},SYNTHETIC AMBIGUOUS,1.23,100.00\n",
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        response = client.post(f"/api/import-batches/{batch_id}/validate")
+
+    assert response.status_code == 200
+    assert response.json()["findings"][0]["severity"] == "blocking"
+    assert response.json()["findings"][0]["code"] == "ambiguous_source"
+
+
+def test_amount_precision_and_sign_findings_are_reported_together(tmp_path):
+    write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_chase_amount_findings.csv",
+        CHASE_HEADER + fresh_chase_row("12.345") + fresh_chase_row("0.00"),
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        response = client.post(f"/api/import-batches/{batch_id}/validate")
+
+    assert response.status_code == 200
+    findings_by_code = {finding["code"]: finding for finding in response.json()["findings"]}
+    assert findings_by_code["amount_precision_invalid"]["severity"] == "blocking"
+    assert findings_by_code["amount_sign_unexpected"]["severity"] == "warning"
+
+
+def test_accepting_before_validation_records_incomplete_validation_finding(tmp_path):
+    write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_accept_without_validate.csv",
+        CHASE_HEADER + fresh_chase_row(),
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+        findings_response = client.get("/api/validation-findings")
+
+    assert accept_response.status_code == 409
+    assert accept_response.json()["detail"]["code"] == "batch_validation_incomplete"
+    assert any(
+        finding["status"] == "open" and finding["code"] == "batch_validation_incomplete"
+        for finding in findings_response.json()["findings"]
+    )
+
+
+def test_stored_row_count_mismatch_creates_blocking_finding(tmp_path):
+    write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_row_count_mismatch.csv",
+        CHASE_HEADER + fresh_chase_row(),
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+        Session = sessionmaker(bind=engine)
+        with Session() as session:
+            source_file = session.scalar(select(SourceFile).where(SourceFile.import_batch_id == batch_id))
+            assert source_file is not None
+            source_file.row_count = 99
+            session.commit()
+
+        response = client.post(f"/api/import-batches/{batch_id}/validate")
+
+    assert response.status_code == 200
+    assert response.json()["findings"][0]["severity"] == "blocking"
+    assert response.json()["findings"][0]["code"] == "row_count_mismatch"
 
 
 def test_missing_required_sources_are_first_class_validation_findings_and_resolve(tmp_path):
