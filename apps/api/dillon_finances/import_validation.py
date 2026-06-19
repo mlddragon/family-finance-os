@@ -20,6 +20,7 @@ from dillon_finances.models import (
     SourceFile,
     ValidationFinding,
 )
+from dillon_finances.ledger_normalization import normalize_import_batch
 from dillon_finances.source_profiles import SourceProfile, list_source_profiles
 
 
@@ -600,6 +601,7 @@ def accept_import_batch(
         source_file.validation_status = "accepted"
     batch.status = "accepted"
     batch.validation_status = "accepted_with_warnings" if warning_findings else "accepted"
+    normalize_import_batch(session, batch)
     session.commit()
     session.refresh(batch)
     return serialize_import_batch(batch)

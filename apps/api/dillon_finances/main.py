@@ -21,6 +21,7 @@ from dillon_finances.import_validation import (
     serialize_import_batch,
     validate_import_batch,
 )
+from dillon_finances.ledger_normalization import get_transaction, list_transactions
 from dillon_finances.runtime import bootstrap_data_root
 from dillon_finances.settings_service import (
     SettingsPatchRequest,
@@ -184,6 +185,22 @@ def create_app(
     def get_validation_findings() -> Dict[str, Any]:
         with create_session() as session:
             return {"findings": list_validation_findings(session)}
+
+    @app.get("/api/transactions")
+    def get_transactions() -> Dict[str, Any]:
+        with create_session() as session:
+            return {"transactions": list_transactions(session)}
+
+    @app.get("/api/transactions/{transaction_id}")
+    def get_transaction_detail(transaction_id: str) -> Dict[str, Any]:
+        with create_session() as session:
+            transaction = get_transaction(session, transaction_id)
+            if transaction is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"code": "transaction_not_found", "message": "Transaction not found"},
+                )
+            return {"transaction": transaction}
 
     @app.get("/api/settings")
     def get_settings() -> Dict[str, Any]:
