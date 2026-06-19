@@ -175,6 +175,21 @@ def test_report_artifacts_include_integrity_and_source_input_metadata(tmp_path):
     assert artifact_by_type["import_validation_summary"]["sensitivity"] == "household_financial_summary"
 
 
+def test_report_run_blocks_artifact_root_symlink_escape(tmp_path):
+    outside_reports_dir = tmp_path.parent / f"{tmp_path.name}_outside_reports"
+    outside_reports_dir.mkdir()
+    (tmp_path / "reports").symlink_to(outside_reports_dir, target_is_directory=True)
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        create_accepted_chase_batch(client, tmp_path)
+        response = client.post("/api/reports/run", json={"actor": "mason"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "artifact_storage_path_unsafe"
+    assert list(outside_reports_dir.iterdir()) == []
+
+
 def test_monthly_close_draft_writes_provisional_manifest_and_bundle(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
@@ -233,6 +248,21 @@ def test_monthly_close_manifest_references_registered_bundle_artifacts(tmp_path)
     assert manifest["status"] == "draft"
     assert manifest["validation_summary"] == body["validation_summary"]
     assert manifest_artifact_ids == expected_bundle_artifact_ids
+
+
+def test_monthly_close_blocks_artifact_root_symlink_escape(tmp_path):
+    outside_close_dir = tmp_path.parent / f"{tmp_path.name}_outside_monthly_close"
+    outside_close_dir.mkdir()
+    (tmp_path / "monthly_close").symlink_to(outside_close_dir, target_is_directory=True)
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        create_accepted_chase_batch(client, tmp_path)
+        response = client.post("/api/monthly-close/draft", json={"actor": "mason"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "artifact_storage_path_unsafe"
+    assert list(outside_close_dir.iterdir()) == []
 
 
 def test_final_close_blocks_missing_required_source_coverage(tmp_path):
@@ -355,6 +385,21 @@ def test_advisor_export_artifacts_include_integrity_and_validation_metadata(tmp_
     advisor_summary = json.loads(Path(artifact_by_type["advisor_summary"]["path"]).read_text())
     assert advisor_summary["validation_summary"] == body["validation_summary"]
     assert artifact_by_type["advisor_transactions_export"]["sensitivity"] == "household_financial_export"
+
+
+def test_advisor_export_blocks_artifact_root_symlink_escape(tmp_path):
+    outside_exports_dir = tmp_path.parent / f"{tmp_path.name}_outside_exports"
+    outside_exports_dir.mkdir()
+    (tmp_path / "exports").symlink_to(outside_exports_dir, target_is_directory=True)
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        create_accepted_chase_batch(client, tmp_path)
+        response = client.post("/api/exports/advisor", json={"actor": "mason"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "artifact_storage_path_unsafe"
+    assert list(outside_exports_dir.iterdir()) == []
 
 
 def test_artifact_download_returns_registered_artifact_file(tmp_path):
