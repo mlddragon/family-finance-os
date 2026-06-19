@@ -1,6 +1,13 @@
 import "./styles.css";
 
 const navItems = ["Home", "Sources", "Review", "Transactions", "Reports", "Settings"];
+const settingsTabs = ["Data root", "Sources", "Thresholds", "Reports", "Privacy", "Future integrations"];
+const sourceProfiles = [
+  { name: "Alliant Checking", type: "Checking", freshness: "14 days" },
+  { name: "Alliant Savings", type: "Savings", freshness: "14 days" },
+  { name: "Alliant Credit Card", type: "Credit card", freshness: "14 days" },
+  { name: "Chase Prime Visa", type: "Credit card", freshness: "14 days" },
+];
 
 export function App() {
   return (
@@ -12,6 +19,7 @@ export function App() {
         </div>
         <div className="status-strip" aria-label="Runtime status">
           <span>Data: Local only</span>
+          <span>DATA_ROOT: External mount required</span>
           <span>Last refresh: Not run</span>
           <span>Close: Not started</span>
         </div>
@@ -50,6 +58,48 @@ export function App() {
             <div>
               <h3>Next action</h3>
               <p>Complete scaffold, Docker, and repository safety checks.</p>
+            </div>
+          </section>
+
+          <section className="settings-panel" aria-labelledby="settings-heading">
+            <div className="section-heading">
+              <p className="eyebrow">SQLite-backed configuration</p>
+              <h2 id="settings-heading">Settings</h2>
+            </div>
+            <div className="tabs" role="tablist" aria-label="Settings sections">
+              {settingsTabs.map((tab, index) => (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={index === 0}
+                  className={index === 0 ? "active" : undefined}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            <div className="settings-grid" aria-label="Source profile defaults">
+              {sourceProfiles.map((source) => (
+                <article key={source.name}>
+                  <h3>{source.name}</h3>
+                  <dl>
+                    <div>
+                      <dt>Type</dt>
+                      <dd>{source.type}</dd>
+                    </div>
+                    <div>
+                      <dt>Required</dt>
+                      <dd>Yes</dd>
+                    </div>
+                    <div>
+                      <dt>Freshness</dt>
+                      <dd>{source.freshness}</dd>
+                    </div>
+                  </dl>
+                </article>
+              ))}
             </div>
           </section>
         </main>

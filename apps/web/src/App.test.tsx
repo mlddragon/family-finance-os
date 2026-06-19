@@ -15,3 +15,18 @@ test("renders local-only Dillon Finances shell", () => {
   expect(screen.getByRole("link", { name: "Reports" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
 });
+
+test("renders settings tabs and source profile status", () => {
+  render(<App />);
+
+  expect(screen.getByText("DATA_ROOT: External mount required")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Data root" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Sources" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Thresholds" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Reports" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Privacy" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Future integrations" })).toBeInTheDocument();
+  expect(screen.getByText("Alliant Checking")).toBeInTheDocument();
+  expect(screen.getByText("Chase Prime Visa")).toBeInTheDocument();
+});
