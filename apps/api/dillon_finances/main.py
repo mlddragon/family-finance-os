@@ -331,8 +331,9 @@ def create_app(
 
         @app.get("/{full_path:path}")
         def serve_ui(full_path: str) -> FileResponse:
-            requested = STATIC_DIR / full_path
-            if full_path and requested.is_file():
+            static_root = STATIC_DIR.resolve()
+            requested = (STATIC_DIR / full_path).resolve()
+            if full_path and requested.is_relative_to(static_root) and requested.is_file():
                 return FileResponse(requested)
             return FileResponse(STATIC_DIR / "index.html")
 
