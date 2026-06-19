@@ -93,7 +93,7 @@ const emptySummary: OperatorSummary = {
   },
   artifacts: {
     generated_count: 0,
-    status: "pending_reports_milestone",
+    status: "none",
   },
   next_action: {
     code: "loading",
