@@ -368,3 +368,18 @@ def test_artifact_download_returns_registered_artifact_file(tmp_path):
 
     assert download_response.status_code == 200
     assert download_response.content
+
+
+def test_artifact_download_rejects_registered_file_when_integrity_metadata_no_longer_matches(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        create_accepted_chase_batch(client, tmp_path)
+        run_response = client.post("/api/reports/run", json={"actor": "mason"})
+        artifact = run_response.json()["artifacts"][0]
+        Path(artifact["path"]).write_text("tampered synthetic report content")
+
+        download_response = client.get(f"/api/artifacts/{artifact['id']}/download")
+
+    assert download_response.status_code == 409
+    assert download_response.json()["detail"]["code"] == "artifact_integrity_mismatch"

@@ -345,6 +345,13 @@ def artifact_download_path(session: Session, data_root: Path, artifact_id: str) 
         raise ReportingError("artifact_path_outside_data_root", "Artifact path is outside DATA_ROOT.", status_code=409)
     if not path.exists():
         raise ReportingError("artifact_file_missing", "Artifact file is missing.", status_code=404)
+    content = path.read_bytes()
+    if len(content) != artifact.byte_size or hashlib.sha256(content).hexdigest() != artifact.sha256:
+        raise ReportingError(
+            "artifact_integrity_mismatch",
+            "Artifact file no longer matches its registered integrity metadata.",
+            status_code=409,
+        )
     return path
 
 
