@@ -75,6 +75,7 @@ def test_validation_code_registry_covers_pr5_required_codes():
         "file_missing",
         "file_unreadable",
         "file_empty",
+        "unsafe_filename",
         "unsupported_file_type",
         "schema_mismatch",
         "ambiguous_source",
@@ -186,6 +187,27 @@ def test_upload_rejects_unsupported_file_type(tmp_path):
 
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "unsupported_file_type"
+
+
+def test_upload_rejects_path_like_filename_without_writing_outside_inbox(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/uploads",
+            files={
+                "file": (
+                    "../SYNTHETIC_chase_prime_visa.csv",
+                    (CHASE_HEADER + fresh_chase_row()).encode(),
+                    "text/csv",
+                )
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "unsafe_filename"
+    assert not (tmp_path / "SYNTHETIC_chase_prime_visa.csv").exists()
+    assert not list((tmp_path / "inbox").glob("**/*"))
 
 
 def test_validation_findings_endpoint_lists_current_findings(tmp_path):

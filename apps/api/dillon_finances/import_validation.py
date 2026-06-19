@@ -7,7 +7,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
+from pathlib import Path, PurePath, PureWindowsPath
 from typing import Any, Optional
 
 from sqlalchemy import select
@@ -29,6 +29,7 @@ VALIDATION_CODES = {
     "file_missing",
     "file_unreadable",
     "file_empty",
+    "unsafe_filename",
     "unsupported_file_type",
     "schema_mismatch",
     "ambiguous_source",
@@ -266,11 +267,20 @@ def scan_inbox(session: Session, data_root: Path) -> list[ImportBatch]:
     return batches
 
 
+def _safe_upload_filename(filename: str) -> str:
+    if not filename or filename in {".", ".."} or "\x00" in filename:
+        raise ImportValidationError("unsafe_filename", "Uploaded filename must be a plain file name.")
+    if PurePath(filename).name != filename or PureWindowsPath(filename).name != filename:
+        raise ImportValidationError("unsafe_filename", "Uploaded filename must not include path components.")
+    return filename
+
+
 def save_upload(session: Session, data_root: Path, filename: str, content: bytes) -> ImportBatch:
-    extension = Path(filename).suffix.lower()
+    safe_filename = _safe_upload_filename(filename)
+    extension = Path(safe_filename).suffix.lower()
     if extension in REJECTED_EXTENSIONS or extension not in SUPPORTED_EXTENSIONS:
         raise ImportValidationError("unsupported_file_type", f"{extension or 'file'} is not supported")
-    inbox_path = data_root / "inbox" / Path(filename).name
+    inbox_path = data_root / "inbox" / safe_filename
     inbox_path.parent.mkdir(parents=True, exist_ok=True)
     inbox_path.write_bytes(content)
     return _scan_file(session, inbox_path)
