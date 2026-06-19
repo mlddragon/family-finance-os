@@ -27,6 +27,7 @@ from dillon_finances.import_validation import (
     validate_import_batch,
 )
 from dillon_finances.ledger_normalization import get_transaction, list_transactions
+from dillon_finances.operator_summary import operator_summary_payload
 from dillon_finances.runtime import bootstrap_data_root
 from dillon_finances.settings_service import (
     SettingsPatchRequest,
@@ -121,6 +122,11 @@ def create_app(
     @app.get("/api/status")
     def status() -> Dict[str, Any]:
         return status_payload()
+
+    @app.get("/api/operator-summary")
+    def operator_summary() -> Dict[str, Any]:
+        with create_session() as session:
+            return operator_summary_payload(session, runtime=status_payload())
 
     def import_validation_http_error(exc: ImportValidationError) -> HTTPException:
         return HTTPException(

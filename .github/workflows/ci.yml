@@ -43,6 +43,14 @@ jobs:
         working-directory: apps/web
         run: npm test
 
+      - name: Install browser test runtime
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser smoke tests
+        working-directory: apps/web
+        run: npm run test:e2e
+
       - name: Build web app
         working-directory: apps/web
         run: npm run build
