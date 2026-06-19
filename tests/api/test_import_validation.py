@@ -75,6 +75,7 @@ def test_validation_code_registry_covers_pr5_required_codes():
         "file_missing",
         "file_unreadable",
         "file_empty",
+        "file_not_regular",
         "unsafe_filename",
         "unsupported_file_type",
         "schema_mismatch",
@@ -208,6 +209,76 @@ def test_upload_rejects_path_like_filename_without_writing_outside_inbox(tmp_pat
     assert response.json()["detail"]["code"] == "unsafe_filename"
     assert not (tmp_path / "SYNTHETIC_chase_prime_visa.csv").exists()
     assert not list((tmp_path / "inbox").glob("**/*"))
+
+
+def test_upload_rejects_existing_inbox_symlink_without_writing_target(tmp_path):
+    outside_target = tmp_path.parent / "SYNTHETIC_upload_target.csv"
+    outside_target.write_text("do not overwrite")
+    inbox_path = tmp_path / "inbox" / "SYNTHETIC_chase_prime_visa.csv"
+    inbox_path.parent.mkdir(parents=True, exist_ok=True)
+    inbox_path.symlink_to(outside_target)
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/uploads",
+            files={
+                "file": (
+                    "SYNTHETIC_chase_prime_visa.csv",
+                    (CHASE_HEADER + fresh_chase_row()).encode(),
+                    "text/csv",
+                )
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "file_not_regular"
+    assert outside_target.read_text() == "do not overwrite"
+
+
+def test_inbox_scan_blocks_symlink_without_creating_import_batch(tmp_path):
+    outside_target = tmp_path.parent / "SYNTHETIC_external_chase_prime_visa.csv"
+    outside_target.write_text(CHASE_HEADER + fresh_chase_row())
+    inbox_path = tmp_path / "inbox" / "SYNTHETIC_symlink_chase_prime_visa.csv"
+    inbox_path.parent.mkdir(parents=True, exist_ok=True)
+    inbox_path.symlink_to(outside_target)
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        scan_response = client.post("/api/inbox/scan")
+        findings_response = client.get("/api/validation-findings")
+
+    assert scan_response.status_code == 200
+    assert scan_response.json()["import_batches"] == []
+    assert any(
+        finding["status"] == "open"
+        and finding["severity"] == "blocking"
+        and finding["code"] == "file_not_regular"
+        and finding["target_id"] == "SYNTHETIC_symlink_chase_prime_visa.csv"
+        for finding in findings_response.json()["findings"]
+    )
+
+
+def test_validation_blocks_source_file_replaced_by_symlink_after_scan(tmp_path):
+    inbox_file = write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_chase_prime_visa.csv",
+        CHASE_HEADER + fresh_chase_row(),
+    )
+    replacement_target = tmp_path.parent / "SYNTHETIC_replacement_chase_prime_visa.csv"
+    replacement_target.write_text(inbox_file.read_text())
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        inbox_file.unlink()
+        inbox_file.symlink_to(replacement_target)
+
+        response = client.post(f"/api/import-batches/{batch_id}/validate")
+
+    assert response.status_code == 200
+    assert response.json()["findings"][0]["severity"] == "blocking"
+    assert response.json()["findings"][0]["code"] == "file_not_regular"
 
 
 def test_validation_findings_endpoint_lists_current_findings(tmp_path):

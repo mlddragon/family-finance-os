@@ -29,6 +29,7 @@ VALIDATION_CODES = {
     "file_missing",
     "file_unreadable",
     "file_empty",
+    "file_not_regular",
     "unsafe_filename",
     "unsupported_file_type",
     "schema_mismatch",
@@ -177,6 +178,35 @@ def _create_finding(
     return finding
 
 
+def _create_open_finding_once(
+    session: Session,
+    *,
+    severity: str,
+    code: str,
+    message: str,
+    target_type: str,
+    target_id: Optional[str],
+) -> ValidationFinding:
+    existing = session.scalar(
+        select(ValidationFinding).where(
+            ValidationFinding.code == code,
+            ValidationFinding.target_type == target_type,
+            ValidationFinding.target_id == target_id,
+            ValidationFinding.status == "open",
+        )
+    )
+    if existing is not None:
+        return existing
+    return _create_finding(
+        session,
+        severity=severity,
+        code=code,
+        message=message,
+        target_type=target_type,
+        target_id=target_id,
+    )
+
+
 def _clear_batch_findings(session: Session, batch_id: str) -> None:
     findings = session.scalars(
         select(ValidationFinding).where(
@@ -256,14 +286,26 @@ def _scan_file(session: Session, path: Path) -> ImportBatch:
 def scan_inbox(session: Session, data_root: Path) -> list[ImportBatch]:
     inbox = data_root / "inbox"
     inbox.mkdir(parents=True, exist_ok=True)
+    _sync_inbox_file_regular_findings(session, inbox)
     batches: list[ImportBatch] = []
     for path in sorted(inbox.iterdir()):
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            _create_open_finding_once(
+                session,
+                severity=BLOCKING,
+                code="file_not_regular",
+                message=_non_regular_source_message(path.name),
+                target_type="inbox_file",
+                target_id=path.name,
+            )
+            continue
         if path.is_file():
             existing = session.scalar(select(SourceFile).where(SourceFile.stored_path == str(path)))
             if existing is None:
                 batches.append(_scan_file(session, path))
             else:
                 batches.append(existing.import_batch)
+    session.commit()
     return batches
 
 
@@ -282,6 +324,12 @@ def save_upload(session: Session, data_root: Path, filename: str, content: bytes
         raise ImportValidationError("unsupported_file_type", f"{extension or 'file'} is not supported")
     inbox_path = data_root / "inbox" / safe_filename
     inbox_path.parent.mkdir(parents=True, exist_ok=True)
+    if inbox_path.is_symlink() or (inbox_path.exists() and not inbox_path.is_file()):
+        raise ImportValidationError(
+            "file_not_regular",
+            _non_regular_source_message(safe_filename),
+            status_code=409,
+        )
     inbox_path.write_bytes(content)
     return _scan_file(session, inbox_path)
 
@@ -439,6 +487,33 @@ def _validate_rows(
     return findings
 
 
+def _is_regular_source_file(path: Path) -> bool:
+    return not path.is_symlink() and path.is_file()
+
+
+def _non_regular_source_message(filename: str) -> str:
+    return f"{filename} must be a regular source export file, not a symlink or special filesystem item."
+
+
+def _sync_inbox_file_regular_findings(session: Session, inbox: Path) -> None:
+    findings = session.scalars(
+        select(ValidationFinding).where(
+            ValidationFinding.code == "file_not_regular",
+            ValidationFinding.target_type == "inbox_file",
+            ValidationFinding.status == "open",
+        )
+    ).all()
+    for finding in findings:
+        if finding.target_id is None:
+            continue
+        path = inbox / finding.target_id
+        if not path.exists() and not path.is_symlink():
+            finding.status = "resolved"
+            continue
+        if _is_regular_source_file(path):
+            finding.status = "resolved"
+
+
 def validate_import_batch(session: Session, batch_id: str) -> dict[str, Any]:
     batch = session.get(ImportBatch, batch_id)
     if batch is None:
@@ -448,6 +523,18 @@ def validate_import_batch(session: Session, batch_id: str) -> dict[str, Any]:
     findings: list[ValidationFinding] = []
     for source_file in batch.source_files:
         path = Path(source_file.stored_path)
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            findings.append(
+                _create_finding(
+                    session,
+                    severity=BLOCKING,
+                    code="file_not_regular",
+                    message=_non_regular_source_message(source_file.original_filename),
+                    target_type="import_batch",
+                    target_id=batch.id,
+                )
+            )
+            continue
         if not path.exists():
             findings.append(
                 _create_finding(
