@@ -82,6 +82,7 @@ def test_validation_code_registry_covers_pr5_required_codes():
         "schema_mismatch",
         "ambiguous_source",
         "source_account_unconfirmed",
+        "storage_path_unsafe",
         "date_parse_failed",
         "amount_parse_failed",
         "amount_precision_invalid",
@@ -322,6 +323,59 @@ def test_accept_blocks_source_file_content_changed_after_validation(tmp_path):
     assert accept_response.json()["detail"]["code"] == "file_integrity_mismatch"
     assert inbox_file.exists()
     assert not list((tmp_path / "raw").glob("**/SYNTHETIC_chase_prime_visa.csv"))
+
+
+def test_accept_blocks_raw_storage_directory_symlink_escape(tmp_path):
+    inbox_file = write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_chase_prime_visa.csv",
+        CHASE_HEADER + fresh_chase_row(),
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        assert validate_response.status_code == 200
+        year = (date.today() - timedelta(days=1)).isoformat()[:4]
+        outside_raw_dir = tmp_path.parent / f"{batch_id}_outside_raw"
+        outside_raw_dir.mkdir()
+        raw_batch_dir = tmp_path / "raw" / "chase_prime_visa" / year / batch_id
+        raw_batch_dir.parent.mkdir(parents=True, exist_ok=True)
+        raw_batch_dir.symlink_to(outside_raw_dir, target_is_directory=True)
+
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+
+    assert accept_response.status_code == 409
+    assert accept_response.json()["detail"]["code"] == "storage_path_unsafe"
+    assert inbox_file.exists()
+    assert list(outside_raw_dir.iterdir()) == []
+
+
+def test_quarantine_blocks_storage_directory_symlink_escape(tmp_path):
+    inbox_file = write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_chase_wrong_header.csv",
+        "Wrong,Header\n2026-06-01,12.34\n",
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        assert validate_response.status_code == 200
+        outside_quarantine_dir = tmp_path.parent / f"{batch_id}_outside_quarantine"
+        outside_quarantine_dir.mkdir()
+        quarantine_batch_dir = tmp_path / "quarantine" / batch_id
+        quarantine_batch_dir.parent.mkdir(parents=True, exist_ok=True)
+        quarantine_batch_dir.symlink_to(outside_quarantine_dir, target_is_directory=True)
+
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+
+    assert accept_response.status_code == 409
+    assert accept_response.json()["detail"]["code"] == "storage_path_unsafe"
+    assert inbox_file.exists()
+    assert list(outside_quarantine_dir.iterdir()) == []
 
 
 def test_validation_findings_endpoint_lists_current_findings(tmp_path):

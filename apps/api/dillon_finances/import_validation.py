@@ -36,6 +36,7 @@ VALIDATION_CODES = {
     "schema_mismatch",
     "ambiguous_source",
     "source_account_unconfirmed",
+    "storage_path_unsafe",
     "date_parse_failed",
     "amount_parse_failed",
     "amount_precision_invalid",
@@ -500,6 +501,54 @@ def _source_file_integrity_message(filename: str) -> str:
     return f"{filename} no longer matches the file hash and size recorded at detection."
 
 
+def _storage_path_unsafe_message(path: Path) -> str:
+    return f"Storage path {path.name} is not a safe directory inside DATA_ROOT."
+
+
+def _ensure_safe_storage_directory(data_root: Path, directory: Path) -> Path:
+    resolved_data_root = data_root.resolve()
+    try:
+        relative_parts = directory.relative_to(data_root).parts
+    except ValueError as exc:
+        raise ImportValidationError(
+            "storage_path_unsafe",
+            _storage_path_unsafe_message(directory),
+            status_code=409,
+        ) from exc
+
+    current = data_root
+    for part in relative_parts[:-1]:
+        current = current / part
+        if current.is_symlink() or (current.exists() and not current.is_dir()):
+            raise ImportValidationError(
+                "storage_path_unsafe",
+                _storage_path_unsafe_message(current),
+                status_code=409,
+            )
+        current.mkdir(exist_ok=True)
+        if not current.resolve().is_relative_to(resolved_data_root):
+            raise ImportValidationError(
+                "storage_path_unsafe",
+                _storage_path_unsafe_message(current),
+                status_code=409,
+            )
+
+    if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+        raise ImportValidationError(
+            "storage_path_unsafe",
+            _storage_path_unsafe_message(directory),
+            status_code=409,
+        )
+    directory.mkdir(exist_ok=True)
+    if directory.is_symlink() or not directory.resolve().is_relative_to(resolved_data_root):
+        raise ImportValidationError(
+            "storage_path_unsafe",
+            _storage_path_unsafe_message(directory),
+            status_code=409,
+        )
+    return directory
+
+
 def _non_regular_source_message(filename: str) -> str:
     return f"{filename} must be a regular source export file, not a symlink or special filesystem item."
 
@@ -705,8 +754,7 @@ def _open_findings(session: Session, batch_id: str) -> list[ValidationFinding]:
 
 
 def _quarantine_batch(data_root: Path, batch: ImportBatch, findings: list[ValidationFinding]) -> None:
-    quarantine_dir = data_root / "quarantine" / batch.id
-    quarantine_dir.mkdir(parents=True, exist_ok=True)
+    quarantine_dir = _ensure_safe_storage_directory(data_root, data_root / "quarantine" / batch.id)
     reason_path = quarantine_dir / "validation.reason.json"
     reason_path.write_text(
         json.dumps(
@@ -818,8 +866,7 @@ def accept_import_batch(
 
     year = batch.transaction_date_max[:4] if batch.transaction_date_max else "unknown-year"
     source_key = batch.source.source_key if batch.source else "unknown"
-    raw_dir = data_root / "raw" / source_key / year / batch.id
-    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir = _ensure_safe_storage_directory(data_root, data_root / "raw" / source_key / year / batch.id)
     for source_file in batch.source_files:
         source_path = Path(source_file.stored_path)
         destination = raw_dir / source_file.original_filename
