@@ -6,7 +6,7 @@ from typing import Any, AsyncIterator, Dict, Optional
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
@@ -22,10 +22,12 @@ from dillon_finances.import_validation import (
     accept_import_batch,
     list_validation_findings,
     refresh_source_coverage_findings,
+    resolve_validation_finding,
     save_upload,
     scan_inbox,
     serialize_import_batch,
     validate_import_batch,
+    void_import_batch,
 )
 from dillon_finances.ledger_normalization import get_transaction, list_transactions
 from dillon_finances.operator_summary import operator_summary_payload
@@ -57,6 +59,17 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 class AcceptImportBatchRequest(BaseModel):
     acknowledge_warnings: bool = False
+
+
+class VoidImportBatchRequest(BaseModel):
+    actor: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    destroy_files: bool = False
+
+
+class ResolveValidationFindingRequest(BaseModel):
+    actor: str = Field(min_length=1)
+    note: str = Field(min_length=1)
 
 
 def _default_data_root() -> Path:
@@ -209,10 +222,39 @@ def create_app(
             except ImportValidationError as exc:
                 raise import_validation_http_error(exc) from exc
 
+    @app.post("/api/import-batches/{batch_id}/void")
+    def void_batch(batch_id: str, payload: VoidImportBatchRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            try:
+                return void_import_batch(
+                    session,
+                    active_data_root,
+                    batch_id,
+                    actor=payload.actor,
+                    reason=payload.reason,
+                    destroy_files=payload.destroy_files,
+                )
+            except ImportValidationError as exc:
+                raise import_validation_http_error(exc) from exc
+
     @app.get("/api/validation-findings")
     def get_validation_findings() -> Dict[str, Any]:
         with create_session() as session:
             return {"findings": list_validation_findings(session)}
+
+    @app.post("/api/validation-findings/{finding_id}/resolve")
+    def resolve_finding(finding_id: str, payload: ResolveValidationFindingRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return resolve_validation_finding(
+                    session,
+                    finding_id,
+                    actor=payload.actor,
+                    note=payload.note,
+                )
+            except ImportValidationError as exc:
+                raise import_validation_http_error(exc) from exc
 
     @app.get("/api/transactions")
     def get_transactions() -> Dict[str, Any]:
