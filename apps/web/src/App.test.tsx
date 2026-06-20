@@ -19,6 +19,15 @@ const sourceProfiles = [
     confirmation_status: "pending_owner_sample",
   },
   {
+    source_key: "alliant_savings",
+    display_name: "Alliant Savings",
+    account_type: "savings",
+    required: true,
+    freshness_threshold_days: 14,
+    accepted_file_extensions: [".csv"],
+    confirmation_status: "pending_owner_sample",
+  },
+  {
     source_key: "chase_prime_visa",
     display_name: "Chase Prime Visa",
     account_type: "credit_card",
@@ -53,6 +62,8 @@ const blockedTransaction = {
   id: "tx-2",
   raw_description: "SYNTHETIC DUPLICATE",
   amount: "12.34",
+  initial_category: "Utilities",
+  category_current: "Utilities",
   validation_status: "blocked",
   imported_fact_count: 2,
 };
@@ -62,6 +73,14 @@ function response(body: unknown) {
     ok: true,
     status: 200,
     json: async () => body,
+  };
+}
+
+function errorResponse(status: number, code: string, message: string) {
+  return {
+    ok: false,
+    status,
+    json: async () => ({ detail: { code, message } }),
   };
 }
 
@@ -75,10 +94,29 @@ function pathFor(input: RequestInfo | URL) {
   return new URL(input.url).pathname;
 }
 
-function installApiMock() {
+function installApiMock(options: { acceptImportError?: boolean } = {}) {
+  let importBatchVoided = false;
+  let validationFindingCleared = false;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = pathFor(input);
+    if (path === "/api/validation-findings/finding-warning/resolve" && init?.method === "POST") {
+      validationFindingCleared = true;
+      return response({
+        finding: {
+          id: "finding-warning",
+          severity: "warning",
+          code: "source_stale",
+          target_type: "import_batch",
+          target_id: "batch-1",
+          message: "This source appears stale against its freshness threshold.",
+          status: "resolved",
+          created_at: "2026-06-18T00:00:01Z",
+        },
+      });
+    }
     if (path === "/api/settings" && init?.method === "PATCH") {
+      const patchBody = JSON.parse(String(init.body));
+      const changedSetting = patchBody.changes?.[0];
       return response({
         tabs: ["Data root", "Sources", "Thresholds", "Reports", "Privacy", "Future integrations"],
         local_only: true,
@@ -93,17 +131,87 @@ function installApiMock() {
             editable: false,
             note_required: true,
           },
+          {
+            id: "setting-2",
+            domain: "sources",
+            setting_key: "sources.chase_prime_visa.required",
+            value: changedSetting?.setting_key === "sources.chase_prime_visa.required" ? changedSetting.value : true,
+            editable: true,
+            note_required: true,
+          },
         ],
         settings_events: [
           {
             id: "setting-event-2",
-            domain: "sources",
-            setting_key: "sources.chase_prime_visa.profile_confirmation_status",
-            new_value: "owner_confirmed_header_sample",
+            domain: changedSetting?.domain ?? "sources",
+            setting_key: changedSetting?.setting_key ?? "sources.chase_prime_visa.profile_confirmation_status",
+            new_value: changedSetting?.value ?? "owner_confirmed_header_sample",
             actor: "mason",
             created_at: "2026-06-18T00:01:00Z",
           },
         ],
+      });
+    }
+    if (path === "/api/import-batches/batch-1/validate" && init?.method === "POST") {
+      return response({
+        id: "batch-1",
+        status: "validated",
+        validation_status: "passed",
+        row_count: 2,
+        source_key: "chase_prime_visa",
+        source_files: [],
+        findings: [],
+      });
+    }
+    if (path === "/api/import-batches/batch-1/accept" && init?.method === "POST") {
+      if (options.acceptImportError) {
+        return errorResponse(
+          409,
+          "warning_acknowledgment_required",
+          "Warnings require explicit acknowledgment before acceptance.",
+        );
+      }
+      return response({
+        id: "batch-1",
+        status: "accepted",
+        validation_status: "accepted",
+        row_count: 2,
+        source_key: "chase_prime_visa",
+        imported_rows_created: 2,
+        canonical_transactions_created: 2,
+      });
+    }
+    if (path === "/api/import-batches/batch-1/void" && init?.method === "POST") {
+      importBatchVoided = true;
+      return response({
+        import_batch: {
+          id: "batch-1",
+          status: "voided",
+          validation_status: "voided",
+          row_count: 2,
+          source_key: "chase_prime_visa",
+          source_files: [
+            {
+              id: "file-1",
+              original_filename: "SYNTHETIC_chase_summary.csv",
+              validation_status: "voided",
+              storage_status: "destroyed",
+              row_count: 2,
+            },
+          ],
+        },
+      });
+    }
+    if (path === "/api/uploads" && init?.method === "POST") {
+      return response({
+        import_batch: {
+          id: "uploaded-batch-1",
+          status: "detected",
+          validation_status: "pending",
+          row_count: null,
+          source_key: "alliant_savings",
+          source_files: [],
+        },
       });
     }
     if (path === "/api/decision-events" && init?.method === "POST") {
@@ -209,15 +317,16 @@ function installApiMock() {
         import_batches: [
           {
             id: "batch-1",
-            status: "accepted",
-            validation_status: "accepted",
+            status: importBatchVoided ? "voided" : "detected",
+            validation_status: importBatchVoided ? "voided" : "pending",
             row_count: 2,
             source_key: "chase_prime_visa",
             source_files: [
               {
                 id: "file-1",
                 original_filename: "SYNTHETIC_chase_summary.csv",
-                validation_status: "accepted",
+                validation_status: importBatchVoided ? "voided" : "pending",
+                storage_status: importBatchVoided ? "destroyed" : "present",
                 row_count: 2,
               },
             ],
@@ -235,6 +344,16 @@ function installApiMock() {
             message: "File headers do not match an approved v1 source profile.",
             status: "open",
             created_at: "2026-06-18T00:00:00Z",
+          },
+          {
+            id: "finding-warning",
+            severity: "warning",
+            code: "source_stale",
+            target_type: "import_batch",
+            target_id: "batch-1",
+            message: "This source appears stale against its freshness threshold.",
+            status: validationFindingCleared ? "resolved" : "open",
+            created_at: "2026-06-18T00:00:01Z",
           },
         ],
       },
@@ -284,6 +403,14 @@ function installApiMock() {
             setting_key: "runtime.local_only",
             value: true,
             editable: false,
+            note_required: true,
+          },
+          {
+            id: "setting-2",
+            domain: "sources",
+            setting_key: "sources.chase_prime_visa.required",
+            value: true,
+            editable: true,
             note_required: true,
           },
         ],
@@ -339,7 +466,7 @@ test("navigates through the PR8 operator screens", async () => {
   fireEvent.click(screen.getByRole("link", { name: "Sources" }));
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
-  expect(await screen.findByText("Chase Prime Visa")).toBeInTheDocument();
+  expect(screen.getAllByText("Chase Prime Visa").length).toBeGreaterThan(0);
   expect(screen.getByText("Quarantine" )).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("link", { name: "Validation Issues" }));
@@ -362,6 +489,172 @@ test("navigates through the PR8 operator screens", async () => {
   expect(screen.getByText("Settings audit history")).toBeInTheDocument();
 });
 
+test("sources screen validates and accepts import batches from the browser", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Sources" }));
+  expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
+  expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Validate batch" }));
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/import-batches/batch-1/validate",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+  expect(await screen.findByText("Batch validation completed")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Accept batch" }));
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/import-batches/batch-1/accept",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+  expect(await screen.findByText("Batch accepted")).toBeInTheDocument();
+});
+
+test("sources screen shows structured backend reasons when import acceptance is blocked", async () => {
+  const fetchMock = installApiMock({ acceptImportError: true });
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Sources" }));
+  expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
+  expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Validate batch" }));
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/import-batches/batch-1/validate",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+  expect(await screen.findByText("Batch validation completed")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Accept batch" }));
+
+  expect(
+    await screen.findByText(
+      "Batch acceptance blocked: Warnings require explicit acknowledgment before acceptance. (warning_acknowledgment_required)",
+    ),
+  ).toBeInTheDocument();
+});
+
+test("sources screen voids an upload with confirmation and optional file destruction", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Sources" }));
+  expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
+  expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Void upload" }));
+  const dialog = await screen.findByRole("dialog", { name: "Void upload" });
+  const destroyCheckbox = screen.getByLabelText("Destroy stored files");
+  expect(dialog).toBeInTheDocument();
+  expect(destroyCheckbox).not.toBeChecked();
+
+  fireEvent.change(screen.getByLabelText("Reason"), {
+    target: { value: "Wrong export file uploaded" },
+  });
+  fireEvent.click(destroyCheckbox);
+  fireEvent.click(screen.getByRole("button", { name: "Confirm void" }));
+
+  await waitFor(() => {
+    const voidCall = fetchMock.mock.calls.find(
+      ([input, init]) => pathFor(input) === "/api/import-batches/batch-1/void" && init?.method === "POST",
+    );
+    expect(voidCall).toBeTruthy();
+    const body = JSON.parse(String(voidCall?.[1]?.body));
+    expect(body).toEqual({
+      actor: "mason",
+      reason: "Wrong export file uploaded",
+      destroy_files: true,
+    });
+  });
+  expect(await screen.findByText("Upload voided and stored files destroyed")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Validate batch" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Accept batch" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Void upload" })).not.toBeInTheDocument();
+});
+
+test("sources upload sends selected source profile with the file", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Sources" }));
+  expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
+  await waitFor(() => expect(screen.getAllByText("Alliant Savings").length).toBeGreaterThan(0));
+
+  const sourceProfileSelect = screen.getByLabelText("Source profile");
+  fireEvent.change(sourceProfileSelect, {
+    target: { value: "alliant_savings" },
+  });
+  await waitFor(() => expect(sourceProfileSelect).toHaveValue("alliant_savings"));
+
+  const sourceFile = new File(["Date,Description,Amount,Balance\n"], "History-061926-011955.csv", { type: "text/csv" });
+  const sourceFileInput = screen.getByLabelText("Source file") as HTMLInputElement;
+  Object.defineProperty(sourceFileInput, "files", { value: [sourceFile], configurable: true });
+  fireEvent.change(sourceFileInput);
+
+  const uploadButton = screen.getByRole("button", { name: "Upload to inbox" });
+  await waitFor(() => expect(uploadButton).not.toBeDisabled());
+  fireEvent.submit(uploadButton.closest("form") as HTMLFormElement);
+
+  await waitFor(() => {
+    const uploadCall = fetchMock.mock.calls.find(([input, init]) => pathFor(input) === "/api/uploads" && init?.method === "POST");
+    expect(uploadCall).toBeTruthy();
+    const body = uploadCall?.[1]?.body;
+    expect(body).toBeInstanceOf(FormData);
+    expect((body as FormData).get("source_key")).toBe("alliant_savings");
+    expect((body as FormData).get("file")).toBeInstanceOf(File);
+  });
+  expect(await screen.findByText("File uploaded to inbox")).toBeInTheDocument();
+});
+
+test("validation screen clears acknowledged findings from the default open queue", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Validation Issues" }));
+  expect(await screen.findByRole("heading", { name: "Validation Issues" })).toBeInTheDocument();
+  expect(await screen.findByText("schema_mismatch")).toBeInTheDocument();
+  expect(await screen.findByText("source_stale")).toBeInTheDocument();
+  expect(screen.getByText("Active blockers must be fixed or voided before they can be cleared.")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear source_stale import_batch:batch-1" }));
+  const dialog = await screen.findByRole("dialog", { name: "Clear validation finding" });
+  expect(dialog).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Clear note"), {
+    target: { value: "Acknowledged stale source while waiting for next export." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm clear" }));
+
+  await waitFor(() => {
+    const clearCall = fetchMock.mock.calls.find(
+      ([input, init]) => pathFor(input) === "/api/validation-findings/finding-warning/resolve" && init?.method === "POST",
+    );
+    expect(clearCall).toBeTruthy();
+    expect(JSON.parse(String(clearCall?.[1]?.body))).toEqual({
+      actor: "mason",
+      note: "Acknowledged stale source while waiting for next export.",
+    });
+  });
+  expect(await screen.findByText("Validation finding cleared")).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByText("source_stale")).not.toBeInTheDocument());
+
+  fireEvent.click(screen.getByLabelText("Show cleared"));
+  expect(await screen.findByText("source_stale")).toBeInTheDocument();
+  expect(screen.getByText("resolved")).toBeInTheDocument();
+});
+
 test("review controls are labelled, focusable, and save append-only decisions", async () => {
   const fetchMock = installApiMock();
 
@@ -373,9 +666,20 @@ test("review controls are labelled, focusable, and save append-only decisions", 
   const approvedCategory = screen.getByLabelText("Approved category");
   approvedCategory.focus();
   expect(approvedCategory).toHaveFocus();
-  fireEvent.change(approvedCategory, { target: { value: "Groceries" } });
+  expect(approvedCategory).toBeInstanceOf(HTMLSelectElement);
+  const categoryOptions = Array.from((approvedCategory as HTMLSelectElement).options).map((option) => option.text);
+  expect(categoryOptions).toEqual(["Food", "Utilities", "Other"]);
+
+  fireEvent.change(approvedCategory, { target: { value: "__other__" } });
+  await waitFor(() => expect(approvedCategory).toHaveValue("__other__"));
 
   const saveButton = screen.getByRole("button", { name: "Save decision" });
+  await waitFor(() => expect(saveButton).toBeDisabled());
+
+  fireEvent.change(screen.getByLabelText("Other category"), { target: { value: "Groceries" } });
+  await waitFor(() => expect(saveButton).toBeDisabled());
+
+  fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Creating a new category from review." } });
   saveButton.focus();
   expect(saveButton).toHaveFocus();
   fireEvent.click(saveButton);
@@ -387,15 +691,63 @@ test("review controls are labelled, focusable, and save append-only decisions", 
     );
   });
   expect(await screen.findByText("Decision saved" )).toBeInTheDocument();
-  const decisionCall = fetchMock.mock.calls.find((call) => pathFor(call[0]) === "/api/decision-events");
-  expect(JSON.parse(decisionCall?.[1]?.body as string)).toMatchObject({
+  const decisionCalls = fetchMock.mock.calls.filter((call) => pathFor(call[0]) === "/api/decision-events");
+  expect(JSON.parse(decisionCalls.at(-1)?.[1]?.body as string)).toMatchObject({
     target_type: "canonical_transaction",
     target_id: "tx-1",
     decision_type: "category_change",
     field_name: "category",
     approved_value: "Groceries",
     explicit_user_action: true,
+    notes: "Creating a new category from review.",
   });
+});
+
+test("review save approves unchanged category as a reviewed decision", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Review" }));
+  expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
+
+  const approvedCategory = screen.getByLabelText("Approved category");
+  expect(approvedCategory).toHaveValue("Food");
+
+  fireEvent.click(screen.getByRole("button", { name: "Save decision" }));
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/decision-events",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+  expect(await screen.findByText("Decision saved")).toBeInTheDocument();
+  const decisionCalls = fetchMock.mock.calls.filter((call) => pathFor(call[0]) === "/api/decision-events");
+  expect(JSON.parse(decisionCalls.at(-1)?.[1]?.body as string)).toMatchObject({
+    target_type: "canonical_transaction",
+    target_id: "tx-1",
+    decision_type: "review_status_change",
+    field_name: "review_status",
+    approved_value: "reviewed",
+    explicit_user_action: true,
+  });
+});
+
+test("blocked validation filter selects blocked transaction and explains review save is blocked", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Review" }));
+  expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Validation status"), { target: { value: "blocked" } });
+
+  expect(await screen.findByText("SYNTHETIC DUPLICATE")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByLabelText("Current category")).toHaveValue("Utilities"));
+  expect(screen.getByText("Blocked transactions must be resolved in Validation Issues before review decisions can be saved.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Resolve validation first" })).toBeDisabled();
 });
 
 test("reports screen runs artifacts and close/export actions", async () => {
@@ -474,6 +826,48 @@ test("settings screen saves source profile sample confirmation with owner note",
         setting_key: "sources.chase_prime_visa.profile_confirmation_status",
         value: "owner_confirmed_header_sample",
         note: "Header-only Chase Prime Visa sample approved.",
+      },
+    ],
+  });
+});
+
+test("settings screen edits editable database-backed settings with required notes", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+  expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
+
+  fireEvent.change(await screen.findByLabelText("Editable setting"), {
+    target: { value: "sources.chase_prime_visa.required" },
+  });
+  fireEvent.change(screen.getByLabelText("Setting value"), {
+    target: { value: "false" },
+  });
+  fireEvent.change(screen.getByLabelText("Change note"), {
+    target: { value: "Temporarily make Chase Prime Visa optional for v1 smoke testing." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save setting" }));
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/settings",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+  expect(await screen.findByText("Setting saved")).toBeInTheDocument();
+  const settingsPatchCalls = fetchMock.mock.calls.filter(
+    (call) => pathFor(call[0]) === "/api/settings" && call[1]?.method === "PATCH",
+  );
+  expect(JSON.parse(settingsPatchCalls.at(-1)?.[1]?.body as string)).toMatchObject({
+    actor: "mason",
+    changes: [
+      {
+        domain: "sources",
+        setting_key: "sources.chase_prime_visa.required",
+        value: false,
+        note: "Temporarily make Chase Prime Visa optional for v1 smoke testing.",
       },
     ],
   });
