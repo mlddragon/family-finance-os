@@ -13,6 +13,7 @@ class SourceProfile:
     freshness_threshold_days: int
     accepted_file_extensions: tuple[str, ...]
     expected_headers: tuple[str, ...]
+    optional_headers: tuple[str, ...]
     amount_sign_policy: str
     parser_version: str
     confirmation_status: str = "pending_owner_sample"
@@ -30,6 +31,7 @@ SOURCE_PROFILES: tuple[SourceProfile, ...] = (
         freshness_threshold_days=14,
         accepted_file_extensions=(".csv",),
         expected_headers=("Date", "Description", "Amount", "Balance"),
+        optional_headers=(),
         amount_sign_policy="debits_negative_credits_positive",
         parser_version="alliant_checking:v1",
     ),
@@ -41,6 +43,7 @@ SOURCE_PROFILES: tuple[SourceProfile, ...] = (
         freshness_threshold_days=14,
         accepted_file_extensions=(".csv",),
         expected_headers=("Date", "Description", "Amount", "Balance"),
+        optional_headers=(),
         amount_sign_policy="debits_negative_credits_positive",
         parser_version="alliant_savings:v1",
     ),
@@ -51,7 +54,8 @@ SOURCE_PROFILES: tuple[SourceProfile, ...] = (
         required=True,
         freshness_threshold_days=14,
         accepted_file_extensions=(".csv",),
-        expected_headers=("Transaction Date", "Description", "Amount"),
+        expected_headers=("Date", "Description", "Amount", "Balance", "Post Date"),
+        optional_headers=(),
         amount_sign_policy="charges_positive_payments_negative",
         parser_version="alliant_credit_card:v1",
     ),
@@ -63,7 +67,8 @@ SOURCE_PROFILES: tuple[SourceProfile, ...] = (
         freshness_threshold_days=14,
         accepted_file_extensions=(".csv",),
         expected_headers=("Transaction Date", "Post Date", "Description", "Category", "Amount"),
-        amount_sign_policy="charges_positive_payments_negative",
+        optional_headers=("Type", "Memo"),
+        amount_sign_policy="charges_negative_payments_positive",
         parser_version="chase_prime_visa:v1",
     ),
 )

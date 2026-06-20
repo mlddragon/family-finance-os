@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 from datetime import date, timedelta
@@ -54,6 +55,16 @@ def write_fixture_to_inbox(data_root: Path, fixture_name: str, *, filename: str 
     return inbox_path
 
 
+def load_docker_e2e_module():
+    script_path = REPO_ROOT / "scripts" / "run_docker_e2e.py"
+    spec = importlib.util.spec_from_file_location("run_docker_e2e", script_path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def scan_validate_accept_all(client: TestClient, *, acknowledge_warnings: bool = False) -> list[dict]:
     scan_response = client.post("/api/inbox/scan")
     assert scan_response.status_code == 200
@@ -92,6 +103,25 @@ def save_decision(client: TestClient, transaction_id: str, *, field_name: str, d
     return response.json()
 
 
+def confirm_source_profiles(client: TestClient, source_keys: list[str]) -> None:
+    response = client.patch(
+        "/api/settings",
+        json={
+            "actor": "mason",
+            "changes": [
+                {
+                    "domain": "sources",
+                    "setting_key": f"sources.{source_key}.profile_confirmation_status",
+                    "value": "owner_confirmed_header_sample",
+                    "note": f"SYNTHETIC header-only sample confirmation for {source_key}.",
+                }
+                for source_key in sorted(source_keys)
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+
 def test_required_pr10_synthetic_fixtures_exist_and_are_obviously_fake():
     expected_fixtures = set(VALID_SOURCE_FIXTURES) | SCENARIO_FIXTURES
     assert expected_fixtures
@@ -109,6 +139,7 @@ def test_full_synthetic_closed_loop_reaches_final_close_advisor_export_and_refre
     with TestClient(app) as client:
         accepted_batches = scan_validate_accept_all(client)
         source_keys = sorted(batch["source_key"] for batch in accepted_batches)
+        confirm_source_profiles(client, source_keys)
         transactions_response = client.get("/api/transactions")
         assert transactions_response.status_code == 200
         transactions = transactions_response.json()["transactions"]
@@ -212,3 +243,53 @@ def test_pr10_security_contract_and_docker_e2e_scripts_exist_and_pass_static_che
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_docker_e2e_script_exercises_blocked_validation_path(tmp_path, monkeypatch):
+    module = load_docker_e2e_module()
+    calls: list[tuple[str, str]] = []
+
+    def fake_request_json(_base_url: str, method: str, path: str, payload: dict | None = None):
+        calls.append((method, path))
+        if path == "/api/inbox/scan":
+            return {
+                "import_batches": [
+                    {
+                        "id": "blocked-batch-1",
+                        "source_files": [
+                            {"original_filename": "SYNTHETIC_docker_blocked_wrong_header.csv"}
+                        ],
+                    }
+                ]
+            }
+        if path == "/api/import-batches/blocked-batch-1/validate":
+            return {
+                "findings": [
+                    {"severity": "blocking", "code": "schema_mismatch", "status": "open"}
+                ]
+            }
+        if path == "/api/import-batches/blocked-batch-1/accept":
+            raise module.E2EHttpError(
+                method,
+                path,
+                409,
+                '{"detail":{"code":"blocking_validation_findings"}}',
+            )
+        if path == "/api/validation-findings":
+            return {
+                "findings": [
+                    {"severity": "blocking", "code": "schema_mismatch", "status": "open"}
+                ]
+            }
+        raise AssertionError(f"unexpected request: {method} {path} {payload}")
+
+    monkeypatch.setattr(module, "request_json", fake_request_json)
+
+    result = module.run_blocked_validation_path("http://127.0.0.1:8080", tmp_path)
+
+    assert (tmp_path / "inbox" / "SYNTHETIC_docker_blocked_wrong_header.csv").exists()
+    assert result == {
+        "blocked_batch_id": "blocked-batch-1",
+        "validation_codes": ["schema_mismatch"],
+    }
+    assert ("POST", "/api/import-batches/blocked-batch-1/accept") in calls
