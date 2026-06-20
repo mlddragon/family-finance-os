@@ -5,9 +5,11 @@ import json
 from datetime import date, timedelta
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from dillon_finances.main import create_app
+from dillon_finances.runtime import DataRootConfigurationError
 
 
 CHASE_HEADER = "Transaction Date,Post Date,Description,Category,Amount\n"
@@ -72,6 +74,24 @@ def disable_unavailable_required_sources(client: TestClient) -> None:
                     "value": False,
                     "note": "Synthetic PR9 final close covers Chase only until owner source samples are confirmed.",
                 },
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+
+def confirm_source_profile_sample(client: TestClient, source_key: str) -> None:
+    response = client.patch(
+        "/api/settings",
+        json={
+            "actor": "mason",
+            "changes": [
+                {
+                    "domain": "sources",
+                    "setting_key": f"sources.{source_key}.profile_confirmation_status",
+                    "value": "owner_confirmed_header_sample",
+                    "note": f"Synthetic confirmation of header-only sample for {source_key}.",
+                }
             ],
         },
     )
@@ -157,6 +177,18 @@ def test_report_artifacts_include_integrity_and_source_input_metadata(tmp_path):
     assert artifact_by_type["import_validation_summary"]["sensitivity"] == "household_financial_summary"
 
 
+def test_report_run_blocks_artifact_root_symlink_escape(tmp_path):
+    outside_reports_dir = tmp_path.parent / f"{tmp_path.name}_outside_reports"
+    outside_reports_dir.mkdir()
+    (tmp_path / "reports").symlink_to(outside_reports_dir, target_is_directory=True)
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with pytest.raises(DataRootConfigurationError, match="DATA_ROOT/reports must be a safe directory"):
+        with TestClient(app):
+            pass
+    assert list(outside_reports_dir.iterdir()) == []
+
+
 def test_monthly_close_draft_writes_provisional_manifest_and_bundle(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
@@ -217,6 +249,18 @@ def test_monthly_close_manifest_references_registered_bundle_artifacts(tmp_path)
     assert manifest_artifact_ids == expected_bundle_artifact_ids
 
 
+def test_monthly_close_blocks_artifact_root_symlink_escape(tmp_path):
+    outside_close_dir = tmp_path.parent / f"{tmp_path.name}_outside_monthly_close"
+    outside_close_dir.mkdir()
+    (tmp_path / "monthly_close").symlink_to(outside_close_dir, target_is_directory=True)
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with pytest.raises(DataRootConfigurationError, match="DATA_ROOT/monthly_close must be a safe directory"):
+        with TestClient(app):
+            pass
+    assert list(outside_close_dir.iterdir()) == []
+
+
 def test_final_close_blocks_missing_required_source_coverage(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
@@ -229,6 +273,33 @@ def test_final_close_blocks_missing_required_source_coverage(tmp_path):
     assert detail["code"] == "final_close_blocked"
     assert "missing_required_sources" in detail["validation_summary"]
     assert detail["validation_summary"]["missing_required_count"] == 3
+
+
+def test_final_close_blocks_unconfirmed_required_source_profiles(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        create_accepted_chase_batch(client, tmp_path)
+        disable_unavailable_required_sources(client)
+        readiness_before_confirmation = client.post(
+            "/api/monthly-close/finalize",
+            json={"actor": "mason", "notes": "Synthetic final close should wait for source confirmation."},
+        )
+
+        assert readiness_before_confirmation.status_code == 409
+        detail = readiness_before_confirmation.json()["detail"]
+        assert detail["code"] == "final_close_blocked"
+        assert "unconfirmed_source_profiles" in detail["validation_summary"]["blockers"]
+        assert detail["validation_summary"]["unconfirmed_source_profiles"] == ["chase_prime_visa"]
+
+        confirm_source_profile_sample(client, "chase_prime_visa")
+        readiness_after_confirmation = client.post(
+            "/api/monthly-close/finalize",
+            json={"actor": "mason", "notes": "Synthetic final close after profile confirmation."},
+        )
+
+    assert readiness_after_confirmation.status_code == 200
+    assert readiness_after_confirmation.json()["validation_summary"]["unconfirmed_source_profiles"] == []
 
 
 def test_monthly_close_duplicate_month_status_returns_controlled_conflict(tmp_path):
@@ -250,6 +321,7 @@ def test_final_close_writes_immutable_bundle_after_owner_required_source_setting
     with TestClient(app) as client:
         create_accepted_chase_batch(client, tmp_path)
         disable_unavailable_required_sources(client)
+        confirm_source_profile_sample(client, "chase_prime_visa")
         response = client.post(
             "/api/monthly-close/finalize",
             json={"actor": "mason", "notes": "Synthetic final close after explicit source requirement settings review."},
@@ -311,6 +383,18 @@ def test_advisor_export_artifacts_include_integrity_and_validation_metadata(tmp_
     assert artifact_by_type["advisor_transactions_export"]["sensitivity"] == "household_financial_export"
 
 
+def test_advisor_export_blocks_artifact_root_symlink_escape(tmp_path):
+    outside_exports_dir = tmp_path.parent / f"{tmp_path.name}_outside_exports"
+    outside_exports_dir.mkdir()
+    (tmp_path / "exports").symlink_to(outside_exports_dir, target_is_directory=True)
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with pytest.raises(DataRootConfigurationError, match="DATA_ROOT/exports must be a safe directory"):
+        with TestClient(app):
+            pass
+    assert list(outside_exports_dir.iterdir()) == []
+
+
 def test_artifact_download_returns_registered_artifact_file(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
@@ -322,3 +406,37 @@ def test_artifact_download_returns_registered_artifact_file(tmp_path):
 
     assert download_response.status_code == 200
     assert download_response.content
+
+
+def test_artifact_download_rejects_registered_file_when_integrity_metadata_no_longer_matches(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        create_accepted_chase_batch(client, tmp_path)
+        run_response = client.post("/api/reports/run", json={"actor": "mason"})
+        artifact = run_response.json()["artifacts"][0]
+        Path(artifact["path"]).write_text("tampered synthetic report content")
+
+        download_response = client.get(f"/api/artifacts/{artifact['id']}/download")
+
+    assert download_response.status_code == 409
+    assert download_response.json()["detail"]["code"] == "artifact_integrity_mismatch"
+
+
+def test_artifact_download_rejects_registered_path_replaced_by_symlink(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        create_accepted_chase_batch(client, tmp_path)
+        run_response = client.post("/api/reports/run", json={"actor": "mason"})
+        artifact = run_response.json()["artifacts"][0]
+        artifact_path = Path(artifact["path"])
+        replacement_target = artifact_path.with_name(f"{artifact_path.stem}_same_content{artifact_path.suffix}")
+        replacement_target.write_bytes(artifact_path.read_bytes())
+        artifact_path.unlink()
+        artifact_path.symlink_to(replacement_target)
+
+        download_response = client.get(f"/api/artifacts/{artifact['id']}/download")
+
+    assert download_response.status_code == 409
+    assert download_response.json()["detail"]["code"] == "artifact_file_not_regular"

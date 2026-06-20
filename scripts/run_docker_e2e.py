@@ -23,6 +23,15 @@ class E2EError(RuntimeError):
     pass
 
 
+class E2EHttpError(E2EError):
+    def __init__(self, method: str, path: str, status_code: int, detail: str):
+        super().__init__(f"{method} {path} failed with HTTP {status_code}: {detail}")
+        self.method = method
+        self.path = path
+        self.status_code = status_code
+        self.detail = detail
+
+
 def render_fixture(path: Path) -> str:
     fresh_date = date.today() - timedelta(days=1)
     fresh_post_date = date.today()
@@ -45,7 +54,7 @@ def request_json(base_url: str, method: str, path: str, payload: dict[str, Any] 
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
-        raise E2EError(f"{method} {path} failed with HTTP {exc.code}: {detail}") from exc
+        raise E2EHttpError(method, path, exc.code, detail) from exc
 
 
 def wait_for_status(base_url: str) -> dict[str, Any]:
@@ -93,6 +102,70 @@ def save_decision(base_url: str, transaction_id: str, *, field_name: str, decisi
     )
 
 
+def confirm_source_profiles(base_url: str, source_keys: list[str]) -> None:
+    request_json(
+        base_url,
+        "PATCH",
+        "/api/settings",
+        {
+            "actor": "mason",
+            "changes": [
+                {
+                    "domain": "sources",
+                    "setting_key": f"sources.{source_key}.profile_confirmation_status",
+                    "value": "owner_confirmed_header_sample",
+                    "note": f"SYNTHETIC Docker E2E header-only sample confirmation for {source_key}.",
+                }
+                for source_key in sorted(source_keys)
+            ],
+        },
+    )
+
+
+def run_blocked_validation_path(base_url: str, data_root: Path) -> dict[str, Any]:
+    blocked_filename = "SYNTHETIC_docker_blocked_wrong_header.csv"
+    blocked_path = data_root / "inbox" / blocked_filename
+    blocked_path.parent.mkdir(parents=True, exist_ok=True)
+    blocked_path.write_text("Wrong,Header\nSYNTHETIC BLOCKED,1.23\n")
+
+    scan = request_json(base_url, "POST", "/api/inbox/scan")
+    matching_batches = [
+        batch
+        for batch in scan["import_batches"]
+        if any(
+            source_file.get("original_filename") == blocked_filename
+            for source_file in batch.get("source_files", [])
+        )
+    ]
+    assert_condition(len(matching_batches) == 1, "blocked wrong-header file must scan as one batch")
+    batch_id = matching_batches[0]["id"]
+
+    validation = request_json(base_url, "POST", f"/api/import-batches/{batch_id}/validate")
+    validation_codes = sorted({finding["code"] for finding in validation["findings"]})
+    blocking = [finding for finding in validation["findings"] if finding["severity"] == "blocking"]
+    assert_condition("schema_mismatch" in validation_codes, "blocked path must report schema_mismatch")
+    assert_condition(blocking, "blocked path must report at least one blocking finding")
+
+    try:
+        request_json(base_url, "POST", f"/api/import-batches/{batch_id}/accept")
+    except E2EHttpError as exc:
+        assert_condition(exc.status_code == 409, "blocked path accept must fail with HTTP 409")
+    else:
+        raise E2EError("blocked path accept unexpectedly succeeded")
+
+    findings = request_json(base_url, "GET", "/api/validation-findings")
+    assert_condition(
+        any(
+            finding["status"] == "open"
+            and finding["severity"] == "blocking"
+            and finding["code"] == "schema_mismatch"
+            for finding in findings["findings"]
+        ),
+        "blocked path must leave an open schema_mismatch validation finding",
+    )
+    return {"blocked_batch_id": batch_id, "validation_codes": validation_codes}
+
+
 def run_closed_loop(base_url: str, repo_root: Path, data_root: Path) -> dict[str, Any]:
     status = wait_for_status(base_url)
     assert_condition(status["local_only"] is True, "status must report local-only mode")
@@ -101,11 +174,20 @@ def run_closed_loop(base_url: str, repo_root: Path, data_root: Path) -> dict[str
 
     scan = request_json(base_url, "POST", "/api/inbox/scan")
     assert_condition(len(scan["import_batches"]) == len(SOURCE_FIXTURES), "all synthetic source files must scan")
+    accepted_source_keys: list[str] = []
     for batch in scan["import_batches"]:
         validation = request_json(base_url, "POST", f"/api/import-batches/{batch['id']}/validate")
         blocking = [finding for finding in validation["findings"] if finding["severity"] == "blocking"]
         assert_condition(not blocking, f"batch {batch['id']} has blocking findings")
-        request_json(base_url, "POST", f"/api/import-batches/{batch['id']}/accept", {"acknowledge_warnings": False})
+        accepted_batch = request_json(
+            base_url,
+            "POST",
+            f"/api/import-batches/{batch['id']}/accept",
+            {"acknowledge_warnings": False},
+        )
+        accepted_source_keys.append(accepted_batch["source_key"])
+
+    confirm_source_profiles(base_url, accepted_source_keys)
 
     transactions = request_json(base_url, "GET", "/api/transactions")["transactions"]
     assert_condition(len(transactions) >= 4, "closed loop must create synthetic transactions")
@@ -129,6 +211,7 @@ def run_closed_loop(base_url: str, repo_root: Path, data_root: Path) -> dict[str
     )
     advisor = request_json(base_url, "POST", "/api/exports/advisor", {"actor": "mason"})
     summary = request_json(base_url, "GET", "/api/operator-summary")
+    blocked_path = run_blocked_validation_path(base_url, data_root)
 
     assert_condition(reports["report_run"]["status"] == "completed", "reports must complete")
     assert_condition(draft_close["monthly_close"]["status"] == "draft", "draft close must be created")
@@ -140,6 +223,7 @@ def run_closed_loop(base_url: str, repo_root: Path, data_root: Path) -> dict[str
         "accepted_sources": summary["sources"]["imported_source_keys"],
         "transaction_count": summary["review"]["total_transactions"],
         "artifact_count": summary["artifacts"]["generated_count"],
+        "blocked_path": blocked_path,
         "monthly_close_status": summary["monthly_close"]["status"],
         "next_action": summary["next_action"]["code"],
     }
