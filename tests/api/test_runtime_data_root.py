@@ -38,3 +38,29 @@ def test_bootstrap_data_root_accepts_directory_next_to_git_repo(tmp_path):
 
     assert resolved == data_root.resolve()
     assert not Path(resolved).is_relative_to(repo_root.resolve())
+
+
+def test_bootstrap_data_root_rejects_required_directory_symlink_escape(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    data_root = tmp_path / "Dillon_Finances_Data"
+    outside_database = tmp_path / "outside_database"
+    outside_database.mkdir()
+    data_root.mkdir()
+    (data_root / "database").symlink_to(outside_database, target_is_directory=True)
+
+    with pytest.raises(DataRootConfigurationError, match="safe directory"):
+        bootstrap_data_root(data_root, repo_root=repo_root)
+
+    assert list(outside_database.iterdir()) == []
+
+
+def test_bootstrap_data_root_rejects_required_directory_file_collision(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    data_root = tmp_path / "Dillon_Finances_Data"
+    data_root.mkdir()
+    (data_root / "reports").write_text("not a directory")
+
+    with pytest.raises(DataRootConfigurationError, match="safe directory"):
+        bootstrap_data_root(data_root, repo_root=repo_root)
