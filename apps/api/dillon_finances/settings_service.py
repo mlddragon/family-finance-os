@@ -21,6 +21,17 @@ SETTINGS_TABS = [
     "Future integrations",
 ]
 
+SOURCE_PROFILE_CONFIRMATION_STATUSES = {
+    "pending_owner_sample",
+    "owner_confirmed_header_sample",
+    "owner_confirmed_sanitized_sample",
+}
+
+CONFIRMED_SOURCE_PROFILE_STATUSES = {
+    "owner_confirmed_header_sample",
+    "owner_confirmed_sanitized_sample",
+}
+
 
 class SettingsValidationError(ValueError):
     def __init__(self, code: str, message: str):
@@ -109,7 +120,7 @@ def default_settings() -> list[dict[str, Any]]:
                     "domain": "sources",
                     "setting_key": f"sources.{profile.source_key}.profile_confirmation_status",
                     "value": profile.confirmation_status,
-                    "editable": False,
+                    "editable": True,
                     "note_required": True,
                 },
             ]
@@ -158,6 +169,13 @@ def _validate_change(change: SettingChange, existing: Setting) -> None:
             raise SettingsValidationError(
                 "invalid_freshness_threshold",
                 "Freshness thresholds must be an integer from 1 to 365 days.",
+            )
+
+    if change.domain == "sources" and change.setting_key.endswith(".profile_confirmation_status"):
+        if change.value not in SOURCE_PROFILE_CONFIRMATION_STATUSES:
+            raise SettingsValidationError(
+                "invalid_source_profile_confirmation",
+                "Source profile confirmation must use an approved v1 status.",
             )
 
     previous_value = _load_value(existing.value_json)
@@ -267,6 +285,10 @@ def settings_payload(
     local_only: bool,
 ) -> dict[str, Any]:
     seed_default_settings(session)
+    settings_by_key = {
+        (setting.domain, setting.setting_key): _load_value(setting.value_json)
+        for setting in session.scalars(select(Setting)).all()
+    }
     return {
         "tabs": SETTINGS_TABS,
         "local_only": local_only,
@@ -276,7 +298,28 @@ def settings_payload(
         },
         "settings": list_settings(session),
         "settings_events": list_settings_events(session),
-        "source_profiles": [profile.to_dict() for profile in list_source_profiles()],
+        "source_profiles": [
+            {
+                **profile.to_dict(),
+                "display_name": settings_by_key.get(
+                    ("sources", f"sources.{profile.source_key}.display_name"),
+                    profile.display_name,
+                ),
+                "required": settings_by_key.get(
+                    ("sources", f"sources.{profile.source_key}.required"),
+                    profile.required,
+                ),
+                "freshness_threshold_days": settings_by_key.get(
+                    ("freshness", f"sources.{profile.source_key}.freshness_threshold_days"),
+                    profile.freshness_threshold_days,
+                ),
+                "confirmation_status": settings_by_key.get(
+                    ("sources", f"sources.{profile.source_key}.profile_confirmation_status"),
+                    profile.confirmation_status,
+                ),
+            }
+            for profile in list_source_profiles()
+        ],
     }
 
 

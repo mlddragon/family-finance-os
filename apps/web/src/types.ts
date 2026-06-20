@@ -91,6 +91,10 @@ export type SourceFile = {
   stored_path?: string;
   file_sha256?: string;
   byte_size?: number;
+  storage_status?: string;
+  destroyed_at?: string | null;
+  destroyed_by?: string | null;
+  destroyed_reason?: string | null;
   validation_status: string;
   row_count: number | null;
   parser_version?: string | null;
@@ -173,4 +177,40 @@ export type DecisionEventResponse = {
     category_current?: string | null;
     review_status?: string;
   };
+};
+
+export type Artifact = {
+  id: string;
+  artifact_type: string;
+  path: string;
+  sha256?: string;
+  byte_size?: number;
+  title: string | null;
+  description?: string | null;
+  producing_job_id?: string | null;
+  source_inputs?: unknown;
+  retention_category?: string | null;
+  sensitivity?: string;
+  download_url: string;
+  created_at?: string;
+};
+
+export type ArtifactActionResponse = {
+  job?: {
+    id: string;
+    job_type?: string;
+    status: string;
+  };
+  report_run?: {
+    id: string;
+    status: string;
+    validation_status: string;
+  };
+  monthly_close?: {
+    id: string;
+    status: string;
+    provisional: boolean;
+  };
+  validation_summary?: Record<string, unknown>;
+  artifacts: Artifact[];
 };

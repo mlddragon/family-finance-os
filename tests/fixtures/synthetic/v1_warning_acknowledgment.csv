@@ -1,0 +1,2 @@
+Transaction Date,Post Date,Description,Category,Amount
+{{FRESH_DATE}},{{FRESH_POST_DATE}},SYNTHETIC WARNING ACKNOWLEDGMENT,Household,15.00
