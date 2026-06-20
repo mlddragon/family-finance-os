@@ -53,9 +53,22 @@ def validate_data_root(data_root: Path, *, repo_root: Optional[Path] = None) -> 
     return resolved_data_root
 
 
+def _ensure_safe_child_directory(data_root: Path, directory_name: str) -> None:
+    directory = data_root / directory_name
+    if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+        raise DataRootConfigurationError(
+            f"DATA_ROOT/{directory_name} must be a safe directory inside DATA_ROOT."
+        )
+    directory.mkdir(exist_ok=True)
+    if directory.is_symlink() or not directory.resolve().is_relative_to(data_root):
+        raise DataRootConfigurationError(
+            f"DATA_ROOT/{directory_name} must be a safe directory inside DATA_ROOT."
+        )
+
+
 def bootstrap_data_root(data_root: Path, *, repo_root: Optional[Path] = None) -> Path:
     resolved_data_root = validate_data_root(data_root, repo_root=repo_root)
     resolved_data_root.mkdir(parents=True, exist_ok=True)
     for directory in REQUIRED_DATA_ROOT_DIRS:
-        (resolved_data_root / directory).mkdir(parents=True, exist_ok=True)
+        _ensure_safe_child_directory(resolved_data_root, directory)
     return resolved_data_root
