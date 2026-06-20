@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   QueryClient,
   QueryClientProvider,
@@ -25,12 +25,16 @@ import {
   fetchTransactions,
   fetchValidationFindings,
   finalizeMonthlyClose,
+  formatApiError,
+  resolveValidationFinding,
   runReports,
   saveCategoryDecision,
+  saveReviewStatusDecision,
   saveSettingChange,
   scanInbox,
   uploadSourceFile,
   validateImportBatch,
+  voidImportBatch,
 } from "./api";
 import type {
   Artifact,
@@ -56,6 +60,9 @@ const screens: Array<{ key: ScreenKey; label: string }> = [
   { key: "reports", label: "Reports" },
   { key: "settings", label: "Settings" },
 ];
+
+const OTHER_LIST_VALUE = "__other__";
+const OTHER_LIST_LABEL = "Other";
 
 const emptySummary: OperatorSummary = {
   runtime: {
@@ -105,6 +112,24 @@ const emptySummary: OperatorSummary = {
     label: "Load local operating state",
   },
 };
+
+function uniqueExistingListValues(values: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed || trimmed.toLowerCase() === OTHER_LIST_LABEL.toLowerCase()) {
+      continue;
+    }
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result.sort((left, right) => left.localeCompare(right));
+}
 
 function createQueryClient() {
   return new QueryClient({
@@ -158,6 +183,7 @@ function OperatorApp() {
   const findings = findingsQuery.data?.findings ?? [];
   const inbox = inboxQuery.data?.import_batches ?? [];
   const settings = settingsQuery.data;
+  const sourceProfileKey = summary.sources.profiles.map((profile) => profile.source_key).join("|") || "no-source-profiles";
   const selectedTransaction =
     transactionDetailQuery.data?.transaction ??
     transactions.find((transaction) => transaction.id === selectedTransactionId) ??
@@ -186,7 +212,7 @@ function OperatorApp() {
 
         <main className="content">
           {activeScreen === "home" ? <HomeScreen summary={summary} /> : null}
-          {activeScreen === "sources" ? <SourcesScreen profiles={summary.sources.profiles} inbox={inbox} /> : null}
+          {activeScreen === "sources" ? <SourcesScreen key={sourceProfileKey} profiles={summary.sources.profiles} inbox={inbox} /> : null}
           {activeScreen === "validation" ? <ValidationScreen findings={findings} /> : null}
           {activeScreen === "review" ? (
             <ReviewScreen
@@ -277,7 +303,21 @@ function HomeScreen({ summary }: { summary: OperatorSummary }) {
 function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: ImportBatch[] }) {
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedUploadSourceKey, setSelectedUploadSourceKey] = useState(profiles[0]?.source_key ?? "");
   const [batchActionStatus, setBatchActionStatus] = useState<string | null>(null);
+  const [voidTarget, setVoidTarget] = useState<ImportBatch | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [destroyStoredFiles, setDestroyStoredFiles] = useState(false);
+  const uploadSourceKey = selectedUploadSourceKey || profiles[0]?.source_key || "";
+
+  useEffect(() => {
+    if (!selectedUploadSourceKey && profiles[0]) {
+      setSelectedUploadSourceKey(profiles[0].source_key);
+    }
+    if (selectedUploadSourceKey && !profiles.some((profile) => profile.source_key === selectedUploadSourceKey)) {
+      setSelectedUploadSourceKey(profiles[0]?.source_key ?? "");
+    }
+  }, [profiles, selectedUploadSourceKey]);
 
   function updateCachedBatch(updatedBatch: ImportBatch) {
     queryClient.setQueryData<InboxScan>(["inbox-scan"], (current) => {
@@ -322,7 +362,7 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
       setBatchActionStatus("Batch validation completed");
       refreshAfterBatchAction();
     },
-    onError: () => setBatchActionStatus("Batch validation blocked"),
+    onError: (error) => setBatchActionStatus(formatApiError(error, "Batch validation blocked")),
   });
   const acceptMutation = useMutation({
     mutationFn: acceptImportBatch,
@@ -331,11 +371,50 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
       setBatchActionStatus("Batch accepted");
       refreshAfterBatchAction();
     },
-    onError: () => setBatchActionStatus("Batch acceptance blocked"),
+    onError: (error) => setBatchActionStatus(formatApiError(error, "Batch acceptance blocked")),
+  });
+  const voidMutation = useMutation({
+    mutationFn: voidImportBatch,
+    onSuccess: (body, variables) => {
+      updateCachedBatch(body.import_batch);
+      setBatchActionStatus(
+        variables.destroyFiles ? "Upload voided and stored files destroyed" : "Upload voided; stored files preserved",
+      );
+      setVoidTarget(null);
+      setVoidReason("");
+      setDestroyStoredFiles(false);
+      refreshImportState();
+    },
+    onError: (error) => setBatchActionStatus(formatApiError(error, "Upload void blocked")),
   });
 
   const blockedBatches = inbox.filter((batch) => batch.status === "blocked" || batch.validation_status === "blocked");
-  const batchActionPending = validateMutation.isPending || acceptMutation.isPending;
+  const batchActionPending = validateMutation.isPending || acceptMutation.isPending || voidMutation.isPending;
+
+  function openVoidDialog(batch: ImportBatch) {
+    setVoidTarget(batch);
+    setVoidReason("");
+    setDestroyStoredFiles(false);
+    setBatchActionStatus(null);
+  }
+
+  function closeVoidDialog() {
+    setVoidTarget(null);
+    setVoidReason("");
+    setDestroyStoredFiles(false);
+  }
+
+  function confirmVoidUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!voidTarget || !voidReason.trim()) {
+      return;
+    }
+    voidMutation.mutate({
+      batchId: voidTarget.id,
+      reason: voidReason.trim(),
+      destroyFiles: destroyStoredFiles,
+    });
+  }
 
   return (
     <section className="screen" aria-labelledby="sources-heading">
@@ -394,26 +473,40 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
               { header: "Rows", accessorKey: "row_count" },
               {
                 header: "Actions",
-                cell: ({ row }) => (
-                  <div className="table-actions">
-                    <button
-                      type="button"
-                      className="link-button"
-                      disabled={batchActionPending}
-                      onClick={() => validateMutation.mutate(row.original.id)}
-                    >
-                      Validate batch
-                    </button>
-                    <button
-                      type="button"
-                      className="link-button"
-                      disabled={batchActionPending || row.original.validation_status === "pending"}
-                      onClick={() => acceptMutation.mutate(row.original.id)}
-                    >
-                      Accept batch
-                    </button>
-                  </div>
-                ),
+                cell: ({ row }) => {
+                  const batchClosed = row.original.status === "accepted" || row.original.status === "voided";
+                  if (batchClosed) {
+                    return <span className="muted-text">{formatStatus(row.original.status)}</span>;
+                  }
+                  return (
+                    <div className="table-actions">
+                      <button
+                        type="button"
+                        className="link-button"
+                        disabled={batchActionPending}
+                        onClick={() => validateMutation.mutate(row.original.id)}
+                      >
+                        Validate batch
+                      </button>
+                      <button
+                        type="button"
+                        className="link-button"
+                        disabled={batchActionPending || row.original.validation_status === "pending"}
+                        onClick={() => acceptMutation.mutate(row.original.id)}
+                      >
+                        Accept batch
+                      </button>
+                      <button
+                        type="button"
+                        className="link-button danger-link"
+                        disabled={batchActionPending}
+                        onClick={() => openVoidDialog(row.original)}
+                      >
+                        Void upload
+                      </button>
+                    </div>
+                  );
+                },
               },
             ]}
           />
@@ -425,19 +518,29 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
             className="upload-form"
             onSubmit={(event) => {
               event.preventDefault();
-              if (selectedFile) {
-                uploadMutation.mutate(selectedFile);
+              if (selectedFile && uploadSourceKey) {
+                uploadMutation.mutate({ file: selectedFile, sourceKey: uploadSourceKey });
               }
             }}
           >
             <label>
+              Source profile
+              <select value={uploadSourceKey} onChange={(event) => setSelectedUploadSourceKey(event.target.value)}>
+                {profiles.map((profile) => (
+                  <option key={profile.source_key} value={profile.source_key}>
+                    {profile.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
               Source file
               <input type="file" accept=".csv" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
             </label>
-            <button type="submit" disabled={!selectedFile || uploadMutation.isPending}>
+            <button type="submit" disabled={!selectedFile || !uploadSourceKey || uploadMutation.isPending}>
               Upload to inbox
             </button>
-            {uploadMutation.isError ? <p className="form-status danger-text">Upload blocked</p> : null}
+            {uploadMutation.isError ? <p className="form-status danger-text">{formatApiError(uploadMutation.error, "Upload blocked")}</p> : null}
           </form>
         </div>
       </section>
@@ -452,6 +555,7 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
             { header: "Batch", cell: ({ row }) => row.original.batch.id.slice(0, 8) },
             { header: "Source", cell: ({ row }) => row.original.batch.source_key ?? "unmatched" },
             { header: "Status", accessorKey: "validation_status" },
+            { header: "Storage", cell: ({ row }) => formatStatus(row.original.storage_status ?? "present") },
             { header: "Rows", accessorKey: "row_count" },
           ]}
         />
@@ -474,11 +578,95 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
           <p className="empty-state">No quarantined files</p>
         )}
       </section>
+
+      {voidTarget ? (
+        <div className="modal-backdrop">
+          <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="void-upload-title">
+            <h3 id="void-upload-title">Void upload</h3>
+            <p className="modal-copy">
+              Batch {voidTarget.id.slice(0, 8)} will be removed from the active import workflow. Stored files are
+              preserved unless destruction is explicitly selected.
+            </p>
+            <form className="modal-form" onSubmit={confirmVoidUpload}>
+              <label>
+                Reason
+                <textarea value={voidReason} onChange={(event) => setVoidReason(event.target.value)} />
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={destroyStoredFiles}
+                  onChange={(event) => setDestroyStoredFiles(event.target.checked)}
+                />
+                <span>Destroy stored files</span>
+              </label>
+              <div className="button-row">
+                <button type="button" onClick={closeVoidDialog} disabled={voidMutation.isPending}>
+                  Cancel
+                </button>
+                <button type="submit" className="danger-button" disabled={!voidReason.trim() || voidMutation.isPending}>
+                  Confirm void
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }
 
 function ValidationScreen({ findings }: { findings: ValidationFinding[] }) {
+  const queryClient = useQueryClient();
+  const [showCleared, setShowCleared] = useState(false);
+  const [clearTarget, setClearTarget] = useState<ValidationFinding | null>(null);
+  const [clearNote, setClearNote] = useState("");
+  const [clearStatus, setClearStatus] = useState<string | null>(null);
+  const visibleFindings = useMemo(
+    () => (showCleared ? findings : findings.filter((finding) => finding.status === "open")),
+    [findings, showCleared],
+  );
+  const clearMutation = useMutation({
+    mutationFn: resolveValidationFinding,
+    onSuccess: (body) => {
+      setClearStatus("Validation finding cleared");
+      setClearTarget(null);
+      setClearNote("");
+      queryClient.setQueryData<{ findings: ValidationFinding[] }>(["validation-findings"], (current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          findings: current.findings.map((finding) =>
+            finding.id === body.finding.id ? body.finding : finding,
+          ),
+        };
+      });
+      void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["validation-findings"] });
+    },
+    onError: (error) => setClearStatus(formatApiError(error, "Validation finding clear blocked")),
+  });
+
+  function openClearDialog(finding: ValidationFinding) {
+    setClearTarget(finding);
+    setClearNote("");
+    setClearStatus(null);
+  }
+
+  function closeClearDialog() {
+    setClearTarget(null);
+    setClearNote("");
+  }
+
+  function confirmClearFinding(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!clearTarget || !clearNote.trim()) {
+      return;
+    }
+    clearMutation.mutate({ findingId: clearTarget.id, note: clearNote });
+  }
+
   const columns = useMemo<ColumnDef<ValidationFinding>[]>(
     () => [
       { header: "Severity", accessorKey: "severity" },
@@ -487,8 +675,36 @@ function ValidationScreen({ findings }: { findings: ValidationFinding[] }) {
       { header: "Message", accessorKey: "message" },
       { header: "Status", accessorKey: "status" },
       { header: "Affected reports", cell: ({ row }) => affectedReports(row.original) },
+      {
+        header: "Action",
+        cell: ({ row }) => {
+          const finding = row.original;
+          const targetLabel = `${finding.target_type}:${finding.target_id ?? "none"}`;
+          if (finding.status !== "open") {
+            return <span className="muted-text">Cleared</span>;
+          }
+          if (finding.severity === "blocking") {
+            return (
+              <span className="muted-text">
+                Active blockers must be fixed or voided before they can be cleared.
+              </span>
+            );
+          }
+          return (
+            <button
+              type="button"
+              className="link-button"
+              aria-label={`Clear ${finding.code} ${targetLabel}`}
+              onClick={() => openClearDialog(finding)}
+              disabled={clearMutation.isPending}
+            >
+              Clear {finding.code}
+            </button>
+          );
+        },
+      },
     ],
-    [],
+    [clearMutation.isPending],
   );
 
   return (
@@ -497,7 +713,38 @@ function ValidationScreen({ findings }: { findings: ValidationFinding[] }) {
         <p className="product-label">Validation queue</p>
         <h2 id="validation-heading">Validation Issues</h2>
       </div>
-      <DataTable data={findings} columns={columns} emptyLabel="No validation findings" />
+      <div className="action-row">
+        <label className="checkbox-row inline-checkbox">
+          <input type="checkbox" checked={showCleared} onChange={(event) => setShowCleared(event.target.checked)} />
+          <span>Show cleared</span>
+        </label>
+      </div>
+      {clearStatus ? <p className={clearStatus === "Validation finding cleared" ? "form-status ok-text" : "form-status danger-text"}>{clearStatus}</p> : null}
+      <DataTable data={visibleFindings} columns={columns} emptyLabel="No open validation findings" />
+      {clearTarget ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="clear-validation-title">
+            <h3 id="clear-validation-title">Clear validation finding</h3>
+            <p className="modal-copy">
+              This records an acknowledgment event and removes the finding from the default open queue.
+            </p>
+            <form className="modal-form" onSubmit={confirmClearFinding}>
+              <label>
+                Clear note
+                <textarea value={clearNote} onChange={(event) => setClearNote(event.target.value)} />
+              </label>
+              <div className="button-row">
+                <button type="button" onClick={closeClearDialog} disabled={clearMutation.isPending}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={!clearNote.trim() || clearMutation.isPending}>
+                  Confirm clear
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -517,15 +764,51 @@ function ReviewScreen({
   const [statusFilter, setStatusFilter] = useState("all");
   const [validationFilter, setValidationFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [approvedCategory, setApprovedCategory] = useState("");
+  const [categorySelection, setCategorySelection] = useState("");
+  const [otherCategory, setOtherCategory] = useState("");
   const [notes, setNotes] = useState("");
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const lastInitializedTransactionId = useRef<string | null>(null);
+  const categoryOptions = useMemo(
+    () =>
+      uniqueExistingListValues([
+        ...transactions.flatMap((transaction) => [transaction.category_current, transaction.initial_category]),
+        selectedTransaction?.category_current,
+        selectedTransaction?.initial_category,
+        ...(hasImportedFacts(selectedTransaction)
+          ? selectedTransaction.imported_facts?.map((fact) => fact.initial_category) ?? []
+          : []),
+      ]),
+    [selectedTransaction, transactions],
+  );
 
   useLayoutEffect(() => {
-    setApprovedCategory(selectedTransaction?.category_current ?? "");
+    const currentCategory = selectedTransaction?.category_current?.trim() ?? "";
+    if (!selectedTransaction) {
+      lastInitializedTransactionId.current = null;
+      setCategorySelection("");
+      setOtherCategory("");
+      setNotes("");
+      setSaveStatus(null);
+      return;
+    }
+    if (lastInitializedTransactionId.current === selectedTransaction.id) {
+      return;
+    }
+    lastInitializedTransactionId.current = selectedTransaction.id;
+    if (currentCategory && categoryOptions.includes(currentCategory)) {
+      setCategorySelection(currentCategory);
+      setOtherCategory("");
+    } else if (currentCategory) {
+      setCategorySelection(OTHER_LIST_VALUE);
+      setOtherCategory(currentCategory);
+    } else {
+      setCategorySelection(categoryOptions[0] ?? OTHER_LIST_VALUE);
+      setOtherCategory("");
+    }
     setNotes("");
     setSaveStatus(null);
-  }, [selectedTransaction?.id]);
+  }, [categoryOptions, selectedTransaction]);
 
   const filteredTransactions = useMemo(
     () =>
@@ -542,8 +825,43 @@ function ReviewScreen({
     [search, statusFilter, transactions, validationFilter],
   );
 
+  useEffect(() => {
+    if (!filteredTransactions.length) {
+      return;
+    }
+    const selectedIsVisible = filteredTransactions.some((transaction) => transaction.id === selectedTransactionId);
+    if (!selectedIsVisible) {
+      onSelectTransaction(filteredTransactions[0].id);
+    }
+  }, [filteredTransactions, onSelectTransaction, selectedTransactionId]);
+
+  const otherCategorySelected = categorySelection === OTHER_LIST_VALUE;
+  const approvedCategory = otherCategorySelected ? otherCategory.trim() : categorySelection.trim();
+  const otherCategoryRequiresNote = otherCategorySelected;
+  const currentCategory = selectedTransaction?.category_current?.trim() ?? "";
+  const selectedTransactionBlocked = selectedTransaction?.validation_status === "blocked";
+  const categoryChanged = Boolean(selectedTransaction) && approvedCategory !== currentCategory;
+  const reviewAlreadyComplete = ["reviewed", "approved"].includes(selectedTransaction?.review_status ?? "");
+  const reviewApprovalNeeded = Boolean(selectedTransaction) && !categoryChanged && !reviewAlreadyComplete;
+
   const decisionMutation = useMutation({
-    mutationFn: saveCategoryDecision,
+    mutationFn: () => {
+      if (!selectedTransaction) {
+        throw new Error("No selected transaction");
+      }
+      if (categoryChanged) {
+        return saveCategoryDecision({
+          transactionId: selectedTransaction.id,
+          approvedCategory,
+          notes: otherCategoryRequiresNote ? notes.trim() : notes,
+        });
+      }
+      return saveReviewStatusDecision({
+        transactionId: selectedTransaction.id,
+        approvedStatus: "reviewed",
+        notes,
+      });
+    },
     onSuccess: (body) => {
       setSaveStatus("Decision saved");
       const updatedCategory = body.current_state?.category_current ?? approvedCategory.trim();
@@ -566,8 +884,16 @@ function ReviewScreen({
       void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
       void queryClient.invalidateQueries({ queryKey: ["transaction", selectedTransactionId] });
     },
-    onError: () => setSaveStatus("Decision blocked"),
+    onError: (error) => setSaveStatus(formatApiError(error, "Decision blocked")),
   });
+
+  const saveDecisionDisabled =
+    !selectedTransaction ||
+    selectedTransactionBlocked ||
+    decisionMutation.isPending ||
+    !approvedCategory ||
+    (otherCategoryRequiresNote && !notes.trim()) ||
+    (!categoryChanged && !reviewApprovalNeeded);
 
   const columns = useMemo<ColumnDef<Transaction>[]>(
     () => [
@@ -591,17 +917,16 @@ function ReviewScreen({
 
   function saveDecision(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedTransaction || !approvedCategory.trim()) {
+    if (
+      !selectedTransaction ||
+      !approvedCategory ||
+      (otherCategoryRequiresNote && !notes.trim()) ||
+      (!categoryChanged && !reviewApprovalNeeded)
+    ) {
       return;
     }
-    decisionMutation.mutate({
-      transactionId: selectedTransaction.id,
-      approvedCategory: approvedCategory.trim(),
-      notes,
-    });
+    decisionMutation.mutate();
   }
-
-  const selectedIsBlocked = selectedTransaction?.validation_status === "blocked";
 
   return (
     <section className="screen" aria-labelledby="review-heading">
@@ -669,12 +994,34 @@ function ReviewScreen({
 
           <label>
             Approved category
-            <input type="text" value={approvedCategory} onChange={(event) => setApprovedCategory(event.target.value)} />
+            <select
+              value={categorySelection}
+              onChange={(event) => {
+                setCategorySelection(event.target.value);
+                if (event.target.value !== OTHER_LIST_VALUE) {
+                  setOtherCategory("");
+                }
+              }}
+            >
+              {categoryOptions.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+              <option value={OTHER_LIST_VALUE}>{OTHER_LIST_LABEL}</option>
+            </select>
           </label>
+
+          {otherCategorySelected ? (
+            <label>
+              Other category
+              <input type="text" value={otherCategory} onChange={(event) => setOtherCategory(event.target.value)} />
+            </label>
+          ) : null}
 
           <label>
             Notes
-            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} />
+            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} required={otherCategoryRequiresNote} />
           </label>
 
           <div className="audit-preview" aria-label="Audit preview">
@@ -683,8 +1030,14 @@ function ReviewScreen({
             <span>Source: owner</span>
           </div>
 
-          <button type="submit" disabled={!selectedTransaction || selectedIsBlocked || decisionMutation.isPending}>
-            Save decision
+          {selectedTransactionBlocked ? (
+            <p className="form-status danger-text">
+              Blocked transactions must be resolved in Validation Issues before review decisions can be saved.
+            </p>
+          ) : null}
+
+          <button type="submit" disabled={saveDecisionDisabled}>
+            {selectedTransactionBlocked ? "Resolve validation first" : "Save decision"}
           </button>
           {saveStatus ? <p className={saveStatus === "Decision saved" ? "form-status ok-text" : "form-status danger-text"}>{saveStatus}</p> : null}
         </form>
@@ -775,7 +1128,7 @@ function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artif
       setActionStatus("Reports completed");
       refreshReportState();
     },
-    onError: () => setActionStatus("Reports blocked"),
+    onError: (error) => setActionStatus(formatApiError(error, "Reports blocked")),
   });
   const draftCloseMutation = useMutation({
     mutationFn: draftMonthlyClose,
@@ -783,7 +1136,7 @@ function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artif
       setActionStatus("Draft close created");
       refreshReportState();
     },
-    onError: () => setActionStatus("Draft close blocked"),
+    onError: (error) => setActionStatus(formatApiError(error, "Draft close blocked")),
   });
   const finalCloseMutation = useMutation({
     mutationFn: finalizeMonthlyClose,
@@ -791,7 +1144,7 @@ function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artif
       setActionStatus("Final close finalized");
       refreshReportState();
     },
-    onError: () => setActionStatus("Final close blocked"),
+    onError: (error) => setActionStatus(formatApiError(error, "Final close blocked")),
   });
   const advisorExportMutation = useMutation({
     mutationFn: createAdvisorExport,
@@ -799,7 +1152,7 @@ function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artif
       setActionStatus("Advisor export created");
       refreshReportState();
     },
-    onError: () => setActionStatus("Advisor export blocked"),
+    onError: (error) => setActionStatus(formatApiError(error, "Advisor export blocked")),
   });
   const actionPending =
     runReportsMutation.isPending ||
@@ -929,7 +1282,7 @@ function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; pr
       queryClient.setQueryData(["settings"], body);
       void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
     },
-    onError: () => setConfirmationStatus("Source confirmation blocked"),
+    onError: (error) => setConfirmationStatus(formatApiError(error, "Source confirmation blocked")),
   });
 
   const settingMutation = useMutation({
@@ -940,7 +1293,7 @@ function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; pr
       queryClient.setQueryData(["settings"], body);
       void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
     },
-    onError: () => setSettingStatus("Setting save blocked"),
+    onError: (error) => setSettingStatus(formatApiError(error, "Setting save blocked")),
   });
 
   function saveEditableSetting(event: FormEvent<HTMLFormElement>) {
@@ -1173,6 +1526,10 @@ function affectedReports(finding: ValidationFinding) {
 
 function hasDecisionHistory(transaction: TransactionDetail | Transaction | null): transaction is TransactionDetail {
   return Boolean(transaction && "decision_history" in transaction);
+}
+
+function hasImportedFacts(transaction: TransactionDetail | Transaction | null): transaction is TransactionDetail {
+  return Boolean(transaction && "imported_facts" in transaction);
 }
 
 function formatStatus(status: string) {
