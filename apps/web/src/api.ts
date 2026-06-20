@@ -71,9 +71,10 @@ export function scanInbox() {
   return apiJson<InboxScan>("/api/inbox/scan");
 }
 
-export function uploadSourceFile(file: File) {
+export function uploadSourceFile(payload: { file: File; sourceKey: string }) {
   const body = new FormData();
-  body.append("file", file);
+  body.append("file", payload.file);
+  body.append("source_key", payload.sourceKey);
   return apiJson<InboxScan>("/api/uploads", {
     method: "POST",
     body,
@@ -95,8 +96,31 @@ export function acceptImportBatch(batchId: string) {
   });
 }
 
+export function voidImportBatch(payload: { batchId: string; reason: string; destroyFiles: boolean }) {
+  return apiJson<{ import_batch: ImportBatch }>(`/api/import-batches/${payload.batchId}/void`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: "mason",
+      reason: payload.reason,
+      destroy_files: payload.destroyFiles,
+    }),
+  });
+}
+
 export function fetchValidationFindings() {
   return apiJson<{ findings: ValidationFinding[] }>("/api/validation-findings");
+}
+
+export function resolveValidationFinding(payload: { findingId: string; note: string }) {
+  return apiJson<{ finding: ValidationFinding; event?: unknown }>(`/api/validation-findings/${payload.findingId}/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: "mason",
+      note: payload.note.trim(),
+    }),
+  });
 }
 
 export function fetchTransactions() {
@@ -122,6 +146,29 @@ export function saveCategoryDecision(payload: {
       field_name: "category",
       proposed_value: payload.approvedCategory,
       approved_value: payload.approvedCategory,
+      actor: "mason",
+      suggestion_source: "owner",
+      explicit_user_action: true,
+      notes: payload.notes?.trim() || null,
+    }),
+  });
+}
+
+export function saveReviewStatusDecision(payload: {
+  transactionId: string;
+  approvedStatus: "reviewed";
+  notes?: string;
+}) {
+  return apiJson<DecisionEventResponse>("/api/decision-events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target_type: "canonical_transaction",
+      target_id: payload.transactionId,
+      decision_type: "review_status_change",
+      field_name: "review_status",
+      proposed_value: payload.approvedStatus,
+      approved_value: payload.approvedStatus,
       actor: "mason",
       suggestion_source: "owner",
       explicit_user_action: true,

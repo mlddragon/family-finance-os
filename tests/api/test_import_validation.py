@@ -10,12 +10,20 @@ from sqlalchemy.orm import sessionmaker
 from dillon_finances.database import create_sqlite_engine
 from dillon_finances.import_validation import VALIDATION_CODES
 from dillon_finances.main import create_app
-from dillon_finances.models import SourceFile
+from dillon_finances.models import (
+    ImportedRow,
+    ImportBatch,
+    ImportBatchEvent,
+    SourceFile,
+    ValidationFinding,
+    ValidationFindingEvent,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures" / "synthetic"
 CHASE_HEADER = "Transaction Date,Post Date,Description,Category,Amount\n"
+CHASE_REAL_EXPORT_HEADER = "Transaction Date,Post Date,Description,Category,Type,Amount,Memo\n"
 
 
 def fresh_chase_row(amount: str = "12.34") -> str:
@@ -24,6 +32,15 @@ def fresh_chase_row(amount: str = "12.34") -> str:
     return (
         f"{transaction_date.isoformat()},{post_date.isoformat()},"
         f"SYNTHETIC GROCERY,Food,{amount}\n"
+    )
+
+
+def fresh_chase_real_export_row(description: str, category: str, transaction_type: str, amount: str) -> str:
+    transaction_date = date.today() - timedelta(days=1)
+    post_date = date.today()
+    return (
+        f"{transaction_date.strftime('%m/%d/%Y')},{post_date.strftime('%m/%d/%Y')},"
+        f"{description},{category},{transaction_type},{amount},\n"
     )
 
 
@@ -75,12 +92,14 @@ def test_validation_code_registry_covers_pr5_required_codes():
         "file_missing",
         "file_unreadable",
         "file_empty",
+        "file_integrity_mismatch",
         "file_not_regular",
         "unsafe_filename",
         "unsupported_file_type",
         "schema_mismatch",
         "ambiguous_source",
         "source_account_unconfirmed",
+        "storage_path_unsafe",
         "date_parse_failed",
         "amount_parse_failed",
         "amount_precision_invalid",
@@ -147,6 +166,232 @@ def test_blocking_validation_prevents_accept_and_quarantines_file(tmp_path):
     assert reason_files
 
 
+def test_void_import_batch_preserves_files_and_resolves_batch_findings(tmp_path):
+    inbox_file = write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_void_wrong_header.csv",
+        "Wrong,Header\n2026-06-01,12.34\n",
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        assert validate_response.status_code == 200
+        assert validate_response.json()["findings"][0]["code"] == "schema_mismatch"
+
+        void_response = client.post(
+            f"/api/import-batches/{batch_id}/void",
+            json={
+                "actor": "mason",
+                "reason": "Wrong source selected during upload",
+                "destroy_files": False,
+            },
+        )
+        validation_response = client.get("/api/validation-findings")
+        scan_again_response = client.post("/api/inbox/scan")
+
+    assert void_response.status_code == 200
+    body = void_response.json()
+    assert body["import_batch"]["status"] == "voided"
+    assert body["import_batch"]["validation_status"] == "voided"
+    assert body["import_batch"]["source_files"][0]["validation_status"] == "voided"
+    assert body["import_batch"]["source_files"][0]["storage_status"] == "preserved"
+    preserved_path = Path(body["import_batch"]["source_files"][0]["stored_path"])
+    assert not inbox_file.exists()
+    assert preserved_path.exists()
+    assert preserved_path.is_relative_to(tmp_path / "processed" / "voided")
+    assert [
+        finding
+        for finding in validation_response.json()["findings"]
+        if finding["target_id"] == batch_id and finding["status"] == "open"
+    ] == []
+    assert [batch["id"] for batch in scan_again_response.json()["import_batches"]] == []
+
+
+def test_void_import_batch_can_destroy_files_for_unaccepted_upload(tmp_path):
+    inbox_file = write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_destroy_wrong_header.csv",
+        "Wrong,Header\n2026-06-01,12.34\n",
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        client.post(f"/api/import-batches/{batch_id}/validate")
+        void_response = client.post(
+            f"/api/import-batches/{batch_id}/void",
+            json={
+                "actor": "mason",
+                "reason": "Uploaded the wrong export file",
+                "destroy_files": True,
+            },
+        )
+
+    assert void_response.status_code == 200
+    body = void_response.json()
+    source_file_body = body["import_batch"]["source_files"][0]
+    assert source_file_body["storage_status"] == "destroyed"
+    assert source_file_body["destroyed_at"]
+    assert source_file_body["destroyed_by"] == "mason"
+    assert source_file_body["destroyed_reason"] == "Uploaded the wrong export file"
+    assert not inbox_file.exists()
+    assert not Path(source_file_body["stored_path"]).exists()
+
+    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        source_file = session.scalar(select(SourceFile).where(SourceFile.import_batch_id == batch_id))
+        event = session.scalar(
+            select(ImportBatchEvent).where(
+                ImportBatchEvent.import_batch_id == batch_id,
+                ImportBatchEvent.event_type == "files_destroyed",
+            )
+        )
+        assert source_file is not None
+        assert source_file.storage_status == "destroyed"
+        assert source_file.destroyed_by == "mason"
+        assert event is not None
+
+
+def test_voided_destroyed_import_batch_cannot_be_revalidated(tmp_path):
+    write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_voided_destroyed_wrong_header.csv",
+        "Wrong,Header\n2026-06-01,12.34\n",
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        client.post(f"/api/import-batches/{batch_id}/validate")
+        void_response = client.post(
+            f"/api/import-batches/{batch_id}/void",
+            json={
+                "actor": "mason",
+                "reason": "Wrong source selected during upload",
+                "destroy_files": True,
+            },
+        )
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        findings_response = client.get("/api/validation-findings")
+
+    assert void_response.status_code == 200
+    assert void_response.json()["import_batch"]["status"] == "voided"
+    assert validate_response.status_code == 409
+    assert validate_response.json()["detail"]["code"] == "voided_import_validation_blocked"
+    assert [
+        finding
+        for finding in findings_response.json()["findings"]
+        if finding["target_id"] == batch_id and finding["status"] == "open"
+    ] == []
+
+    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        batch = session.get(ImportBatch, batch_id)
+        source_file = session.scalar(select(SourceFile).where(SourceFile.import_batch_id == batch_id))
+        assert batch is not None
+        assert source_file is not None
+        assert batch.status == "voided"
+        assert batch.validation_status == "voided"
+        assert source_file.validation_status == "voided"
+        assert source_file.storage_status == "destroyed"
+
+
+def test_revoid_does_not_delete_reuploaded_same_filename(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    filename = "History-061926-011648.csv"
+    content = (
+        "Date,Description,Amount,Balance\n"
+        "06/18/2026,SYNTHETIC FIRST UPLOAD,$12.34,$100.00\n"
+    )
+    replacement_content = (
+        "Date,Description,Amount,Balance\n"
+        "06/19/2026,SYNTHETIC SECOND UPLOAD,$45.67,$145.67\n"
+    )
+
+    with TestClient(app) as client:
+        first_upload = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_checking"},
+            files={"file": (filename, content.encode(), "text/csv")},
+        )
+        assert first_upload.status_code == 200
+        first_batch_id = first_upload.json()["import_batch"]["id"]
+        first_stored_path = first_upload.json()["import_batch"]["source_files"][0]["stored_path"]
+
+        void_response = client.post(
+            f"/api/import-batches/{first_batch_id}/void",
+            json={
+                "actor": "mason",
+                "reason": "Wrong source selected during upload",
+                "destroy_files": True,
+            },
+        )
+        assert void_response.status_code == 200
+
+        second_upload = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_checking"},
+            files={"file": (filename, replacement_content.encode(), "text/csv")},
+        )
+        assert second_upload.status_code == 200
+        second_batch_id = second_upload.json()["import_batch"]["id"]
+        second_stored_path = second_upload.json()["import_batch"]["source_files"][0]["stored_path"]
+
+        revoid_response = client.post(
+            f"/api/import-batches/{first_batch_id}/void",
+            json={
+                "actor": "mason",
+                "reason": "Repeat void should not touch replacement upload",
+                "destroy_files": True,
+            },
+        )
+        validate_second = client.post(f"/api/import-batches/{second_batch_id}/validate")
+
+    assert first_stored_path != second_stored_path
+    assert revoid_response.status_code == 200
+    assert revoid_response.json()["import_batch"]["status"] == "voided"
+    assert validate_second.status_code == 200
+    assert validate_second.json()["findings"] == []
+
+
+def test_void_import_batch_rejects_accepted_batches(tmp_path):
+    write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_accepted_cannot_void.csv",
+        CHASE_HEADER + fresh_chase_row(),
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        accepted = accept_latest_batch(client)
+        response = client.post(
+            f"/api/import-batches/{accepted['id']}/void",
+            json={
+                "actor": "mason",
+                "reason": "Test accepted protection",
+                "destroy_files": True,
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "accepted_import_void_blocked"
+
+    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        batch = session.get(ImportBatch, accepted["id"])
+        source_file = session.scalar(select(SourceFile).where(SourceFile.import_batch_id == accepted["id"]))
+        assert batch is not None
+        assert source_file is not None
+        assert batch.status == "accepted"
+        assert source_file.storage_status == "present"
+        assert Path(source_file.stored_path).exists()
+
+
 def test_warnings_require_acknowledgment_before_accept(tmp_path):
     content = CHASE_HEADER + fresh_chase_row()
     write_inbox_file(tmp_path, "SYNTHETIC_chase_prime_visa_one.csv", content)
@@ -188,6 +433,171 @@ def test_upload_rejects_unsupported_file_type(tmp_path):
 
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "unsupported_file_type"
+
+
+def test_upload_source_hint_disambiguates_alliant_checking_and_savings_headers(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    content = (
+        "Date,Description,Amount,Balance\n"
+        f"{(date.today() - timedelta(days=1)).isoformat()},SYNTHETIC ALLIANT SAVINGS INTEREST,25.00,10025.00\n"
+    )
+
+    with TestClient(app) as client:
+        upload_response = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_savings"},
+            files={"file": ("History-061926-011955.csv", content.encode(), "text/csv")},
+        )
+        assert upload_response.status_code == 200
+        batch_id = upload_response.json()["import_batch"]["id"]
+
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+
+    assert validate_response.status_code == 200
+    body = validate_response.json()
+    assert body["source_key"] == "alliant_savings"
+    assert body["findings"] == []
+
+
+def test_upload_rejects_source_hint_when_headers_do_not_match_profile(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    content = CHASE_HEADER + fresh_chase_row()
+
+    with TestClient(app) as client:
+        upload_response = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_savings"},
+            files={"file": ("SYNTHETIC_chase_prime_visa.csv", content.encode(), "text/csv")},
+        )
+        assert upload_response.status_code == 200
+        batch_id = upload_response.json()["import_batch"]["id"]
+
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+
+    assert validate_response.status_code == 200
+    assert validate_response.json()["findings"][0]["code"] == "schema_mismatch"
+
+
+def test_real_alliant_credit_card_header_profile_validates(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    content = (
+        "Date,Description,Amount,Balance,Post Date\n"
+        f"{(date.today() - timedelta(days=1)).isoformat()},SYNTHETIC ALLIANT CARD GROCERY,84.25,915.75,{date.today().isoformat()}\n"
+    )
+
+    with TestClient(app) as client:
+        upload_response = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_credit_card"},
+            files={"file": ("History-061926-012007.csv", content.encode(), "text/csv")},
+        )
+        assert upload_response.status_code == 200
+        batch_id = upload_response.json()["import_batch"]["id"]
+
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+
+    assert validate_response.status_code == 200
+    body = validate_response.json()
+    assert body["source_key"] == "alliant_credit_card"
+    assert body["findings"] == []
+
+
+def test_alliant_export_money_and_us_dates_validate_and_accept(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    content = (
+        "Date,Description,Amount,Balance\n"
+        '06/18/2026,SYNTHETIC ALLIANT DEPOSIT,"$1,234.56","$2,345.67"\n'
+        '06/19/2026,SYNTHETIC ALLIANT WITHDRAWAL,($45.67),"$2,300.00"\n'
+    )
+
+    with TestClient(app) as client:
+        upload_response = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_checking"},
+            files={"file": ("History-061926-011648.csv", content.encode(), "text/csv")},
+        )
+        assert upload_response.status_code == 200
+        batch_id = upload_response.json()["import_batch"]["id"]
+
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+        transactions_response = client.get("/api/transactions")
+
+    assert validate_response.status_code == 200
+    assert validate_response.json()["findings"] == []
+    assert accept_response.status_code == 200
+    assert accept_response.json()["status"] == "accepted"
+    transactions = transactions_response.json()["transactions"]
+    assert len(transactions) == 2
+    assert {transaction["posted_date"] for transaction in transactions} == {"2026-06-18", "2026-06-19"}
+    assert {transaction["amount"] for transaction in transactions} == {"1234.56", "-45.67"}
+
+
+def test_alliant_credit_card_export_money_and_us_dates_validate_and_accept(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    content = (
+        "Date,Description,Amount,Balance,Post Date\n"
+        "06/18/2026,SYNTHETIC ALLIANT CARD CHARGE,$45.67,$100.00,06/19/2026\n"
+        "06/19/2026,SYNTHETIC ALLIANT CARD PAYMENT,($123.45),$0.00,06/20/2026\n"
+    )
+
+    with TestClient(app) as client:
+        upload_response = client.post(
+            "/api/uploads",
+            data={"source_key": "alliant_credit_card"},
+            files={"file": ("History-061926-012007.csv", content.encode(), "text/csv")},
+        )
+        assert upload_response.status_code == 200
+        batch_id = upload_response.json()["import_batch"]["id"]
+
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+        transactions_response = client.get("/api/transactions")
+
+    assert validate_response.status_code == 200
+    assert validate_response.json()["findings"] == []
+    assert accept_response.status_code == 200
+    assert accept_response.json()["status"] == "accepted"
+    transactions = transactions_response.json()["transactions"]
+    assert len(transactions) == 2
+    assert {transaction["posted_date"] for transaction in transactions} == {"2026-06-19", "2026-06-20"}
+    assert {transaction["amount"] for transaction in transactions} == {"45.67", "-123.45"}
+
+
+def test_real_chase_export_with_type_and_memo_validates_and_keeps_credit_card_directions(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    content = (
+        CHASE_REAL_EXPORT_HEADER
+        + fresh_chase_real_export_row("SYNTHETIC CHASE CARD CHARGE", "Shopping", "Sale", "-45.67")
+        + fresh_chase_real_export_row("SYNTHETIC CHASE CARD PAYMENT", "Payment", "Payment", "123.45")
+    )
+
+    with TestClient(app) as client:
+        upload_response = client.post(
+            "/api/uploads",
+            data={"source_key": "chase_prime_visa"},
+            files={"file": ("Chase9789_Activity20260520_20260619_20260619.CSV", content.encode(), "text/csv")},
+        )
+        assert upload_response.status_code == 200
+        batch_id = upload_response.json()["import_batch"]["id"]
+
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+
+    assert validate_response.status_code == 200
+    assert validate_response.json()["source_key"] == "chase_prime_visa"
+    assert validate_response.json()["findings"] == []
+    assert accept_response.status_code == 200
+
+    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        rows = session.scalars(select(ImportedRow).order_by(ImportedRow.raw_description)).all()
+
+    assert [(row.raw_description, str(row.amount), row.direction) for row in rows] == [
+        ("SYNTHETIC CHASE CARD CHARGE", "-45.67", "outflow"),
+        ("SYNTHETIC CHASE CARD PAYMENT", "123.45", "inflow"),
+    ]
 
 
 def test_upload_rejects_path_like_filename_without_writing_outside_inbox(tmp_path):
@@ -281,6 +691,101 @@ def test_validation_blocks_source_file_replaced_by_symlink_after_scan(tmp_path):
     assert response.json()["findings"][0]["code"] == "file_not_regular"
 
 
+def test_validation_blocks_source_file_content_changed_after_scan(tmp_path):
+    inbox_file = write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_chase_prime_visa.csv",
+        CHASE_HEADER + fresh_chase_row("12.34"),
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        inbox_file.write_text(CHASE_HEADER + fresh_chase_row("45.67"))
+
+        response = client.post(f"/api/import-batches/{batch_id}/validate")
+
+    assert response.status_code == 200
+    assert response.json()["findings"][0]["severity"] == "blocking"
+    assert response.json()["findings"][0]["code"] == "file_integrity_mismatch"
+
+
+def test_accept_blocks_source_file_content_changed_after_validation(tmp_path):
+    inbox_file = write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_chase_prime_visa.csv",
+        CHASE_HEADER + fresh_chase_row("12.34"),
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        assert validate_response.status_code == 200
+        assert validate_response.json()["findings"] == []
+
+        inbox_file.write_text(CHASE_HEADER + fresh_chase_row("45.67"))
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+
+    assert accept_response.status_code == 409
+    assert accept_response.json()["detail"]["code"] == "file_integrity_mismatch"
+    assert inbox_file.exists()
+    assert not list((tmp_path / "raw").glob("**/SYNTHETIC_chase_prime_visa.csv"))
+
+
+def test_accept_blocks_raw_storage_directory_symlink_escape(tmp_path):
+    inbox_file = write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_chase_prime_visa.csv",
+        CHASE_HEADER + fresh_chase_row(),
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        assert validate_response.status_code == 200
+        year = (date.today() - timedelta(days=1)).isoformat()[:4]
+        outside_raw_dir = tmp_path.parent / f"{batch_id}_outside_raw"
+        outside_raw_dir.mkdir()
+        raw_batch_dir = tmp_path / "raw" / "chase_prime_visa" / year / batch_id
+        raw_batch_dir.parent.mkdir(parents=True, exist_ok=True)
+        raw_batch_dir.symlink_to(outside_raw_dir, target_is_directory=True)
+
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+
+    assert accept_response.status_code == 409
+    assert accept_response.json()["detail"]["code"] == "storage_path_unsafe"
+    assert inbox_file.exists()
+    assert list(outside_raw_dir.iterdir()) == []
+
+
+def test_quarantine_blocks_storage_directory_symlink_escape(tmp_path):
+    inbox_file = write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_chase_wrong_header.csv",
+        "Wrong,Header\n2026-06-01,12.34\n",
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        assert validate_response.status_code == 200
+        outside_quarantine_dir = tmp_path.parent / f"{batch_id}_outside_quarantine"
+        outside_quarantine_dir.mkdir()
+        quarantine_batch_dir = tmp_path / "quarantine" / batch_id
+        quarantine_batch_dir.parent.mkdir(parents=True, exist_ok=True)
+        quarantine_batch_dir.symlink_to(outside_quarantine_dir, target_is_directory=True)
+
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+
+    assert accept_response.status_code == 409
+    assert accept_response.json()["detail"]["code"] == "storage_path_unsafe"
+    assert inbox_file.exists()
+    assert list(outside_quarantine_dir.iterdir()) == []
+
+
 def test_validation_findings_endpoint_lists_current_findings(tmp_path):
     write_inbox_file(
         tmp_path,
@@ -296,6 +801,86 @@ def test_validation_findings_endpoint_lists_current_findings(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["findings"][0]["code"] == "amount_parse_failed"
+
+
+def test_warning_validation_finding_can_be_acknowledged_with_audit_event(tmp_path):
+    write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_stale_for_acknowledgment.csv",
+        CHASE_HEADER + stale_chase_row(),
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        finding_id = validate_response.json()["findings"][0]["id"]
+
+        resolve_response = client.post(
+            f"/api/validation-findings/{finding_id}/resolve",
+            json={"actor": "mason", "note": "Acknowledged stale source while testing upload flow."},
+        )
+        findings_response = client.get("/api/validation-findings")
+
+    assert resolve_response.status_code == 200
+    resolved_finding = resolve_response.json()["finding"]
+    assert resolved_finding["id"] == finding_id
+    assert resolved_finding["status"] == "resolved"
+
+    stale_findings = [
+        finding
+        for finding in findings_response.json()["findings"]
+        if finding["id"] == finding_id
+    ]
+    assert stale_findings[0]["status"] == "resolved"
+
+    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        finding = session.get(ValidationFinding, finding_id)
+        event = session.scalar(
+            select(ValidationFindingEvent).where(ValidationFindingEvent.validation_finding_id == finding_id)
+        )
+
+    assert finding is not None
+    assert event is not None
+    assert finding.resolution_event_id == event.id
+    assert event.actor == "mason"
+    assert event.notes == "Acknowledged stale source while testing upload flow."
+
+
+def test_active_blocking_validation_finding_cannot_be_acknowledged_or_used_to_bypass_accept(tmp_path):
+    write_inbox_file(
+        tmp_path,
+        "SYNTHETIC_blocked_for_acknowledgment.csv",
+        "Wrong,Header\n2026-06-01,12.34\n",
+    )
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
+        validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
+        finding_id = validate_response.json()["findings"][0]["id"]
+
+        resolve_response = client.post(
+            f"/api/validation-findings/{finding_id}/resolve",
+            json={"actor": "mason", "note": "Do not hide active blockers."},
+        )
+
+        engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+        Session = sessionmaker(bind=engine)
+        with Session() as session:
+            finding = session.get(ValidationFinding, finding_id)
+            assert finding is not None
+            finding.status = "resolved"
+            session.commit()
+
+        accept_response = client.post(f"/api/import-batches/{batch_id}/accept")
+
+    assert resolve_response.status_code == 409
+    assert resolve_response.json()["detail"]["code"] == "active_blocking_validation_finding"
+    assert accept_response.status_code == 409
+    assert accept_response.json()["detail"]["code"] == "blocking_validation_findings"
 
 
 def test_missing_file_creates_blocking_finding(tmp_path):
@@ -495,6 +1080,39 @@ def test_missing_required_sources_are_first_class_validation_findings_and_resolv
         for finding in resolved_response.json()["findings"]
         if finding["status"] == "open" and finding["code"] == "required_source_missing"
     ] == []
+
+
+def test_missing_required_source_findings_resolve_duplicate_open_warnings(tmp_path):
+    write_rendered_fixture(tmp_path, "v1_valid_chase_prime_visa.csv")
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        accept_latest_batch(client)
+        engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+        Session = sessionmaker(bind=engine)
+        with Session() as session:
+            for _ in range(2):
+                session.add(
+                    ValidationFinding(
+                        severity="warning",
+                        code="required_source_missing",
+                        message="Required source alliant_checking has not been accepted for the current close cycle.",
+                        target_type="source",
+                        target_id="alliant_checking",
+                        status="open",
+                    )
+                )
+            session.commit()
+
+        response = client.get("/api/validation-findings")
+
+    assert response.status_code == 200
+    open_missing_by_source = [
+        finding["target_id"]
+        for finding in response.json()["findings"]
+        if finding["status"] == "open" and finding["code"] == "required_source_missing"
+    ]
+    assert open_missing_by_source.count("alliant_checking") == 1
 
 
 def test_duplicate_file_hash_warns_without_silent_dedupe(tmp_path):
