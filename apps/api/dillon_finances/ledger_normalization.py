@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from dillon_finances.decision_events import derive_decision_state, decision_history
+from dillon_finances.ledger_parsing import decimal_string, parse_ledger_date, parse_money
 from dillon_finances.models import (
     CanonicalTransaction,
     ImportBatch,
@@ -20,6 +21,7 @@ from dillon_finances.models import (
     SourceFile,
     ValidationFinding,
 )
+from dillon_finances.source_profiles import get_source_profile
 
 
 @dataclass(frozen=True)
@@ -43,21 +45,28 @@ def _stable_sha256(payload: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _decimal_string(value: str) -> str:
-    return f"{Decimal(value):.2f}"
-
-
 def _description_fingerprint(description: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", " ", description.lower()).strip()
     return re.sub(r"\s+", " ", normalized)
 
 
-def _direction(amount: Decimal, account_type: str) -> str:
+def _direction(amount: Decimal, account_type: str, amount_sign_policy: str) -> str:
     if amount == 0:
         return "neutral"
     if account_type == "credit_card":
+        if amount_sign_policy == "charges_negative_payments_positive":
+            return "outflow" if amount < 0 else "inflow"
         return "outflow" if amount > 0 else "inflow"
     return "inflow" if amount > 0 else "outflow"
+
+
+def _amount_sign_policy(source_file: SourceFile) -> str:
+    if source_file.source is not None:
+        try:
+            return get_source_profile(source_file.source.source_key).amount_sign_policy
+        except KeyError:
+            pass
+    return "charges_positive_payments_negative" if source_file.source_account and source_file.source_account.account_type == "credit_card" else "debits_negative_credits_positive"
 
 
 def imported_row_hash(row: NormalizedLedgerRow) -> str:
@@ -115,25 +124,28 @@ def parse_source_file(source_file: SourceFile) -> list[NormalizedLedgerRow]:
         return []
 
     account_type = source_file.source_account.account_type
+    amount_sign_policy = _amount_sign_policy(source_file)
     parser_version = source_file.parser_version or "unknown"
     normalized_rows: list[NormalizedLedgerRow] = []
     for row_number, row in enumerate(_read_csv(Path(source_file.stored_path)), start=2):
         transaction_date = _first_present(row, "Transaction Date", "Date")
         post_date = _first_present(row, "Post Date", "Date", "Transaction Date")
         raw_amount = _first_present(row, "Amount") or "0"
-        amount = Decimal(raw_amount)
+        amount = parse_money(raw_amount)
         raw_description = _first_present(row, "Description", "Memo", "Merchant") or ""
         balance = _first_present(row, "Balance")
+        posted_date = parse_ledger_date(post_date or transaction_date or "").isoformat()
+        effective_date = parse_ledger_date(transaction_date).isoformat() if transaction_date else None
         normalized_rows.append(
             NormalizedLedgerRow(
                 source_row_number=row_number,
-                posted_date=post_date or transaction_date or "",
-                effective_date=transaction_date,
+                posted_date=posted_date,
+                effective_date=effective_date,
                 raw_description=raw_description,
                 normalized_merchant=_description_fingerprint(raw_description) or None,
-                amount=_decimal_string(raw_amount),
-                direction=_direction(amount, account_type),
-                balance=_decimal_string(balance) if balance is not None else None,
+                amount=decimal_string(amount),
+                direction=_direction(amount, account_type, amount_sign_policy),
+                balance=decimal_string(parse_money(balance)) if balance is not None else None,
                 initial_category=_first_present(row, "Category"),
                 initial_subcategory=_first_present(row, "Subcategory"),
                 source_transaction_id=_first_present(
@@ -300,7 +312,7 @@ def _imported_fact_payload(imported_row: ImportedRow) -> dict[str, Any]:
         "effective_date": imported_row.effective_date,
         "raw_description": imported_row.raw_description,
         "normalized_merchant": imported_row.normalized_merchant,
-        "amount": _decimal_string(str(imported_row.amount)),
+        "amount": decimal_string(Decimal(str(imported_row.amount))),
         "direction": imported_row.direction,
         "initial_category": imported_row.initial_category,
         "initial_subcategory": imported_row.initial_subcategory,
@@ -330,7 +342,7 @@ def serialize_transaction(
         "id": canonical.id,
         "canonical_identity": canonical.canonical_identity,
         "posted_date": canonical.posted_date,
-        "amount": _decimal_string(str(canonical.amount)),
+        "amount": decimal_string(Decimal(str(canonical.amount))),
         "description_fingerprint": canonical.description_fingerprint,
         "status": canonical.status,
         "validation_status": _transaction_validation_status(canonical),

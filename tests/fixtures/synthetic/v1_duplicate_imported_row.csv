@@ -1,0 +1,2 @@
+Transaction Date,Post Date,Description,Category,Amount
+{{FRESH_DATE}},{{FRESH_POST_DATE}},SYNTHETIC DUPLICATE ROW,Household,12.34
