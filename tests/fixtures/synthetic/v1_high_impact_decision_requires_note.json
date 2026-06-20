@@ -1,0 +1,6 @@
+{
+  "scenario": "SYNTHETIC high-impact decision requires an owner note",
+  "decision_type": "medical_tax_candidate_status",
+  "field_name": "medical_tax_status",
+  "approved_value": "candidate"
+}
