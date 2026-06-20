@@ -3,23 +3,44 @@ from pathlib import Path
 import os
 from typing import Any, AsyncIterator, Dict, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from dillon_finances import __version__
 from dillon_finances.database import create_sqlite_engine, upgrade_database
+from dillon_finances.decision_events import (
+    DecisionEventError,
+    DecisionEventRequest,
+    create_decision_event,
+)
 from dillon_finances.import_validation import (
     ImportValidationError,
     accept_import_batch,
     list_validation_findings,
+    refresh_source_coverage_findings,
+    resolve_validation_finding,
     save_upload,
     scan_inbox,
     serialize_import_batch,
     validate_import_batch,
+    void_import_batch,
+)
+from dillon_finances.ledger_normalization import get_transaction, list_transactions
+from dillon_finances.operator_summary import operator_summary_payload
+from dillon_finances.reporting import (
+    AdvisorExportRequest,
+    MonthlyCloseRequest,
+    ReportRunRequest,
+    ReportingError,
+    artifact_download_path,
+    create_advisor_export,
+    create_monthly_close,
+    list_artifacts,
+    run_reports,
 )
 from dillon_finances.runtime import bootstrap_data_root
 from dillon_finances.settings_service import (
@@ -38,6 +59,17 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 class AcceptImportBatchRequest(BaseModel):
     acknowledge_warnings: bool = False
+
+
+class VoidImportBatchRequest(BaseModel):
+    actor: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    destroy_files: bool = False
+
+
+class ResolveValidationFindingRequest(BaseModel):
+    actor: str = Field(min_length=1)
+    note: str = Field(min_length=1)
 
 
 def _default_data_root() -> Path:
@@ -116,6 +148,13 @@ def create_app(
     def status() -> Dict[str, Any]:
         return status_payload()
 
+    @app.get("/api/operator-summary")
+    def operator_summary() -> Dict[str, Any]:
+        with create_session() as session:
+            refresh_source_coverage_findings(session)
+            session.commit()
+            return operator_summary_payload(session, runtime=status_payload())
+
     def import_validation_http_error(exc: ImportValidationError) -> HTTPException:
         return HTTPException(
             status_code=exc.status_code,
@@ -143,13 +182,16 @@ def create_app(
             }
 
     @app.post("/api/uploads")
-    async def upload_source_file(file: UploadFile = File(...)) -> Dict[str, Any]:
+    async def upload_source_file(
+        file: UploadFile = File(...),
+        source_key: Optional[str] = Form(default=None),
+    ) -> Dict[str, Any]:
         active_data_root = get_data_root()
         filename = file.filename or "uploaded-file"
         content = await file.read()
         with create_session() as session:
             try:
-                batch = save_upload(session, active_data_root, filename, content)
+                batch = save_upload(session, active_data_root, filename, content, source_key_hint=source_key)
                 return {"import_batch": serialize_import_batch(batch)}
             except ImportValidationError as exc:
                 raise import_validation_http_error(exc) from exc
@@ -180,10 +222,66 @@ def create_app(
             except ImportValidationError as exc:
                 raise import_validation_http_error(exc) from exc
 
+    @app.post("/api/import-batches/{batch_id}/void")
+    def void_batch(batch_id: str, payload: VoidImportBatchRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            try:
+                return void_import_batch(
+                    session,
+                    active_data_root,
+                    batch_id,
+                    actor=payload.actor,
+                    reason=payload.reason,
+                    destroy_files=payload.destroy_files,
+                )
+            except ImportValidationError as exc:
+                raise import_validation_http_error(exc) from exc
+
     @app.get("/api/validation-findings")
     def get_validation_findings() -> Dict[str, Any]:
         with create_session() as session:
             return {"findings": list_validation_findings(session)}
+
+    @app.post("/api/validation-findings/{finding_id}/resolve")
+    def resolve_finding(finding_id: str, payload: ResolveValidationFindingRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return resolve_validation_finding(
+                    session,
+                    finding_id,
+                    actor=payload.actor,
+                    note=payload.note,
+                )
+            except ImportValidationError as exc:
+                raise import_validation_http_error(exc) from exc
+
+    @app.get("/api/transactions")
+    def get_transactions() -> Dict[str, Any]:
+        with create_session() as session:
+            return {"transactions": list_transactions(session)}
+
+    @app.get("/api/transactions/{transaction_id}")
+    def get_transaction_detail(transaction_id: str) -> Dict[str, Any]:
+        with create_session() as session:
+            transaction = get_transaction(session, transaction_id)
+            if transaction is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"code": "transaction_not_found", "message": "Transaction not found"},
+                )
+            return {"transaction": transaction}
+
+    @app.post("/api/decision-events")
+    def post_decision_event(payload: DecisionEventRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return create_decision_event(session, payload)
+            except DecisionEventError as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={"code": exc.code, "message": exc.message},
+                ) from exc
 
     @app.get("/api/settings")
     def get_settings() -> Dict[str, Any]:
@@ -201,6 +299,8 @@ def create_app(
         with create_session() as session:
             try:
                 events = apply_settings_patch(session, payload)
+                refresh_source_coverage_findings(session)
+                session.commit()
                 return {
                     **settings_payload(
                         session,
@@ -215,13 +315,70 @@ def create_app(
                     detail=[{"code": exc.code, "message": exc.message}],
                 ) from exc
 
+    def reporting_http_error(exc: ReportingError) -> HTTPException:
+        return HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message, **exc.detail},
+        )
+
+    @app.post("/api/reports/run")
+    def post_reports_run(payload: ReportRunRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            try:
+                return run_reports(session, active_data_root, payload)
+            except ReportingError as exc:
+                raise reporting_http_error(exc) from exc
+
+    @app.post("/api/monthly-close/draft")
+    def post_monthly_close_draft(payload: MonthlyCloseRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            try:
+                return create_monthly_close(session, active_data_root, payload, status="draft")
+            except ReportingError as exc:
+                raise reporting_http_error(exc) from exc
+
+    @app.post("/api/monthly-close/finalize")
+    def post_monthly_close_finalize(payload: MonthlyCloseRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            try:
+                return create_monthly_close(session, active_data_root, payload, status="final")
+            except ReportingError as exc:
+                raise reporting_http_error(exc) from exc
+
+    @app.post("/api/exports/advisor")
+    def post_advisor_export(payload: AdvisorExportRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            try:
+                return create_advisor_export(session, active_data_root, payload)
+            except ReportingError as exc:
+                raise reporting_http_error(exc) from exc
+
+    @app.get("/api/artifacts")
+    def get_artifacts() -> Dict[str, Any]:
+        with create_session() as session:
+            return {"artifacts": list_artifacts(session)}
+
+    @app.get("/api/artifacts/{artifact_id}/download")
+    def download_artifact(artifact_id: str) -> FileResponse:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            try:
+                return FileResponse(artifact_download_path(session, active_data_root, artifact_id))
+            except ReportingError as exc:
+                raise reporting_http_error(exc) from exc
+
     if STATIC_DIR.exists():
         app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
 
         @app.get("/{full_path:path}")
         def serve_ui(full_path: str) -> FileResponse:
-            requested = STATIC_DIR / full_path
-            if full_path and requested.is_file():
+            static_root = STATIC_DIR.resolve()
+            requested = (STATIC_DIR / full_path).resolve()
+            if full_path and requested.is_relative_to(static_root) and requested.is_file():
                 return FileResponse(requested)
             return FileResponse(STATIC_DIR / "index.html")
 

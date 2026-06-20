@@ -28,6 +28,9 @@ jobs:
       - name: Run sensitive artifact scan
         run: python scripts/check_sensitive_artifacts.py .
 
+      - name: Run v1 security contract check
+        run: python scripts/check_v1_security_contract.py .
+
       - name: Run API and script tests
         run: pytest
 
@@ -43,9 +46,28 @@ jobs:
         working-directory: apps/web
         run: npm test
 
+      - name: Install browser test runtime
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser smoke tests
+        working-directory: apps/web
+        run: npm run test:e2e
+
       - name: Build web app
         working-directory: apps/web
         run: npm run build
 
       - name: Build Docker image
         run: docker build .
+
+      - name: Run Docker E2E closed loop
+        run: |
+          set -euo pipefail
+          DATA_ROOT="$(mktemp -d)"
+          mkdir -p "$DATA_ROOT"/{inbox,raw,processed,quarantine,database,reports,monthly_close,exports,logs}
+          chmod -R 0777 "$DATA_ROOT"
+          export DILLON_FINANCES_DATA_ROOT="$DATA_ROOT"
+          trap 'docker compose down >/dev/null 2>&1 || true; chmod -R 0777 "$DATA_ROOT" >/dev/null 2>&1 || true; rm -rf "$DATA_ROOT" >/dev/null 2>&1 || true' EXIT
+          docker compose up -d --build
+          python scripts/run_docker_e2e.py --base-url http://127.0.0.1:8080 --data-root "$DATA_ROOT"
