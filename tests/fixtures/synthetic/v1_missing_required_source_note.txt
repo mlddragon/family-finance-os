@@ -1,0 +1,1 @@
+SYNTHETIC scenario: omit one or more required source files and confirm final monthly close is blocked by missing required source coverage.

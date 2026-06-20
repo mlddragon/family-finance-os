@@ -1,0 +1,2 @@
+Transaction Date,Post Date,Description,Category,Amount
+not-a-date,{{FRESH_POST_DATE}},SYNTHETIC MALFORMED DATE,Household,12.34
