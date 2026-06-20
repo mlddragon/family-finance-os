@@ -80,13 +80,13 @@ def run_reports(session: Session, data_root: Path, request: ReportRunRequest) ->
     session.add_all([job, report_run])
     session.flush()
 
-    report_dir = data_root / "reports" / report_run.id
-    report_dir.mkdir(parents=True, exist_ok=True)
+    report_dir = ensure_safe_artifact_directory(data_root, data_root / "reports" / report_run.id)
     reports = _core_report_payloads(session, month=month, validation_summary=validation_summary)
     artifacts = [
         _write_json_artifact(
             session,
             report_dir / f"{artifact_type}.json",
+            data_root=data_root,
             artifact_type=artifact_type,
             payload=payload,
             job=job,
@@ -101,6 +101,7 @@ def run_reports(session: Session, data_root: Path, request: ReportRunRequest) ->
         _write_csv_artifact(
             session,
             report_dir / "reviewed_transactions_export.csv",
+            data_root=data_root,
             artifact_type="reviewed_transactions_export",
             rows=_reviewed_transaction_rows(session),
             job=job,
@@ -179,8 +180,10 @@ def create_monthly_close(
     session.add_all([job, monthly_close])
     session.flush()
 
-    bundle_dir = data_root / "monthly_close" / month / f"{status}-{monthly_close.id}"
-    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_dir = ensure_safe_artifact_directory(
+        data_root,
+        data_root / "monthly_close" / month / f"{status}-{monthly_close.id}",
+    )
     monthly_close.artifact_folder_path = str(bundle_dir)
     source_inputs = {
         "month": month,
@@ -193,6 +196,7 @@ def create_monthly_close(
     memo_artifact = _write_text_artifact(
         session,
         bundle_dir / "monthly_close_memo.md",
+        data_root=data_root,
         artifact_type="monthly_close_memo",
         text=_monthly_close_memo(month=month, status=status, validation_summary=validation_summary),
         job=job,
@@ -204,6 +208,7 @@ def create_monthly_close(
     settings_artifact = _write_json_artifact(
         session,
         bundle_dir / "settings_snapshot.json",
+        data_root=data_root,
         artifact_type="settings_snapshot",
         payload={"month": month, "settings": list_settings(session)},
         job=job,
@@ -215,6 +220,7 @@ def create_monthly_close(
     decision_artifact = _write_json_artifact(
         session,
         bundle_dir / "decision_events.json",
+        data_root=data_root,
         artifact_type="decision_event_export",
         payload={"month": month, "decision_events": _decision_event_rows(session)},
         job=job,
@@ -240,6 +246,7 @@ def create_monthly_close(
     manifest_artifact = _write_json_artifact(
         session,
         bundle_dir / "manifest.json",
+        data_root=data_root,
         artifact_type="monthly_close_manifest",
         payload=manifest_payload,
         job=job,
@@ -282,12 +289,12 @@ def create_advisor_export(session: Session, data_root: Path, request: AdvisorExp
     )
     session.add(job)
     session.flush()
-    export_dir = data_root / "exports" / "advisor" / job.id
-    export_dir.mkdir(parents=True, exist_ok=True)
+    export_dir = ensure_safe_artifact_directory(data_root, data_root / "exports" / "advisor" / job.id)
 
     summary_artifact = _write_json_artifact(
         session,
         export_dir / "advisor_summary.json",
+        data_root=data_root,
         artifact_type="advisor_summary",
         payload={
             "month": month,
@@ -305,6 +312,7 @@ def create_advisor_export(session: Session, data_root: Path, request: AdvisorExp
     transactions_artifact = _write_csv_artifact(
         session,
         export_dir / "advisor_transactions.csv",
+        data_root=data_root,
         artifact_type="advisor_transactions_export",
         rows=_reviewed_transaction_rows(session),
         job=job,
@@ -335,17 +343,75 @@ def list_artifacts(session: Session) -> list[dict[str, Any]]:
     return [serialize_artifact(artifact) for artifact in artifacts]
 
 
+def ensure_safe_artifact_directory(data_root: Path, directory: Path) -> Path:
+    resolved_data_root = data_root.resolve()
+    try:
+        relative_parts = directory.relative_to(data_root).parts
+    except ValueError as exc:
+        raise ReportingError(
+            "artifact_storage_path_unsafe",
+            "Artifact storage path must be inside DATA_ROOT.",
+            status_code=409,
+        ) from exc
+
+    current = data_root
+    for part in relative_parts[:-1]:
+        current = current / part
+        if current.is_symlink() or (current.exists() and not current.is_dir()):
+            raise ReportingError(
+                "artifact_storage_path_unsafe",
+                "Artifact storage path must be a safe directory inside DATA_ROOT.",
+                status_code=409,
+            )
+        current.mkdir(exist_ok=True)
+        if not current.resolve().is_relative_to(resolved_data_root):
+            raise ReportingError(
+                "artifact_storage_path_unsafe",
+                "Artifact storage path must stay inside DATA_ROOT.",
+                status_code=409,
+            )
+
+    if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+        raise ReportingError(
+            "artifact_storage_path_unsafe",
+            "Artifact storage path must be a safe directory inside DATA_ROOT.",
+            status_code=409,
+        )
+    directory.mkdir(exist_ok=True)
+    if directory.is_symlink() or not directory.resolve().is_relative_to(resolved_data_root):
+        raise ReportingError(
+            "artifact_storage_path_unsafe",
+            "Artifact storage path must stay inside DATA_ROOT.",
+            status_code=409,
+        )
+    return directory
+
+
 def artifact_download_path(session: Session, data_root: Path, artifact_id: str) -> Path:
     artifact = session.get(Artifact, artifact_id)
     if artifact is None:
         raise ReportingError("artifact_not_found", "Artifact not found.", status_code=404)
-    path = Path(artifact.path).resolve()
+    registered_path = Path(artifact.path)
+    path = registered_path.resolve()
     data_root_resolved = data_root.resolve()
     if not path.is_relative_to(data_root_resolved):
         raise ReportingError("artifact_path_outside_data_root", "Artifact path is outside DATA_ROOT.", status_code=409)
-    if not path.exists():
+    if not registered_path.exists():
         raise ReportingError("artifact_file_missing", "Artifact file is missing.", status_code=404)
-    return path
+    if registered_path.is_symlink() or not registered_path.is_file():
+        raise ReportingError(
+            "artifact_file_not_regular",
+            "Artifact path must be a regular file at the registered location.",
+            status_code=409,
+        )
+    content = registered_path.read_bytes()
+    if len(content) != artifact.byte_size or hashlib.sha256(content).hexdigest() != artifact.sha256:
+        raise ReportingError(
+            "artifact_integrity_mismatch",
+            "Artifact file no longer matches its registered integrity metadata.",
+            status_code=409,
+        )
+    return registered_path
 
 
 def close_readiness(session: Session, *, month: Optional[str] = None) -> dict[str, Any]:
@@ -692,6 +758,7 @@ def _write_json_artifact(
     session: Session,
     path: Path,
     *,
+    data_root: Path,
     artifact_type: str,
     payload: dict[str, Any],
     job: Job,
@@ -708,6 +775,7 @@ def _write_json_artifact(
     return _write_artifact(
         session,
         path,
+        data_root=data_root,
         artifact_type=artifact_type,
         content=content,
         job=job,
@@ -722,6 +790,7 @@ def _write_text_artifact(
     session: Session,
     path: Path,
     *,
+    data_root: Path,
     artifact_type: str,
     text: str,
     job: Job,
@@ -733,6 +802,7 @@ def _write_text_artifact(
     return _write_artifact(
         session,
         path,
+        data_root=data_root,
         artifact_type=artifact_type,
         content=text.encode("utf-8"),
         job=job,
@@ -747,6 +817,7 @@ def _write_csv_artifact(
     session: Session,
     path: Path,
     *,
+    data_root: Path,
     artifact_type: str,
     rows: list[dict[str, Any]],
     job: Job,
@@ -764,6 +835,7 @@ def _write_csv_artifact(
     return _write_artifact(
         session,
         path,
+        data_root=data_root,
         artifact_type=artifact_type,
         content=buffer.getvalue().encode("utf-8"),
         job=job,
@@ -778,6 +850,7 @@ def _write_artifact(
     session: Session,
     path: Path,
     *,
+    data_root: Path,
     artifact_type: str,
     content: bytes,
     job: Job,
@@ -786,7 +859,7 @@ def _write_artifact(
     description: str,
     sensitivity: str,
 ) -> Artifact:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_safe_artifact_directory(data_root, path.parent)
     path.write_bytes(content)
     artifact = Artifact(
         artifact_type=artifact_type,
