@@ -122,6 +122,25 @@ def confirm_source_profiles(client: TestClient, source_keys: list[str]) -> None:
     assert response.status_code == 200
 
 
+def enable_required_sources(client: TestClient, source_keys: list[str]) -> None:
+    response = client.patch(
+        "/api/settings",
+        json={
+            "actor": "mason",
+            "changes": [
+                {
+                    "domain": "sources",
+                    "setting_key": f"sources.{source_key}.required",
+                    "value": True,
+                    "note": f"SYNTHETIC hardening test enables required source coverage for {source_key}.",
+                }
+                for source_key in sorted(source_keys)
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+
 def test_required_pr10_synthetic_fixtures_exist_and_are_obviously_fake():
     expected_fixtures = set(VALID_SOURCE_FIXTURES) | SCENARIO_FIXTURES
     assert expected_fixtures
@@ -191,6 +210,7 @@ def test_blocked_path_covers_schema_quarantine_stale_and_missing_required_source
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
     with TestClient(app) as client:
+        enable_required_sources(client, list(VALID_SOURCE_FIXTURES.values()))
         blocked_batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
         validate_blocked = client.post(f"/api/import-batches/{blocked_batch_id}/validate")
         accept_blocked = client.post(f"/api/import-batches/{blocked_batch_id}/accept")

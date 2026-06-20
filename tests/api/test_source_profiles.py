@@ -18,7 +18,7 @@ def test_source_profiles_include_import_contract_fields():
 
     assert profile.display_name == "Chase Prime Visa"
     assert profile.account_type == "credit_card"
-    assert profile.required is True
+    assert profile.required is False
     assert profile.freshness_threshold_days == 14
     assert ".csv" in profile.accepted_file_extensions
     assert profile.expected_headers

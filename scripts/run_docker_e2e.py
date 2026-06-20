@@ -95,7 +95,7 @@ def save_decision(base_url: str, transaction_id: str, *, field_name: str, decisi
             "field_name": field_name,
             "proposed_value": value,
             "approved_value": value,
-            "actor": "mason",
+            "actor": "owner",
             "suggestion_source": "owner",
             "explicit_user_action": True,
         },
@@ -108,7 +108,7 @@ def confirm_source_profiles(base_url: str, source_keys: list[str]) -> None:
         "PATCH",
         "/api/settings",
         {
-            "actor": "mason",
+            "actor": "owner",
             "changes": [
                 {
                     "domain": "sources",
@@ -191,7 +191,7 @@ def run_closed_loop(base_url: str, repo_root: Path, data_root: Path) -> dict[str
 
     transactions = request_json(base_url, "GET", "/api/transactions")["transactions"]
     assert_condition(len(transactions) >= 4, "closed loop must create synthetic transactions")
-    save_decision(base_url, transactions[0]["id"], field_name="category", decision_type="category_change", value="Groceries")
+    save_decision(base_url, transactions[0]["id"], field_name="category", decision_type="category_change", value="business")
     for transaction in transactions:
         save_decision(
             base_url,
@@ -201,15 +201,15 @@ def run_closed_loop(base_url: str, repo_root: Path, data_root: Path) -> dict[str
             value="reviewed",
         )
 
-    reports = request_json(base_url, "POST", "/api/reports/run", {"actor": "mason"})
-    draft_close = request_json(base_url, "POST", "/api/monthly-close/draft", {"actor": "mason"})
+    reports = request_json(base_url, "POST", "/api/reports/run", {"actor": "owner"})
+    draft_close = request_json(base_url, "POST", "/api/monthly-close/draft", {"actor": "owner"})
     final_close = request_json(
         base_url,
         "POST",
         "/api/monthly-close/finalize",
-        {"actor": "mason", "notes": "SYNTHETIC Docker E2E final close."},
+        {"actor": "owner", "notes": "SYNTHETIC Docker E2E final close."},
     )
-    advisor = request_json(base_url, "POST", "/api/exports/advisor", {"actor": "mason"})
+    advisor = request_json(base_url, "POST", "/api/exports/advisor", {"actor": "owner"})
     summary = request_json(base_url, "GET", "/api/operator-summary")
     blocked_path = run_blocked_validation_path(base_url, data_root)
 

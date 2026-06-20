@@ -193,15 +193,26 @@ def create_monthly_close(
         "report_run_ids": _completed_report_run_ids(session),
     }
 
+    app_name = _setting_value(session, "branding", "branding.app_display_name", "Family Finance OS")
+    memo_title = _render_title_template(
+        _setting_value(
+            session,
+            "reports",
+            "reports.monthly_close.title_template",
+            "{app_name} Monthly Close - {month}",
+        ),
+        app_name=app_name,
+        month=month,
+    )
     memo_artifact = _write_text_artifact(
         session,
         bundle_dir / "monthly_close_memo.md",
         data_root=data_root,
         artifact_type="monthly_close_memo",
-        text=_monthly_close_memo(month=month, status=status, validation_summary=validation_summary),
+        text=_monthly_close_memo(title=memo_title, status=status, validation_summary=validation_summary),
         job=job,
         source_inputs=source_inputs,
-        title="Monthly Close Memo",
+        title=memo_title,
         description="Human-readable v1 monthly close memo.",
         sensitivity="household_financial_summary",
     )
@@ -640,10 +651,10 @@ def _decision_event_rows(session: Session) -> list[dict[str, Any]]:
     return [serialize_decision_event(event) for event in events]
 
 
-def _monthly_close_memo(*, month: str, status: str, validation_summary: dict[str, Any]) -> str:
+def _monthly_close_memo(*, title: str, status: str, validation_summary: dict[str, Any]) -> str:
     return "\n".join(
         [
-            f"# Dillon Finances Monthly Close - {month}",
+            f"# {title}",
             "",
             f"Status: {status}",
             f"Provisional: {not validation_summary['ready_for_final']}",
@@ -702,6 +713,14 @@ def _source_coverage(session: Session, accepted_batches: list[ImportBatch]) -> d
 def _settings_lookup(session: Session) -> dict[tuple[str, str], Any]:
     settings = session.scalars(select(Setting)).all()
     return {(setting.domain, setting.setting_key): json.loads(setting.value_json) for setting in settings}
+
+
+def _setting_value(session: Session, domain: str, setting_key: str, default: Any) -> Any:
+    return _settings_lookup(session).get((domain, setting_key), default)
+
+
+def _render_title_template(template: str, *, app_name: str, month: str) -> str:
+    return template.replace("{app_name}", app_name).replace("{month}", month)
 
 
 def _input_snapshot(session: Session, *, month: str, validation_summary: dict[str, Any]) -> dict[str, Any]:

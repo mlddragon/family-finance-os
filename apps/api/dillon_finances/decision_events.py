@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from dillon_finances.category_service import category_display_name, category_identity_for_value, resolve_category_key
 from dillon_finances.models import CanonicalTransaction, DecisionEvent, ValidationFinding
 
 
@@ -76,7 +77,7 @@ def _public_value(field_name: str, value: Optional[str]) -> Any:
     return value
 
 
-def _normalize_value(field_name: str, value: Any) -> str:
+def _normalize_value(field_name: str, value: Any, *, session: Session | None = None) -> str:
     if field_name in BOOLEAN_FIELDS:
         if isinstance(value, bool):
             return "true" if value else "false"
@@ -99,6 +100,17 @@ def _normalize_value(field_name: str, value: Any) -> str:
             "invalid_controlled_value",
             f"{field_name} requires a non-empty approved value.",
         )
+
+    if field_name == "category":
+        if session is None:
+            return normalized
+        category_key = resolve_category_key(session, normalized)
+        if category_key is None:
+            raise DecisionEventError(
+                "unknown_category",
+                "Category decisions must use an existing category key, display label, or alias.",
+            )
+        return category_key
 
     if field_name in STATUS_VALUES and normalized not in STATUS_VALUES[field_name]:
         raise DecisionEventError(
@@ -161,10 +173,15 @@ def derive_decision_state(
     primary_fact = _primary_imported_fact(canonical)
     original_category = primary_fact.initial_category if primary_fact else None
     original_subcategory = primary_fact.initial_subcategory if primary_fact else None
+    original_category_identity = category_identity_for_value(session, original_category)
     state: dict[str, Any] = {
-        "category_original": original_category,
+        "category_original": original_category_identity["display_name"],
+        "category_key_original": original_category_identity["category_key"],
+        "category_display_name_original": original_category_identity["display_name"],
         "subcategory_original": original_subcategory,
-        "category_current": original_category,
+        "category_current": original_category_identity["display_name"],
+        "category_key_current": original_category_identity["category_key"],
+        "category_display_name_current": original_category_identity["display_name"],
         "subcategory_current": original_subcategory,
         "review_status": "unreviewed",
         "review_reason": None,
@@ -182,7 +199,11 @@ def derive_decision_state(
         if event.id in inactive_ids:
             continue
         if event.field_name == "category":
-            state["category_current"] = _public_value(event.field_name, event.approved_value)
+            category_key = _public_value(event.field_name, event.approved_value)
+            display_name = category_display_name(session, category_key) or category_key
+            state["category_key_current"] = category_key
+            state["category_display_name_current"] = display_name
+            state["category_current"] = display_name
         elif event.field_name == "subcategory":
             state["subcategory_current"] = _public_value(event.field_name, event.approved_value)
         else:
@@ -311,9 +332,9 @@ def _validate_request(
             "A category is required before setting a subcategory.",
         )
 
-    previous_key = (
+    previous_key = "category_key_current" if request.field_name == "category" else (
         f"{request.field_name}_current"
-        if request.field_name in {"category", "subcategory"}
+        if request.field_name == "subcategory"
         else request.field_name
     )
     previous_public_value = current_state.get(previous_key)
@@ -377,9 +398,9 @@ def create_decision_event(
             status_code=404,
         )
 
-    approved_value = _normalize_value(request.field_name, request.approved_value)
+    approved_value = _normalize_value(request.field_name, request.approved_value, session=session)
     proposed_value = (
-        _normalize_value(request.field_name, request.proposed_value)
+        _normalize_value(request.field_name, request.proposed_value, session=session)
         if request.proposed_value is not None
         else approved_value
     )

@@ -72,8 +72,8 @@ def main(argv: list[str]) -> int:
     dockerfile = (repo_root / "Dockerfile").read_text()
     dockerignore = (repo_root / ".dockerignore").read_text()
 
-    if "127.0.0.1:8080:8080" not in compose:
-        return fail("Docker Compose must bind the browser app to 127.0.0.1:8080 by default.")
+    if "127.0.0.1:${DILLON_FINANCES_HOST_PORT:-8080}:8080" not in compose:
+        return fail("Docker Compose must bind the browser app to 127.0.0.1 and default the host port to 8080.")
     if "APP_BIND_HOST: 127.0.0.1" not in compose:
         return fail("Docker Compose must keep APP_BIND_HOST at 127.0.0.1 by default.")
     if "DATA_ROOT: /data" not in compose:

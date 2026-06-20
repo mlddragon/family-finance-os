@@ -46,12 +46,12 @@ def test_operator_summary_reports_empty_local_state(tmp_path):
     assert body["runtime"]["local_only"] is True
     assert body["runtime"]["data_root"]["path"] == str(tmp_path)
     assert body["latest_import"]["status"] == "none"
-    assert body["sources"]["required_count"] == 4
-    assert body["sources"]["missing_required_count"] == 4
+    assert body["sources"]["required_count"] == 0
+    assert body["sources"]["missing_required_count"] == 0
     assert body["validation"]["open_blocking"] == 0
     assert body["review"]["total_transactions"] == 0
     assert body["monthly_close"]["status"] == "not_started"
-    assert body["next_action"]["code"] == "import_required_source_files"
+    assert body["next_action"]["code"] == "upload_source_files"
 
 
 def test_operator_summary_counts_import_validation_and_review_state(tmp_path):
@@ -71,10 +71,10 @@ def test_operator_summary_counts_import_validation_and_review_state(tmp_path):
     assert body["latest_import"]["id"] == accepted_batch["id"]
     assert body["latest_import"]["status"] == "accepted"
     assert body["sources"]["imported_source_keys"] == ["chase_prime_visa"]
-    assert body["sources"]["missing_required_count"] == 3
+    assert body["sources"]["missing_required_count"] == 0
     assert body["validation"]["open_blocking"] == 0
     assert body["review"]["total_transactions"] == 1
     assert body["review"]["unreviewed"] == 1
     assert body["monthly_close"]["ready_for_draft"] is True
-    assert body["monthly_close"]["ready_for_final"] is False
+    assert body["monthly_close"]["ready_for_final"] is True
     assert body["next_action"]["code"] == "review_ledger_decisions"

@@ -2,10 +2,25 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { App } from "./App";
+import { enUS } from "./locales/en-US";
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+test("en-US locale covers primary UI surfaces", () => {
+  expect(Object.keys(enUS.nav)).toEqual([
+    "home",
+    "sources",
+    "validation",
+    "review",
+    "transactions",
+    "reports",
+    "settings",
+  ]);
+  expect(enUS.app.fallbackName).toBe("Family Finance OS");
+  expect(enUS.review.other).toBe("Other");
 });
 
 const sourceProfiles = [
@@ -13,28 +28,34 @@ const sourceProfiles = [
     source_key: "alliant_checking",
     display_name: "Alliant Checking",
     account_type: "checking",
-    required: true,
+    required: false,
     freshness_threshold_days: 14,
     accepted_file_extensions: [".csv"],
     confirmation_status: "pending_owner_sample",
+    is_template: true,
+    enabled: false,
   },
   {
     source_key: "alliant_savings",
     display_name: "Alliant Savings",
     account_type: "savings",
-    required: true,
+    required: false,
     freshness_threshold_days: 14,
     accepted_file_extensions: [".csv"],
     confirmation_status: "pending_owner_sample",
+    is_template: true,
+    enabled: false,
   },
   {
     source_key: "chase_prime_visa",
     display_name: "Chase Prime Visa",
     account_type: "credit_card",
-    required: true,
+    required: false,
     freshness_threshold_days: 14,
     accepted_file_extensions: [".csv"],
     confirmation_status: "pending_owner_sample",
+    is_template: true,
+    enabled: false,
   },
 ];
 
@@ -51,7 +72,9 @@ const transaction = {
   normalized_merchant: "synthetic grocery",
   amount: "12.34",
   initial_category: "Food",
-  category_current: "Food",
+  category_key_current: "groceries",
+  category_display_name_current: "Groceries",
+  category_current: "Groceries",
   review_status: "unreviewed",
   validation_status: "ready_for_review",
   imported_fact_count: 1,
@@ -63,10 +86,42 @@ const blockedTransaction = {
   raw_description: "SYNTHETIC DUPLICATE",
   amount: "12.34",
   initial_category: "Utilities",
+  category_key_current: "utilities",
+  category_display_name_current: "Utilities",
   category_current: "Utilities",
   validation_status: "blocked",
   imported_fact_count: 2,
 };
+
+const categories = [
+  {
+    id: "category-groceries",
+    category_key: "groceries",
+    display_name: "Groceries",
+    category_type: "system",
+    aliases: ["Food"],
+    sort_order: 40,
+    active: true,
+  },
+  {
+    id: "category-utilities",
+    category_key: "utilities",
+    display_name: "Utilities",
+    category_type: "system",
+    aliases: [],
+    sort_order: 30,
+    active: true,
+  },
+  {
+    id: "category-business",
+    category_key: "business",
+    display_name: "Business",
+    category_type: "system",
+    aliases: [],
+    sort_order: 180,
+    active: true,
+  },
+];
 
 function response(body: unknown) {
   return {
@@ -118,11 +173,28 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
       const patchBody = JSON.parse(String(init.body));
       const changedSetting = patchBody.changes?.[0];
       return response({
-        tabs: ["Data root", "Sources", "Thresholds", "Reports", "Privacy", "Future integrations"],
+        tabs: ["Branding", "Data root", "Sources", "Categories", "Locale", "Operator", "Thresholds", "Reports", "Privacy", "Future integrations"],
         local_only: true,
         data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
         source_profiles: confirmedSourceProfiles,
         settings: [
+          {
+            id: "setting-branding",
+            domain: "branding",
+            setting_key: "branding.app_display_name",
+            value:
+              changedSetting?.setting_key === "branding.app_display_name" ? changedSetting.value : "Family Finance OS",
+            editable: true,
+            note_required: false,
+          },
+          {
+            id: "setting-operator",
+            domain: "operator",
+            setting_key: "operator.default_actor",
+            value: "owner",
+            editable: true,
+            note_required: false,
+          },
           {
             id: "setting-1",
             domain: "privacy",
@@ -146,7 +218,7 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
             domain: changedSetting?.domain ?? "sources",
             setting_key: changedSetting?.setting_key ?? "sources.chase_prime_visa.profile_confirmation_status",
             new_value: changedSetting?.value ?? "owner_confirmed_header_sample",
-            actor: "mason",
+            actor: "owner",
             created_at: "2026-06-18T00:01:00Z",
           },
         ],
@@ -215,16 +287,39 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
       });
     }
     if (path === "/api/decision-events" && init?.method === "POST") {
+      const decisionBody = JSON.parse(String(init.body));
       return response({
-        event: { id: "event-2", approved_value: "Groceries" },
-        current_state: { category_current: "Groceries", review_status: "unreviewed" },
+        event: { id: "event-2", approved_value: decisionBody.approved_value },
+        current_state:
+          decisionBody.field_name === "category"
+            ? {
+                category_key_current: decisionBody.approved_value,
+                category_display_name_current: "Business",
+                category_current: "Business",
+                review_status: "unreviewed",
+              }
+            : { category_current: "Groceries", review_status: "reviewed" },
+      });
+    }
+    if (path === "/api/categories" && init?.method === "POST") {
+      const categoryBody = JSON.parse(String(init.body));
+      return response({
+        category: {
+          id: "category-family-project",
+          category_key: "family_project",
+          display_name: categoryBody.display_name,
+          category_type: "custom",
+          aliases: [],
+          sort_order: 220,
+          active: true,
+        },
       });
     }
     if (path === "/api/reports/run" && init?.method === "POST") {
       return response({
         job: { id: "job-report", status: "completed" },
         report_run: { id: "report-run-1", status: "completed", validation_status: "passed_with_warnings" },
-        validation_summary: { missing_required_count: 3 },
+        validation_summary: { missing_required_count: 0 },
         artifacts: [
           {
             id: "artifact-report-1",
@@ -239,7 +334,7 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
     if (path === "/api/monthly-close/draft" && init?.method === "POST") {
       return response({
         monthly_close: { id: "close-1", status: "draft", provisional: true },
-        validation_summary: { missing_required_count: 3 },
+        validation_summary: { missing_required_count: 0 },
         artifacts: [
           {
             id: "artifact-close-1",
@@ -254,7 +349,7 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
     if (path === "/api/exports/advisor" && init?.method === "POST") {
       return response({
         job: { id: "job-advisor", job_type: "advisor_export", status: "completed" },
-        validation_summary: { missing_required_count: 3 },
+        validation_summary: { missing_required_count: 0 },
         artifacts: [
           {
             id: "artifact-advisor-1",
@@ -270,8 +365,8 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
     const responses: Record<string, unknown> = {
       "/api/operator-summary": {
         runtime: {
-          app: "Dillon Finances",
-          version: "0.1.0",
+          app: "Family Finance OS",
+          version: "0.2.0",
           local_only: true,
           bind_host: "127.0.0.1",
           data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
@@ -285,8 +380,8 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
           transaction_date_max: "2026-06-17",
         },
         sources: {
-          required_count: 4,
-          missing_required_count: 3,
+          required_count: 0,
+          missing_required_count: 0,
           imported_source_keys: ["chase_prime_visa"],
           profiles: sourceProfiles,
         },
@@ -360,6 +455,9 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
       "/api/transactions": {
         transactions: [transaction, blockedTransaction],
       },
+      "/api/categories": {
+        categories,
+      },
       "/api/transactions/tx-1": {
         transaction: {
           ...transaction,
@@ -377,7 +475,7 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
               id: "event-1",
               decision_type: "category_change",
               field_name: "category",
-              approved_value: "Food",
+              approved_value: "groceries",
               active: true,
               created_at: "2026-06-18T00:00:00Z",
             },
@@ -392,11 +490,27 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
         },
       },
       "/api/settings": {
-        tabs: ["Data root", "Sources", "Thresholds", "Reports", "Privacy", "Future integrations"],
+        tabs: ["Branding", "Data root", "Sources", "Categories", "Locale", "Operator", "Thresholds", "Reports", "Privacy", "Future integrations"],
         local_only: true,
         data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
         source_profiles: sourceProfiles,
         settings: [
+          {
+            id: "setting-branding",
+            domain: "branding",
+            setting_key: "branding.app_display_name",
+            value: "Family Finance OS",
+            editable: true,
+            note_required: false,
+          },
+          {
+            id: "setting-operator",
+            domain: "operator",
+            setting_key: "operator.default_actor",
+            value: "owner",
+            editable: true,
+            note_required: false,
+          },
           {
             id: "setting-1",
             domain: "privacy",
@@ -450,7 +564,7 @@ test("renders operator home from API state", async () => {
 
   render(<App />);
 
-  expect(screen.getByRole("heading", { name: "Dillon Finances" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Family Finance OS" })).toBeInTheDocument();
   expect(await screen.findByText("Local browser mode")).toBeInTheDocument();
   expect(await screen.findByText("Resolve blocking validation findings")).toBeInTheDocument();
   expect(screen.getByText("Open blockers")).toBeInTheDocument();
@@ -572,7 +686,7 @@ test("sources screen voids an upload with confirmation and optional file destruc
     expect(voidCall).toBeTruthy();
     const body = JSON.parse(String(voidCall?.[1]?.body));
     expect(body).toEqual({
-      actor: "mason",
+      actor: "owner",
       reason: "Wrong export file uploaded",
       destroy_files: true,
     });
@@ -643,7 +757,7 @@ test("validation screen clears acknowledged findings from the default open queue
     );
     expect(clearCall).toBeTruthy();
     expect(JSON.parse(String(clearCall?.[1]?.body))).toEqual({
-      actor: "mason",
+      actor: "owner",
       note: "Acknowledged stale source while waiting for next export.",
     });
   });
@@ -668,18 +782,13 @@ test("review controls are labelled, focusable, and save append-only decisions", 
   expect(approvedCategory).toHaveFocus();
   expect(approvedCategory).toBeInstanceOf(HTMLSelectElement);
   const categoryOptions = Array.from((approvedCategory as HTMLSelectElement).options).map((option) => option.text);
-  expect(categoryOptions).toEqual(["Food", "Utilities", "Other"]);
+  expect(categoryOptions).toEqual(["Groceries", "Utilities", "Business", "Other"]);
 
-  fireEvent.change(approvedCategory, { target: { value: "__other__" } });
-  await waitFor(() => expect(approvedCategory).toHaveValue("__other__"));
+  fireEvent.change(approvedCategory, { target: { value: "business" } });
+  await waitFor(() => expect(approvedCategory).toHaveValue("business"));
 
   const saveButton = screen.getByRole("button", { name: "Save decision" });
-  await waitFor(() => expect(saveButton).toBeDisabled());
-
-  fireEvent.change(screen.getByLabelText("Other category"), { target: { value: "Groceries" } });
-  await waitFor(() => expect(saveButton).toBeDisabled());
-
-  fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Creating a new category from review." } });
+  await waitFor(() => expect(saveButton).not.toBeDisabled());
   saveButton.focus();
   expect(saveButton).toHaveFocus();
   fireEvent.click(saveButton);
@@ -697,9 +806,10 @@ test("review controls are labelled, focusable, and save append-only decisions", 
     target_id: "tx-1",
     decision_type: "category_change",
     field_name: "category",
-    approved_value: "Groceries",
+    approved_value: "business",
+    actor: "owner",
     explicit_user_action: true,
-    notes: "Creating a new category from review.",
+    notes: null,
   });
 });
 
@@ -712,7 +822,7 @@ test("review save approves unchanged category as a reviewed decision", async () 
   expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
 
   const approvedCategory = screen.getByLabelText("Approved category");
-  expect(approvedCategory).toHaveValue("Food");
+  expect(approvedCategory).toHaveValue("groceries");
 
   fireEvent.click(screen.getByRole("button", { name: "Save decision" }));
 
@@ -730,6 +840,7 @@ test("review save approves unchanged category as a reviewed decision", async () 
     decision_type: "review_status_change",
     field_name: "review_status",
     approved_value: "reviewed",
+    actor: "owner",
     explicit_user_action: true,
   });
 });
@@ -819,7 +930,7 @@ test("settings screen saves source profile sample confirmation with owner note",
     (call) => pathFor(call[0]) === "/api/settings" && call[1]?.method === "PATCH",
   );
   expect(JSON.parse(settingsPatchCall?.[1]?.body as string)).toMatchObject({
-    actor: "mason",
+    actor: "owner",
     changes: [
       {
         domain: "sources",
@@ -861,7 +972,7 @@ test("settings screen edits editable database-backed settings with required note
     (call) => pathFor(call[0]) === "/api/settings" && call[1]?.method === "PATCH",
   );
   expect(JSON.parse(settingsPatchCalls.at(-1)?.[1]?.body as string)).toMatchObject({
-    actor: "mason",
+    actor: "owner",
     changes: [
       {
         domain: "sources",

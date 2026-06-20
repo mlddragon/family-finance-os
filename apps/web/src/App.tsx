@@ -12,14 +12,17 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table";
+import { useTranslation } from "react-i18next";
 
 import {
   acceptImportBatch,
   confirmSourceProfileSample,
+  createCategory,
   fetchOperatorSummary,
   createAdvisorExport,
   draftMonthlyClose,
   fetchArtifacts,
+  fetchCategories,
   fetchSettings,
   fetchTransactionDetail,
   fetchTransactions,
@@ -36,8 +39,10 @@ import {
   validateImportBatch,
   voidImportBatch,
 } from "./api";
+import "./i18n";
 import type {
   Artifact,
+  Category,
   InboxScan,
   ImportBatch,
   OperatorSummary,
@@ -51,14 +56,14 @@ import "./styles.css";
 
 type ScreenKey = "home" | "sources" | "validation" | "review" | "transactions" | "reports" | "settings";
 
-const screens: Array<{ key: ScreenKey; label: string }> = [
-  { key: "home", label: "Home" },
-  { key: "sources", label: "Sources" },
-  { key: "validation", label: "Validation Issues" },
-  { key: "review", label: "Review" },
-  { key: "transactions", label: "Transactions" },
-  { key: "reports", label: "Reports" },
-  { key: "settings", label: "Settings" },
+const screens: Array<{ key: ScreenKey; labelKey: string }> = [
+  { key: "home", labelKey: "nav.home" },
+  { key: "sources", labelKey: "nav.sources" },
+  { key: "validation", labelKey: "nav.validation" },
+  { key: "review", labelKey: "nav.review" },
+  { key: "transactions", labelKey: "nav.transactions" },
+  { key: "reports", labelKey: "nav.reports" },
+  { key: "settings", labelKey: "nav.settings" },
 ];
 
 const OTHER_LIST_VALUE = "__other__";
@@ -66,8 +71,8 @@ const OTHER_LIST_LABEL = "Other";
 
 const emptySummary: OperatorSummary = {
   runtime: {
-    app: "Dillon Finances",
-    version: "0.1.0",
+    app: "Family Finance OS",
+    version: "0.2.0",
     local_only: true,
     bind_host: "127.0.0.1",
     data_root: { path: "DATA_ROOT", exists: false },
@@ -131,6 +136,11 @@ function uniqueExistingListValues(values: Array<string | null | undefined>) {
   return result.sort((left, right) => left.localeCompare(right));
 }
 
+function settingValue(settings: SettingsPayload | undefined, domain: string, settingKey: string, fallback: string) {
+  const setting = settings?.settings.find((item) => item.domain === domain && item.setting_key === settingKey);
+  return typeof setting?.value === "string" && setting.value.trim() ? setting.value : fallback;
+}
+
 function createQueryClient() {
   return new QueryClient({
     defaultOptions: {
@@ -156,6 +166,7 @@ export function App() {
 }
 
 function OperatorApp() {
+  const { t } = useTranslation();
   const [activeScreen, setActiveScreen] = useState<ScreenKey>("home");
   const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
 
@@ -165,6 +176,7 @@ function OperatorApp() {
   const transactionsQuery = useQuery({ queryKey: ["transactions"], queryFn: fetchTransactions });
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: fetchSettings });
   const artifactsQuery = useQuery({ queryKey: ["artifacts"], queryFn: fetchArtifacts });
+  const categoriesQuery = useQuery({ queryKey: ["categories"], queryFn: fetchCategories });
 
   const transactions = transactionsQuery.data?.transactions ?? [];
   useEffect(() => {
@@ -183,6 +195,9 @@ function OperatorApp() {
   const findings = findingsQuery.data?.findings ?? [];
   const inbox = inboxQuery.data?.import_batches ?? [];
   const settings = settingsQuery.data;
+  const appDisplayName = settingValue(settings, "branding", "branding.app_display_name", summary.runtime.app || t("app.fallbackName"));
+  const operatorActor = settingValue(settings, "operator", "operator.default_actor", "owner");
+  const categories = categoriesQuery.data?.categories ?? [];
   const sourceProfileKey = summary.sources.profiles.map((profile) => profile.source_key).join("|") || "no-source-profiles";
   const selectedTransaction =
     transactionDetailQuery.data?.transaction ??
@@ -191,7 +206,7 @@ function OperatorApp() {
 
   return (
     <div className="app-shell">
-      <Header summary={summary} />
+      <Header summary={summary} appDisplayName={appDisplayName} />
 
       <div className="workspace">
         <nav className="sidebar" aria-label="Primary">
@@ -205,20 +220,29 @@ function OperatorApp() {
                 setActiveScreen(screen.key);
               }}
             >
-              {screen.label}
+              {t(screen.labelKey)}
             </a>
           ))}
         </nav>
 
         <main className="content">
           {activeScreen === "home" ? <HomeScreen summary={summary} /> : null}
-          {activeScreen === "sources" ? <SourcesScreen key={sourceProfileKey} profiles={summary.sources.profiles} inbox={inbox} /> : null}
-          {activeScreen === "validation" ? <ValidationScreen findings={findings} /> : null}
+          {activeScreen === "sources" ? (
+            <SourcesScreen
+              key={sourceProfileKey}
+              profiles={summary.sources.profiles}
+              inbox={inbox}
+              operatorActor={operatorActor}
+            />
+          ) : null}
+          {activeScreen === "validation" ? <ValidationScreen findings={findings} operatorActor={operatorActor} /> : null}
           {activeScreen === "review" ? (
             <ReviewScreen
               transactions={transactions}
               selectedTransaction={selectedTransaction}
               selectedTransactionId={selectedTransactionId}
+              categories={categories}
+              operatorActor={operatorActor}
               onSelectTransaction={setSelectedTransactionId}
             />
           ) : null}
@@ -231,27 +255,32 @@ function OperatorApp() {
             />
           ) : null}
           {activeScreen === "reports" ? (
-            <ReportsScreen summary={summary} artifacts={artifactsQuery.data?.artifacts ?? []} />
+            <ReportsScreen summary={summary} artifacts={artifactsQuery.data?.artifacts ?? []} operatorActor={operatorActor} />
           ) : null}
-          {activeScreen === "settings" ? <SettingsScreen settings={settings} profiles={summary.sources.profiles} /> : null}
+          {activeScreen === "settings" ? (
+            <SettingsScreen settings={settings} profiles={summary.sources.profiles} operatorActor={operatorActor} />
+          ) : null}
         </main>
       </div>
     </div>
   );
 }
 
-function Header({ summary }: { summary: OperatorSummary }) {
+function Header({ summary, appDisplayName }: { summary: OperatorSummary; appDisplayName: string }) {
+  const { t } = useTranslation();
   return (
     <header className="topbar">
       <div>
-        <p className="product-label">Family financial operating system</p>
-        <h1>Dillon Finances</h1>
+        <p className="product-label">{t("app.productLabel")}</p>
+        <h1>{appDisplayName}</h1>
       </div>
       <div className="status-strip" aria-label="Runtime status">
-        <span className={summary.runtime.local_only ? "ok" : "danger"}>Local browser mode</span>
+        <span className={summary.runtime.local_only ? "ok" : "danger"}>{t("runtime.localBrowserMode")}</span>
         <span>{summary.runtime.bind_host}</span>
-        <span>{summary.runtime.data_root.exists ? "DATA_ROOT mounted" : "DATA_ROOT unavailable"}</span>
-        <span>Close: {formatStatus(summary.monthly_close.status)}</span>
+        <span>{summary.runtime.data_root.exists ? t("runtime.dataRootMounted") : t("runtime.dataRootUnavailable")}</span>
+        <span>
+          {t("runtime.close")}: {formatStatus(summary.monthly_close.status)}
+        </span>
       </div>
     </header>
   );
@@ -300,7 +329,15 @@ function HomeScreen({ summary }: { summary: OperatorSummary }) {
   );
 }
 
-function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: ImportBatch[] }) {
+function SourcesScreen({
+  profiles,
+  inbox,
+  operatorActor,
+}: {
+  profiles: SourceProfile[];
+  inbox: ImportBatch[];
+  operatorActor: string;
+}) {
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedUploadSourceKey, setSelectedUploadSourceKey] = useState(profiles[0]?.source_key ?? "");
@@ -413,6 +450,7 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
       batchId: voidTarget.id,
       reason: voidReason.trim(),
       destroyFiles: destroyStoredFiles,
+      actor: operatorActor,
     });
   }
 
@@ -431,7 +469,7 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
       </div>
 
       <section className="work-panel">
-        <h3>Required sources</h3>
+        <h3>Source profile templates</h3>
         <div className="source-grid">
           {profiles.map((profile) => (
             <article key={profile.source_key} className="source-card">
@@ -440,6 +478,14 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
                 <span>{formatStatus(profile.account_type)}</span>
               </div>
               <dl>
+                <div>
+                  <dt>Template</dt>
+                  <dd>{profile.is_template ? "Yes" : "No"}</dd>
+                </div>
+                <div>
+                  <dt>Enabled</dt>
+                  <dd>{profile.enabled ? "Yes" : "No"}</dd>
+                </div>
                 <div>
                   <dt>Required</dt>
                   <dd>{profile.required ? "Yes" : "No"}</dd>
@@ -616,7 +662,7 @@ function SourcesScreen({ profiles, inbox }: { profiles: SourceProfile[]; inbox: 
   );
 }
 
-function ValidationScreen({ findings }: { findings: ValidationFinding[] }) {
+function ValidationScreen({ findings, operatorActor }: { findings: ValidationFinding[]; operatorActor: string }) {
   const queryClient = useQueryClient();
   const [showCleared, setShowCleared] = useState(false);
   const [clearTarget, setClearTarget] = useState<ValidationFinding | null>(null);
@@ -664,7 +710,7 @@ function ValidationScreen({ findings }: { findings: ValidationFinding[] }) {
     if (!clearTarget || !clearNote.trim()) {
       return;
     }
-    clearMutation.mutate({ findingId: clearTarget.id, note: clearNote });
+    clearMutation.mutate({ findingId: clearTarget.id, note: clearNote, actor: operatorActor });
   }
 
   const columns = useMemo<ColumnDef<ValidationFinding>[]>(
@@ -753,14 +799,19 @@ function ReviewScreen({
   transactions,
   selectedTransaction,
   selectedTransactionId,
+  categories,
+  operatorActor,
   onSelectTransaction,
 }: {
   transactions: Transaction[];
   selectedTransaction: TransactionDetail | Transaction | null;
   selectedTransactionId: string | null;
+  categories: Category[];
+  operatorActor: string;
   onSelectTransaction: (id: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const [statusFilter, setStatusFilter] = useState("all");
   const [validationFilter, setValidationFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -769,7 +820,8 @@ function ReviewScreen({
   const [notes, setNotes] = useState("");
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const lastInitializedTransactionId = useRef<string | null>(null);
-  const categoryOptions = useMemo(
+  const categoryOptions = useMemo(() => categories.filter((category) => category.active), [categories]);
+  const fallbackCategoryLabels = useMemo(
     () =>
       uniqueExistingListValues([
         ...transactions.flatMap((transaction) => [transaction.category_current, transaction.initial_category]),
@@ -784,6 +836,7 @@ function ReviewScreen({
 
   useLayoutEffect(() => {
     const currentCategory = selectedTransaction?.category_current?.trim() ?? "";
+    const currentCategoryKey = selectedTransaction?.category_key_current?.trim() ?? "";
     if (!selectedTransaction) {
       lastInitializedTransactionId.current = null;
       setCategorySelection("");
@@ -796,19 +849,22 @@ function ReviewScreen({
       return;
     }
     lastInitializedTransactionId.current = selectedTransaction.id;
-    if (currentCategory && categoryOptions.includes(currentCategory)) {
+    if (currentCategoryKey && categoryOptions.some((category) => category.category_key === currentCategoryKey)) {
+      setCategorySelection(currentCategoryKey);
+      setOtherCategory("");
+    } else if (!categoryOptions.length && currentCategory && fallbackCategoryLabels.includes(currentCategory)) {
       setCategorySelection(currentCategory);
       setOtherCategory("");
     } else if (currentCategory) {
       setCategorySelection(OTHER_LIST_VALUE);
       setOtherCategory(currentCategory);
     } else {
-      setCategorySelection(categoryOptions[0] ?? OTHER_LIST_VALUE);
+      setCategorySelection(categoryOptions[0]?.category_key ?? fallbackCategoryLabels[0] ?? OTHER_LIST_VALUE);
       setOtherCategory("");
     }
     setNotes("");
     setSaveStatus(null);
-  }, [categoryOptions, selectedTransaction]);
+  }, [categoryOptions, fallbackCategoryLabels, selectedTransaction]);
 
   const filteredTransactions = useMemo(
     () =>
@@ -836,35 +892,48 @@ function ReviewScreen({
   }, [filteredTransactions, onSelectTransaction, selectedTransactionId]);
 
   const otherCategorySelected = categorySelection === OTHER_LIST_VALUE;
-  const approvedCategory = otherCategorySelected ? otherCategory.trim() : categorySelection.trim();
+  const approvedCategoryKey = otherCategorySelected ? "" : categorySelection.trim();
   const otherCategoryRequiresNote = otherCategorySelected;
   const currentCategory = selectedTransaction?.category_current?.trim() ?? "";
+  const currentCategoryKey = selectedTransaction?.category_key_current?.trim() ?? currentCategory;
   const selectedTransactionBlocked = selectedTransaction?.validation_status === "blocked";
-  const categoryChanged = Boolean(selectedTransaction) && approvedCategory !== currentCategory;
+  const categoryChanged = Boolean(selectedTransaction) && (
+    otherCategorySelected ? otherCategory.trim() !== currentCategory : approvedCategoryKey !== currentCategoryKey
+  );
   const reviewAlreadyComplete = ["reviewed", "approved"].includes(selectedTransaction?.review_status ?? "");
   const reviewApprovalNeeded = Boolean(selectedTransaction) && !categoryChanged && !reviewAlreadyComplete;
 
   const decisionMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (!selectedTransaction) {
         throw new Error("No selected transaction");
       }
       if (categoryChanged) {
+        const categoryKey = otherCategorySelected
+          ? (await createCategory({
+              displayName: otherCategory,
+              note: notes || t("review.customCategoryNote"),
+              actor: operatorActor,
+            })).category.category_key
+          : approvedCategoryKey;
         return saveCategoryDecision({
           transactionId: selectedTransaction.id,
-          approvedCategory,
+          approvedCategoryKey: categoryKey,
+          actor: operatorActor,
           notes: otherCategoryRequiresNote ? notes.trim() : notes,
         });
       }
       return saveReviewStatusDecision({
         transactionId: selectedTransaction.id,
         approvedStatus: "reviewed",
+        actor: operatorActor,
         notes,
       });
     },
     onSuccess: (body) => {
-      setSaveStatus("Decision saved");
-      const updatedCategory = body.current_state?.category_current ?? approvedCategory.trim();
+      setSaveStatus(t("review.decisionSaved"));
+      const updatedCategory = body.current_state?.category_current ?? currentCategory;
+      const updatedCategoryKey = body.current_state?.category_key_current ?? approvedCategoryKey;
       queryClient.setQueryData<{ transactions: Transaction[] }>(["transactions"], (current) => {
         if (!current) {
           return current;
@@ -874,6 +943,7 @@ function ReviewScreen({
             transaction.id === selectedTransactionId
               ? {
                   ...transaction,
+                  category_key_current: updatedCategoryKey,
                   category_current: updatedCategory,
                   review_status: body.current_state?.review_status ?? transaction.review_status,
                 }
@@ -883,6 +953,7 @@ function ReviewScreen({
       });
       void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
       void queryClient.invalidateQueries({ queryKey: ["transaction", selectedTransactionId] });
+      void queryClient.invalidateQueries({ queryKey: ["categories"] });
     },
     onError: (error) => setSaveStatus(formatApiError(error, "Decision blocked")),
   });
@@ -891,7 +962,8 @@ function ReviewScreen({
     !selectedTransaction ||
     selectedTransactionBlocked ||
     decisionMutation.isPending ||
-    !approvedCategory ||
+    (!otherCategorySelected && !approvedCategoryKey) ||
+    (otherCategorySelected && !otherCategory.trim()) ||
     (otherCategoryRequiresNote && !notes.trim()) ||
     (!categoryChanged && !reviewApprovalNeeded);
 
@@ -919,7 +991,8 @@ function ReviewScreen({
     event.preventDefault();
     if (
       !selectedTransaction ||
-      !approvedCategory ||
+      (!otherCategorySelected && !approvedCategoryKey) ||
+      (otherCategorySelected && !otherCategory.trim()) ||
       (otherCategoryRequiresNote && !notes.trim()) ||
       (!categoryChanged && !reviewApprovalNeeded)
     ) {
@@ -988,12 +1061,12 @@ function ReviewScreen({
           </dl>
 
           <label>
-            Current category
+            {t("review.currentCategory")}
             <input type="text" value={selectedTransaction?.category_current ?? ""} readOnly />
           </label>
 
           <label>
-            Approved category
+            {t("review.approvedCategory")}
             <select
               value={categorySelection}
               onChange={(event) => {
@@ -1004,29 +1077,36 @@ function ReviewScreen({
               }}
             >
               {categoryOptions.map((category) => (
-                <option key={category} value={category}>
-                  {category}
+                <option key={category.category_key} value={category.category_key}>
+                  {category.display_name}
                 </option>
               ))}
-              <option value={OTHER_LIST_VALUE}>{OTHER_LIST_LABEL}</option>
+              {!categoryOptions.length
+                ? fallbackCategoryLabels.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))
+                : null}
+              <option value={OTHER_LIST_VALUE}>{t("review.other")}</option>
             </select>
           </label>
 
           {otherCategorySelected ? (
             <label>
-              Other category
+              {t("review.otherCategory")}
               <input type="text" value={otherCategory} onChange={(event) => setOtherCategory(event.target.value)} />
             </label>
           ) : null}
 
           <label>
-            Notes
+            {t("review.notes")}
             <textarea value={notes} onChange={(event) => setNotes(event.target.value)} required={otherCategoryRequiresNote} />
           </label>
 
           <div className="audit-preview" aria-label="Audit preview">
             <span>Target: canonical transaction</span>
-            <span>Actor: mason</span>
+            <span>Actor: {operatorActor}</span>
             <span>Source: owner</span>
           </div>
 
@@ -1037,9 +1117,9 @@ function ReviewScreen({
           ) : null}
 
           <button type="submit" disabled={saveDecisionDisabled}>
-            {selectedTransactionBlocked ? "Resolve validation first" : "Save decision"}
+            {selectedTransactionBlocked ? t("review.resolveValidationFirst") : t("review.saveDecision")}
           </button>
-          {saveStatus ? <p className={saveStatus === "Decision saved" ? "form-status ok-text" : "form-status danger-text"}>{saveStatus}</p> : null}
+          {saveStatus ? <p className={saveStatus === t("review.decisionSaved") ? "form-status ok-text" : "form-status danger-text"}>{saveStatus}</p> : null}
         </form>
       </div>
     </section>
@@ -1114,7 +1194,15 @@ function TransactionsScreen({
   );
 }
 
-function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artifacts: Artifact[] }) {
+function ReportsScreen({
+  summary,
+  artifacts,
+  operatorActor,
+}: {
+  summary: OperatorSummary;
+  artifacts: Artifact[];
+  operatorActor: string;
+}) {
   const queryClient = useQueryClient();
   const [actionStatus, setActionStatus] = useState<string | null>(null);
 
@@ -1196,16 +1284,16 @@ function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artif
       <section className="work-panel">
         <h3>Report actions</h3>
         <div className="action-row">
-          <button type="button" onClick={() => runReportsMutation.mutate()} disabled={actionPending}>
+          <button type="button" onClick={() => runReportsMutation.mutate({ actor: operatorActor })} disabled={actionPending}>
             Run reports
           </button>
-          <button type="button" onClick={() => draftCloseMutation.mutate()} disabled={actionPending}>
+          <button type="button" onClick={() => draftCloseMutation.mutate({ actor: operatorActor })} disabled={actionPending}>
             Draft close
           </button>
-          <button type="button" onClick={() => finalCloseMutation.mutate()} disabled={actionPending}>
+          <button type="button" onClick={() => finalCloseMutation.mutate({ actor: operatorActor })} disabled={actionPending}>
             Final close
           </button>
-          <button type="button" onClick={() => advisorExportMutation.mutate()} disabled={actionPending}>
+          <button type="button" onClick={() => advisorExportMutation.mutate({ actor: operatorActor })} disabled={actionPending}>
             Advisor export
           </button>
         </div>
@@ -1233,7 +1321,15 @@ function ReportsScreen({ summary, artifacts }: { summary: OperatorSummary; artif
   );
 }
 
-function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; profiles: SourceProfile[] }) {
+function SettingsScreen({
+  settings,
+  profiles,
+  operatorActor,
+}: {
+  settings?: SettingsPayload;
+  profiles: SourceProfile[];
+  operatorActor: string;
+}) {
   const queryClient = useQueryClient();
   const activeProfiles = settings?.source_profiles ?? profiles;
   const editableSettings = useMemo(
@@ -1308,6 +1404,7 @@ function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; pr
       domain: selectedSetting.domain,
       settingKey: selectedSetting.setting_key,
       value: inputToSettingValue(settingDraftValue, selectedSetting.value),
+      actor: operatorActor,
       note: settingNote,
     });
   }
@@ -1319,6 +1416,7 @@ function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; pr
     }
     confirmationMutation.mutate({
       sourceKey: selectedSourceKey,
+      actor: operatorActor,
       note: confirmationNote,
     });
   }
@@ -1433,7 +1531,7 @@ function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; pr
               {confirmationStatus ? <p className="form-status">{confirmationStatus}</p> : null}
             </form>
           ) : (
-            <p className="empty-state">All required source samples are confirmed</p>
+            <p className="empty-state">No source profile samples pending confirmation</p>
           )}
           <DataTable
             data={activeProfiles}
@@ -1441,6 +1539,8 @@ function SettingsScreen({ settings, profiles }: { settings?: SettingsPayload; pr
             columns={[
               { header: "Source", accessorKey: "display_name" },
               { header: "Type", accessorKey: "account_type" },
+              { header: "Template", cell: ({ row }) => (row.original.is_template ? "Yes" : "No") },
+              { header: "Enabled", cell: ({ row }) => (row.original.enabled ? "Yes" : "No") },
               { header: "Required", cell: ({ row }) => (row.original.required ? "Yes" : "No") },
               { header: "Confirmation", accessorKey: "confirmation_status" },
             ]}

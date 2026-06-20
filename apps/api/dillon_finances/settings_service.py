@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -13,8 +14,12 @@ from dillon_finances.source_profiles import iter_source_profiles, list_source_pr
 
 
 SETTINGS_TABS = [
+    "Branding",
     "Data root",
     "Sources",
+    "Categories",
+    "Locale",
+    "Operator",
     "Thresholds",
     "Reports",
     "Privacy",
@@ -63,6 +68,41 @@ def _load_value(value_json: str) -> Any:
 def default_settings() -> list[dict[str, Any]]:
     settings: list[dict[str, Any]] = [
         {
+            "domain": "branding",
+            "setting_key": "branding.app_display_name",
+            "value": "Family Finance OS",
+            "editable": True,
+            "note_required": False,
+        },
+        {
+            "domain": "household",
+            "setting_key": "household.display_name",
+            "value": "Household",
+            "editable": True,
+            "note_required": False,
+        },
+        {
+            "domain": "operator",
+            "setting_key": "operator.default_actor",
+            "value": "owner",
+            "editable": True,
+            "note_required": False,
+        },
+        {
+            "domain": "locale",
+            "setting_key": "locale.default_locale",
+            "value": "en-US",
+            "editable": True,
+            "note_required": False,
+        },
+        {
+            "domain": "locale",
+            "setting_key": "locale.currency_code",
+            "value": "USD",
+            "editable": True,
+            "note_required": False,
+        },
+        {
             "domain": "privacy",
             "setting_key": "runtime.local_only",
             "value": True,
@@ -75,6 +115,20 @@ def default_settings() -> list[dict[str, Any]]:
             "value": True,
             "editable": False,
             "note_required": True,
+        },
+        {
+            "domain": "reports",
+            "setting_key": "reports.monthly_close.title_template",
+            "value": "{app_name} Monthly Close - {month}",
+            "editable": True,
+            "note_required": False,
+        },
+        {
+            "domain": "reports",
+            "setting_key": "reports.advisor_export.title_template",
+            "value": "{app_name} Advisor Export - {month}",
+            "editable": True,
+            "note_required": False,
         },
         {
             "domain": "future_integrations",
@@ -105,6 +159,13 @@ def default_settings() -> list[dict[str, Any]]:
                 {
                     "domain": "sources",
                     "setting_key": f"sources.{profile.source_key}.required",
+                    "value": profile.required,
+                    "editable": True,
+                    "note_required": True,
+                },
+                {
+                    "domain": "sources",
+                    "setting_key": f"sources.{profile.source_key}.enabled",
                     "value": profile.required,
                     "editable": True,
                     "note_required": True,
@@ -171,11 +232,55 @@ def _validate_change(change: SettingChange, existing: Setting) -> None:
                 "Freshness thresholds must be an integer from 1 to 365 days.",
             )
 
+    if change.domain in {"branding", "household"}:
+        if not isinstance(change.value, str) or not change.value.strip() or len(change.value.strip()) > 120:
+            raise SettingsValidationError(
+                "invalid_display_setting",
+                "Display settings must be non-empty text of 120 characters or fewer.",
+            )
+
+    if change.domain == "operator" and change.setting_key == "operator.default_actor":
+        if not isinstance(change.value, str) or not change.value.strip() or len(change.value.strip()) > 80:
+            raise SettingsValidationError(
+                "invalid_actor_setting",
+                "Default actor must be non-empty text of 80 characters or fewer.",
+            )
+
+    if change.domain == "locale" and change.setting_key == "locale.default_locale":
+        if change.value != "en-US":
+            raise SettingsValidationError(
+                "unsupported_locale",
+                "Only en-US is supported by the maintained v0.2 locale bundle.",
+            )
+
+    if change.domain == "locale" and change.setting_key == "locale.currency_code":
+        if not isinstance(change.value, str) or not re.fullmatch(r"[A-Z]{3}", change.value):
+            raise SettingsValidationError(
+                "invalid_currency_code",
+                "Currency code must be a three-letter ISO-style uppercase code.",
+            )
+
+    if change.domain == "reports" and change.setting_key.endswith(".title_template"):
+        if not isinstance(change.value, str) or "{month}" not in change.value or len(change.value) > 200:
+            raise SettingsValidationError(
+                "invalid_report_title_template",
+                "Report title templates must include {month} and be 200 characters or fewer.",
+            )
+
     if change.domain == "sources" and change.setting_key.endswith(".profile_confirmation_status"):
         if change.value not in SOURCE_PROFILE_CONFIRMATION_STATUSES:
             raise SettingsValidationError(
                 "invalid_source_profile_confirmation",
                 "Source profile confirmation must use an approved v1 status.",
+            )
+
+    if change.domain == "sources" and (
+        change.setting_key.endswith(".required") or change.setting_key.endswith(".enabled")
+    ):
+        if not isinstance(change.value, bool):
+            raise SettingsValidationError(
+                "invalid_source_boolean_setting",
+                "Source enabled and required settings must be boolean values.",
             )
 
     previous_value = _load_value(existing.value_json)
@@ -187,14 +292,15 @@ def _validate_change(change: SettingChange, existing: Setting) -> None:
         and change.value > previous_value
         and change.value - previous_value >= 30
     )
-    disabling_required_source = (
+    changing_source_coverage = (
         change.domain == "sources"
-        and change.setting_key.endswith(".required")
-        and previous_value is True
-        and change.value is False
+        and (change.setting_key.endswith(".required") or change.setting_key.endswith(".enabled"))
+        and isinstance(previous_value, bool)
+        and isinstance(change.value, bool)
+        and previous_value != change.value
     )
 
-    if (note_required or materially_relaxed_freshness or disabling_required_source) and not (
+    if (note_required or materially_relaxed_freshness or changing_source_coverage) and not (
         change.note and change.note.strip()
     ):
         raise SettingsValidationError(
@@ -317,6 +423,18 @@ def settings_payload(
                     ("sources", f"sources.{profile.source_key}.profile_confirmation_status"),
                     profile.confirmation_status,
                 ),
+                "is_template": True,
+                "enabled": bool(
+                    settings_by_key.get(
+                        ("sources", f"sources.{profile.source_key}.enabled"),
+                        profile.required,
+                    )
+                    or settings_by_key.get(
+                        ("sources", f"sources.{profile.source_key}.required"),
+                        profile.required,
+                    )
+                ),
+                "template_required_default": profile.required,
             }
             for profile in list_source_profiles()
         ],

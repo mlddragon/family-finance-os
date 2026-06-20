@@ -9,7 +9,7 @@ def test_static_ui_route_does_not_serve_paths_outside_static_dir(tmp_path, monke
     static_dir = tmp_path / "static"
     static_dir.mkdir()
     (static_dir / "assets").mkdir()
-    (static_dir / "index.html").write_text("<html>Dillon Finances UI</html>")
+    (static_dir / "index.html").write_text("<html>Family Finance OS UI</html>")
     (tmp_path / "private.txt").write_text("outside static dir")
     monkeypatch.setattr(main_module, "STATIC_DIR", static_dir)
 
@@ -19,5 +19,5 @@ def test_static_ui_route_does_not_serve_paths_outside_static_dir(tmp_path, monke
         response = client.get("/%2E%2E/private.txt")
 
     assert response.status_code == 200
-    assert response.text == "<html>Dillon Finances UI</html>"
+    assert response.text == "<html>Family Finance OS UI</html>"
     assert "outside static dir" not in response.text

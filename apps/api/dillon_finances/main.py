@@ -11,6 +11,15 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from dillon_finances import __version__
+from dillon_finances.category_service import (
+    CategoryCreateRequest,
+    CategoryError,
+    CategoryPatchRequest,
+    create_custom_category,
+    list_categories,
+    seed_default_categories,
+    update_category,
+)
 from dillon_finances.database import create_sqlite_engine, upgrade_database
 from dillon_finances.decision_events import (
     DecisionEventError,
@@ -53,7 +62,7 @@ from dillon_finances.settings_service import (
 )
 
 
-APP_NAME = "Dillon Finances"
+APP_NAME = "Family Finance OS"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
@@ -118,6 +127,7 @@ def create_app(
         get_data_root()
         with create_session() as session:
             seed_default_settings(session)
+            seed_default_categories(session)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -314,6 +324,33 @@ def create_app(
                     status_code=422,
                     detail=[{"code": exc.code, "message": exc.message}],
                 ) from exc
+
+    def category_http_error(exc: CategoryError) -> HTTPException:
+        return HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        )
+
+    @app.get("/api/categories")
+    def get_categories() -> Dict[str, Any]:
+        with create_session() as session:
+            return {"categories": list_categories(session)}
+
+    @app.post("/api/categories")
+    def post_category(payload: CategoryCreateRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return {"category": create_custom_category(session, payload)}
+            except CategoryError as exc:
+                raise category_http_error(exc) from exc
+
+    @app.patch("/api/categories/{category_key}")
+    def patch_category(category_key: str, payload: CategoryPatchRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return {"category": update_category(session, category_key, payload)}
+            except CategoryError as exc:
+                raise category_http_error(exc) from exc
 
     def reporting_http_error(exc: ReportingError) -> HTTPException:
         return HTTPException(
