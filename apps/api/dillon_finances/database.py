@@ -11,14 +11,34 @@ from sqlalchemy.engine import Engine
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
 
+class DatabaseConfigurationError(RuntimeError):
+    pass
+
+
+def _ensure_safe_database_path(database_path: Path) -> Path:
+    expanded_path = database_path.expanduser()
+    parent = expanded_path.parent
+    if parent.is_symlink() or (parent.exists() and not parent.is_dir()):
+        raise DatabaseConfigurationError("SQLite database parent must be a safe directory.")
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise DatabaseConfigurationError("SQLite database parent must be a safe directory.") from exc
+    if parent.is_symlink() or not parent.is_dir():
+        raise DatabaseConfigurationError("SQLite database parent must be a safe directory.")
+    if expanded_path.is_symlink() or (expanded_path.exists() and not expanded_path.is_file()):
+        raise DatabaseConfigurationError("SQLite database file must be a safe regular file.")
+    return expanded_path.resolve()
+
+
 def sqlite_url(database_path: Path) -> str:
     return f"sqlite:///{database_path.expanduser().resolve()}"
 
 
 def create_sqlite_engine(database_path: Path) -> Engine:
-    database_path.expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+    resolved_database_path = _ensure_safe_database_path(database_path)
     engine = create_engine(
-        sqlite_url(database_path),
+        sqlite_url(resolved_database_path),
         connect_args={"check_same_thread": False},
         future=True,
     )
@@ -40,5 +60,5 @@ def alembic_config(database_path: Path) -> Config:
 
 
 def upgrade_database(database_path: Path) -> None:
-    database_path.expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
-    command.upgrade(alembic_config(database_path), "head")
+    resolved_database_path = _ensure_safe_database_path(database_path)
+    command.upgrade(alembic_config(resolved_database_path), "head")
