@@ -271,7 +271,9 @@ test("saves a category decision through the browser flow", async ({ page }) => {
 
   await page.getByRole("link", { name: "Review" }).click();
   await expect(page.getByRole("cell", { name: "SYNTHETIC GROCERY" })).toBeVisible();
-  await page.getByLabel("Approved category").fill("Groceries");
+  await page.getByLabel("Approved category").selectOption("__other__");
+  await page.getByLabel("Other category").fill("Groceries");
+  await page.getByLabel("Notes").fill("Creating a new category from the browser review flow.");
   await page.getByRole("button", { name: "Save decision" }).click();
 
   await expect(page.getByText("Decision saved")).toBeVisible();
@@ -282,6 +284,7 @@ test("saves a category decision through the browser flow", async ({ page }) => {
     field_name: "category",
     approved_value: "Groceries",
     explicit_user_action: true,
+    notes: "Creating a new category from the browser review flow.",
   });
 });
 
