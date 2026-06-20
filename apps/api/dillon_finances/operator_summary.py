@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from dillon_finances.ledger_normalization import list_transactions
-from dillon_finances.models import Artifact, ImportBatch, MonthlyClose, SourceFile, ValidationFinding
+from dillon_finances.models import Artifact, ImportBatch, MonthlyClose, Setting, SourceFile, ValidationFinding
 from dillon_finances.reporting import close_readiness
 from dillon_finances.source_profiles import list_source_profiles
 
@@ -28,7 +29,7 @@ def operator_summary_payload(
     latest_monthly_close = session.scalar(select(MonthlyClose).order_by(MonthlyClose.created_at.desc(), MonthlyClose.id.desc()))
 
     latest_import = _latest_import_payload(import_batches)
-    source_summary = _source_summary(import_batches)
+    source_summary = _source_summary(session, import_batches)
     validation_summary = _validation_summary(findings)
     review_summary = _review_summary(transactions)
     monthly_close = _monthly_close_summary(
@@ -55,6 +56,7 @@ def operator_summary_payload(
             validation=validation_summary,
             review=review_summary,
             sources=source_summary,
+            monthly_close=monthly_close,
         ),
     }
 
@@ -84,12 +86,17 @@ def _latest_import_payload(import_batches: list[ImportBatch]) -> dict[str, Any]:
     }
 
 
-def _source_summary(import_batches: list[ImportBatch]) -> dict[str, Any]:
+def _source_summary(session: Session, import_batches: list[ImportBatch]) -> dict[str, Any]:
     profiles = list(list_source_profiles())
+    settings = _settings_lookup(session)
     accepted_batches = [batch for batch in import_batches if batch.status == "accepted" and batch.source]
     imported_source_keys = sorted({batch.source.source_key for batch in accepted_batches})
     imported_key_set = set(imported_source_keys)
-    required_keys = {profile.source_key for profile in profiles if profile.required}
+    required_keys = {
+        profile.source_key
+        for profile in profiles
+        if bool(settings.get(("sources", f"sources.{profile.source_key}.required"), profile.required))
+    }
     missing_required_keys = sorted(required_keys - imported_key_set)
 
     latest_by_source: dict[str, ImportBatch] = {}
@@ -108,6 +115,22 @@ def _source_summary(import_batches: list[ImportBatch]) -> dict[str, Any]:
         "profiles": [
             {
                 **profile.to_dict(),
+                "display_name": settings.get(
+                    ("sources", f"sources.{profile.source_key}.display_name"),
+                    profile.display_name,
+                ),
+                "required": settings.get(
+                    ("sources", f"sources.{profile.source_key}.required"),
+                    profile.required,
+                ),
+                "freshness_threshold_days": settings.get(
+                    ("freshness", f"sources.{profile.source_key}.freshness_threshold_days"),
+                    profile.freshness_threshold_days,
+                ),
+                "confirmation_status": settings.get(
+                    ("sources", f"sources.{profile.source_key}.profile_confirmation_status"),
+                    profile.confirmation_status,
+                ),
                 "imported": profile.source_key in imported_key_set,
                 "latest_import_status": latest_by_source.get(profile.source_key).status
                 if profile.source_key in latest_by_source
@@ -119,6 +142,11 @@ def _source_summary(import_batches: list[ImportBatch]) -> dict[str, Any]:
             for profile in profiles
         ],
     }
+
+
+def _settings_lookup(session: Session) -> dict[tuple[str, str], Any]:
+    settings = session.scalars(select(Setting)).all()
+    return {(setting.domain, setting.setting_key): json.loads(setting.value_json) for setting in settings}
 
 
 def _validation_summary(findings: list[ValidationFinding]) -> dict[str, Any]:
@@ -166,6 +194,7 @@ def _next_action(
     validation: dict[str, Any],
     review: dict[str, Any],
     sources: dict[str, Any],
+    monthly_close: dict[str, Any],
 ) -> dict[str, str]:
     if latest_import["status"] == "none":
         return {
@@ -191,6 +220,16 @@ def _next_action(
         return {
             "code": "import_remaining_required_sources",
             "label": "Import remaining required sources",
+        }
+    if "unconfirmed_source_profiles" in monthly_close["blockers"]:
+        return {
+            "code": "confirm_source_profile_samples",
+            "label": "Confirm source profile samples",
+        }
+    if monthly_close["status"] == "final":
+        return {
+            "code": "refresh_source_data",
+            "label": "Refresh source data for the next cycle",
         }
     return {
         "code": "run_reports_monthly_close",

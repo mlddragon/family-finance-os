@@ -90,6 +90,10 @@ class SourceFile(TimestampedModel):
     file_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
     validation_status: Mapped[str] = mapped_column(String(40), default="pending", nullable=False)
+    storage_status: Mapped[str] = mapped_column(String(40), default="present", nullable=False)
+    destroyed_at: Mapped[Optional[str]] = mapped_column(String(40))
+    destroyed_by: Mapped[Optional[str]] = mapped_column(String(120))
+    destroyed_reason: Mapped[Optional[str]] = mapped_column(Text)
     row_count: Mapped[Optional[int]] = mapped_column(Integer)
     parser_version: Mapped[Optional[str]] = mapped_column(String(80))
 
@@ -116,6 +120,19 @@ class ImportBatch(TimestampedModel):
     source_account: Mapped[Optional[SourceAccount]] = relationship(back_populates="import_batches")
     source_files: Mapped[list[SourceFile]] = relationship(back_populates="import_batch")
     imported_rows: Mapped[list["ImportedRow"]] = relationship(back_populates="import_batch")
+    events: Mapped[list["ImportBatchEvent"]] = relationship(back_populates="import_batch")
+
+
+class ImportBatchEvent(TimestampedModel):
+    __tablename__ = "import_batch_events"
+
+    import_batch_id: Mapped[str] = mapped_column(ForeignKey("import_batches.id"), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text)
+
+    import_batch: Mapped[ImportBatch] = relationship(back_populates="events")
 
 
 class CanonicalTransaction(TimestampedModel):
@@ -170,6 +187,20 @@ class ValidationFinding(TimestampedModel):
     target_id: Mapped[Optional[str]] = mapped_column(String(36))
     status: Mapped[str] = mapped_column(String(40), default="open", nullable=False)
     resolution_event_id: Mapped[Optional[str]] = mapped_column(String(36))
+
+    events: Mapped[list["ValidationFindingEvent"]] = relationship(back_populates="validation_finding")
+
+
+class ValidationFindingEvent(TimestampedModel):
+    __tablename__ = "validation_finding_events"
+
+    validation_finding_id: Mapped[str] = mapped_column(ForeignKey("validation_findings.id"), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text)
+
+    validation_finding: Mapped[ValidationFinding] = relationship(back_populates="events")
 
 
 class Setting(TimestampedModel):

@@ -34,10 +34,80 @@ const transaction = {
   imported_fact_count: 1,
 };
 
-async function mockApi(page: Page, onDecision?: (payload: unknown) => void) {
+async function mockApi(
+  page: Page,
+  onDecision?: (payload: unknown) => void,
+  onBatchAction?: (action: string, payload: unknown) => void,
+  onSettingChange?: (payload: unknown) => void,
+) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+
+    if (path === "/api/settings" && request.method() === "PATCH") {
+      const payload = request.postDataJSON();
+      onSettingChange?.(payload);
+      await route.fulfill({
+        json: {
+          tabs: ["Data root", "Sources", "Thresholds", "Reports", "Privacy", "Future integrations"],
+          local_only: true,
+          data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
+          source_profiles: sourceProfiles,
+          settings: [
+            {
+              id: "setting-1",
+              domain: "sources",
+              setting_key: "sources.chase_prime_visa.required",
+              value: false,
+              editable: true,
+              note_required: true,
+            },
+          ],
+          settings_events: [
+            {
+              id: "setting-event-1",
+              domain: "sources",
+              setting_key: "sources.chase_prime_visa.required",
+              new_value: false,
+              actor: "mason",
+              created_at: "2026-06-18T00:00:00Z",
+            },
+          ],
+        },
+      });
+      return;
+    }
+
+    if (path === "/api/import-batches/batch-1/validate") {
+      onBatchAction?.("validate", request.postDataJSON());
+      await route.fulfill({
+        json: {
+          id: "batch-1",
+          status: "validated",
+          validation_status: "passed",
+          row_count: 1,
+          source_key: "chase_prime_visa",
+          source_files: [],
+          findings: [],
+        },
+      });
+      return;
+    }
+
+    if (path === "/api/import-batches/batch-1/accept") {
+      onBatchAction?.("accept", request.postDataJSON());
+      await route.fulfill({
+        json: {
+          id: "batch-1",
+          status: "accepted",
+          validation_status: "accepted",
+          row_count: 1,
+          source_key: "chase_prime_visa",
+          source_files: [],
+        },
+      });
+      return;
+    }
 
     if (path === "/api/decision-events") {
       onDecision?.(request.postDataJSON());
@@ -100,15 +170,15 @@ async function mockApi(page: Page, onDecision?: (payload: unknown) => void) {
         import_batches: [
           {
             id: "batch-1",
-            status: "accepted",
-            validation_status: "accepted",
+            status: "detected",
+            validation_status: "pending",
             row_count: 1,
             source_key: "chase_prime_visa",
             source_files: [
               {
                 id: "file-1",
                 original_filename: "SYNTHETIC_chase_summary.csv",
-                validation_status: "accepted",
+                validation_status: "pending",
                 row_count: 1,
               },
             ],
@@ -142,7 +212,16 @@ async function mockApi(page: Page, onDecision?: (payload: unknown) => void) {
         local_only: true,
         data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
         source_profiles: sourceProfiles,
-        settings: [],
+        settings: [
+          {
+            id: "setting-1",
+            domain: "sources",
+            setting_key: "sources.chase_prime_visa.required",
+            value: true,
+            editable: true,
+            note_required: true,
+          },
+        ],
         settings_events: [],
       },
       "/api/artifacts": {
@@ -192,7 +271,9 @@ test("saves a category decision through the browser flow", async ({ page }) => {
 
   await page.getByRole("link", { name: "Review" }).click();
   await expect(page.getByRole("cell", { name: "SYNTHETIC GROCERY" })).toBeVisible();
-  await page.getByLabel("Approved category").fill("Groceries");
+  await page.getByLabel("Approved category").selectOption("__other__");
+  await page.getByLabel("Other category").fill("Groceries");
+  await page.getByLabel("Notes").fill("Creating a new category from the browser review flow.");
   await page.getByRole("button", { name: "Save decision" }).click();
 
   await expect(page.getByText("Decision saved")).toBeVisible();
@@ -203,5 +284,53 @@ test("saves a category decision through the browser flow", async ({ page }) => {
     field_name: "category",
     approved_value: "Groceries",
     explicit_user_action: true,
+    notes: "Creating a new category from the browser review flow.",
+  });
+});
+
+test("validates and accepts an import batch through the browser flow", async ({ page }) => {
+  const batchActions: Array<{ action: string; payload: unknown }> = [];
+  await mockApi(page, undefined, (action, payload) => {
+    batchActions.push({ action, payload });
+  });
+  await page.goto("/");
+
+  await page.getByRole("link", { name: "Sources" }).click();
+  await expect(page.getByText("SYNTHETIC_chase_summary.csv")).toBeVisible();
+  await page.getByRole("button", { name: "Validate batch" }).click();
+  await expect(page.getByText("Batch validation completed")).toBeVisible();
+  await page.getByRole("button", { name: "Accept batch" }).click();
+  await expect(page.getByText("Batch accepted")).toBeVisible();
+
+  expect(batchActions).toEqual([
+    { action: "validate", payload: null },
+    { action: "accept", payload: { acknowledge_warnings: false } },
+  ]);
+});
+
+test("saves an editable setting through the browser flow", async ({ page }) => {
+  let settingsPayload: unknown;
+  await mockApi(page, undefined, undefined, (payload) => {
+    settingsPayload = payload;
+  });
+  await page.goto("/");
+
+  await page.getByRole("link", { name: "Settings" }).click();
+  await page.getByLabel("Editable setting").selectOption("sources.chase_prime_visa.required");
+  await page.getByLabel("Setting value").selectOption("false");
+  await page.getByLabel("Change note").fill("Temporarily optional for v1 browser smoke testing.");
+  await page.getByRole("button", { name: "Save setting" }).click();
+
+  await expect(page.getByText("Setting saved")).toBeVisible();
+  expect(settingsPayload).toMatchObject({
+    actor: "mason",
+    changes: [
+      {
+        domain: "sources",
+        setting_key: "sources.chase_prime_visa.required",
+        value: false,
+        note: "Temporarily optional for v1 browser smoke testing.",
+      },
+    ],
   });
 });
