@@ -5,9 +5,11 @@ import json
 from datetime import date, timedelta
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from dillon_finances.main import create_app
+from dillon_finances.runtime import DataRootConfigurationError
 
 
 CHASE_HEADER = "Transaction Date,Post Date,Description,Category,Amount\n"
@@ -181,12 +183,9 @@ def test_report_run_blocks_artifact_root_symlink_escape(tmp_path):
     (tmp_path / "reports").symlink_to(outside_reports_dir, target_is_directory=True)
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
-    with TestClient(app) as client:
-        create_accepted_chase_batch(client, tmp_path)
-        response = client.post("/api/reports/run", json={"actor": "mason"})
-
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "artifact_storage_path_unsafe"
+    with pytest.raises(DataRootConfigurationError, match="DATA_ROOT/reports must be a safe directory"):
+        with TestClient(app):
+            pass
     assert list(outside_reports_dir.iterdir()) == []
 
 
@@ -256,12 +255,9 @@ def test_monthly_close_blocks_artifact_root_symlink_escape(tmp_path):
     (tmp_path / "monthly_close").symlink_to(outside_close_dir, target_is_directory=True)
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
-    with TestClient(app) as client:
-        create_accepted_chase_batch(client, tmp_path)
-        response = client.post("/api/monthly-close/draft", json={"actor": "mason"})
-
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "artifact_storage_path_unsafe"
+    with pytest.raises(DataRootConfigurationError, match="DATA_ROOT/monthly_close must be a safe directory"):
+        with TestClient(app):
+            pass
     assert list(outside_close_dir.iterdir()) == []
 
 
@@ -393,12 +389,9 @@ def test_advisor_export_blocks_artifact_root_symlink_escape(tmp_path):
     (tmp_path / "exports").symlink_to(outside_exports_dir, target_is_directory=True)
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
-    with TestClient(app) as client:
-        create_accepted_chase_batch(client, tmp_path)
-        response = client.post("/api/exports/advisor", json={"actor": "mason"})
-
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "artifact_storage_path_unsafe"
+    with pytest.raises(DataRootConfigurationError, match="DATA_ROOT/exports must be a safe directory"):
+        with TestClient(app):
+            pass
     assert list(outside_exports_dir.iterdir()) == []
 
 

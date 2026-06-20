@@ -91,6 +91,10 @@ export type SourceFile = {
   stored_path?: string;
   file_sha256?: string;
   byte_size?: number;
+  storage_status?: string;
+  destroyed_at?: string | null;
+  destroyed_by?: string | null;
+  destroyed_reason?: string | null;
   validation_status: string;
   row_count: number | null;
   parser_version?: string | null;
