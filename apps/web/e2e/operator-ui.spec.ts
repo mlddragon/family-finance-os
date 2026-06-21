@@ -182,7 +182,7 @@ async function mockApi(
       "/api/operator-summary": {
         runtime: {
           app: "Family Finance OS",
-          version: "0.2.0",
+          version: "0.3.0",
           local_only: true,
           bind_host: "127.0.0.1",
           data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },

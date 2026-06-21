@@ -1674,85 +1674,64 @@ Mitigation: vendor detail plugin framework and canonical schemas.
 
 Risk: normal household tuning requires code changes.
 
-Mitigation: settings-driven behavior files and validations.
+Mitigation: SQLite-backed settings exposed through the Settings UI, with auditable change events and validations.
 
 ---
 
 # 21. Immediate Next Work
 
-## 21.1 Complete budget intelligence report package
+This section tracks the current versioned path from the local Docker MVP toward a releasable open-source MVP. It intentionally replaces the prototype-era CSV, YAML, and Streamlit next-work list. Those artifacts remain useful as research history, but they are not the implementation path for this product.
 
-Inputs:
+## 21.1 Current baseline
 
-- `normalized/family_all_transactions_enriched.csv`
-- `normalized/monthly_spending_by_category_enriched.csv`
-- `normalized/amazon_review_queue.csv`
-- `normalized/ledger_safe_amazon_enrichment_summary.csv`
+Version `0.1.0` established the local Docker MVP with synthetic data, SQLite operational state, import/validation/quarantine, review decisions, reports, monthly close, and advisor export.
 
-Outputs:
+Version `0.2.0` established open-source readiness foundations: AGPL-3.0-only licensing, generic default branding, i18n scaffolding with maintained `en-US`, database-backed install settings, source templates separated from required sources, and a stable category catalog.
 
-- `reports/budget/monthly_spending_summary.csv`
-- `reports/budget/category_spending_summary.csv`
-- `reports/budget/category_monthly_trend.csv`
-- `reports/budget/top_merchants_or_sources.csv`
-- `reports/budget/review_exposure_summary.csv`
-- `reports/budget/vendor_category_impact.csv`
-- `reports/budget/controllable_spending_levers.csv`
-- `reports/budget/budget_intelligence_summary.md`
+## 21.2 Finish current verification and owner smoke tracking
 
-## 21.2 Create project documentation
+The current build has already received owner smoke testing for the implemented v1 behaviors. Remaining verification work should focus on confirming repository hygiene, CI/test health, and local Docker readiness without committing real financial data, generated reports, database files, or credentials.
 
-Create:
+Owner real-data smoke testing remains a manual checkpoint. Evidence captured in the repository must be sanitized counts, source names, and pass/fail notes only.
 
-- `docs/project_north_star.md`
-- `docs/product_requirements.md`
-- `docs/monthly_operating_workflow.md`
-- `docs/vendor_detail_plugin_framework.md`
+## 21.3 Version 0.3.0 quality-of-life patch
 
-## 21.3 Build implementation roadmap
+The next patch should address the first usability follow-ups from the owner review:
 
-Create:
+- Settings that cannot be edited should be hidden by default, with an explicit control to show read-only settings.
+- Settings lists should use friendly names by default, not technical setting keys.
+- Settings lists should show value and default value by default.
+- Settings lists should support optional technical columns such as changed-from-default, domain, raw setting key, and editable status.
+- Settings audit history should show saved notes.
 
-- `docs/implementation_roadmap.md`
+This is tracked by GitHub issues `#47`, `#48`, and `#49`.
 
-Roadmap must optimize the loop between:
+## 21.4 User, persona, permission, and audit foundations
 
-- Codex implementation
-- ChatGPT analysis
-- human review
-- local validation
+After `0.3.0`, the next product foundation is the lightweight multi-user framing discussed with the owner:
 
-## 21.4 Build settings/config foundation
+- selectable local user/persona context before full authentication
+- system actor with system personas such as importer, validator, report generator, and scheduler
+- Administrator as an elevated administrative persona, not the owner of financial data
+- Finance Manager as the highest financial-data authority
+- lightweight permission matrix with immutable permission-state audit records
+- deny entries that override inherited allows
+- current display names in main audit views, with historical names available in details when audit fidelity requires them
+- admin/elevated mode for risky settings and approval-rule changes
+- optional approval mode for risky or high-value changes, hidden unless enabled
 
-Create or validate:
+This work is tracked by GitHub issues `#50`, `#51`, `#52`, `#53`, `#54`, and `#55`.
 
-- `config/system_settings.yaml`
-- `config/vendor_plugins.yaml`
-- `config/review_rules.yaml`
-- `config/matching_rules.yaml`
-- `config/budget_policy.yaml`
-- `config/dashboard_settings.yaml`
+## 21.5 Later product foundations
 
-## 21.5 Build read-only dashboard MVP
+The following remain important but should wait until the user/persona/permission foundation is stable:
 
-Create local Streamlit dashboard.
-
-MVP pages:
-
-1. Current Status
-2. Monthly Spending
-3. Review Queue
-4. Projects / Reimbursements / Tax
-5. Net Worth / Long-Term Plan
-6. Data Freshness / Validation
-
-## 21.6 Net worth snapshot v1
-
-Create manual snapshot structure and report.
-
-## 21.7 Vendor plugin framework
-
-Refactor toward a shared vendor detail plugin framework without breaking the currently validated Amazon outputs.
+- net worth snapshot and long-term planning workflows
+- vendor enrichment beyond source-file imports, including Amazon, Walmart, and Costco item-level detail
+- locally hosted LLM or vendor-agnostic AI scaffolding beyond approved stubs
+- automated high-confidence decisions after human-reviewed rules mature
+- role-limited advisor/report-sharing flows
+- LAN/NAS deployment hardening and authentication
 
 ---
 

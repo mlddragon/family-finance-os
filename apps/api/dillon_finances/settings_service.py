@@ -70,6 +70,7 @@ def default_settings() -> list[dict[str, Any]]:
         {
             "domain": "branding",
             "setting_key": "branding.app_display_name",
+            "friendly_name": "App display name",
             "value": "Family Finance OS",
             "editable": True,
             "note_required": False,
@@ -77,6 +78,7 @@ def default_settings() -> list[dict[str, Any]]:
         {
             "domain": "household",
             "setting_key": "household.display_name",
+            "friendly_name": "Household display name",
             "value": "Household",
             "editable": True,
             "note_required": False,
@@ -84,6 +86,7 @@ def default_settings() -> list[dict[str, Any]]:
         {
             "domain": "operator",
             "setting_key": "operator.default_actor",
+            "friendly_name": "Default operator",
             "value": "owner",
             "editable": True,
             "note_required": False,
@@ -91,6 +94,7 @@ def default_settings() -> list[dict[str, Any]]:
         {
             "domain": "locale",
             "setting_key": "locale.default_locale",
+            "friendly_name": "Default locale",
             "value": "en-US",
             "editable": True,
             "note_required": False,
@@ -98,6 +102,7 @@ def default_settings() -> list[dict[str, Any]]:
         {
             "domain": "locale",
             "setting_key": "locale.currency_code",
+            "friendly_name": "Currency code",
             "value": "USD",
             "editable": True,
             "note_required": False,
@@ -105,6 +110,7 @@ def default_settings() -> list[dict[str, Any]]:
         {
             "domain": "privacy",
             "setting_key": "runtime.local_only",
+            "friendly_name": "Local-only mode",
             "value": True,
             "editable": False,
             "note_required": True,
@@ -112,6 +118,7 @@ def default_settings() -> list[dict[str, Any]]:
         {
             "domain": "reports",
             "setting_key": "monthly_close.requires_all_required_sources",
+            "friendly_name": "Require all required sources for monthly close",
             "value": True,
             "editable": False,
             "note_required": True,
@@ -119,6 +126,7 @@ def default_settings() -> list[dict[str, Any]]:
         {
             "domain": "reports",
             "setting_key": "reports.monthly_close.title_template",
+            "friendly_name": "Monthly close title template",
             "value": "{app_name} Monthly Close - {month}",
             "editable": True,
             "note_required": False,
@@ -126,6 +134,7 @@ def default_settings() -> list[dict[str, Any]]:
         {
             "domain": "reports",
             "setting_key": "reports.advisor_export.title_template",
+            "friendly_name": "Advisor export title template",
             "value": "{app_name} Advisor Export - {month}",
             "editable": True,
             "note_required": False,
@@ -133,6 +142,7 @@ def default_settings() -> list[dict[str, Any]]:
         {
             "domain": "future_integrations",
             "setting_key": "vendor_enrichment.status",
+            "friendly_name": "Vendor enrichment status",
             "value": "deferred",
             "editable": False,
             "note_required": True,
@@ -140,6 +150,7 @@ def default_settings() -> list[dict[str, Any]]:
         {
             "domain": "future_integrations",
             "setting_key": "ai_integration.status",
+            "friendly_name": "AI integration status",
             "value": "disabled",
             "editable": False,
             "note_required": True,
@@ -152,6 +163,7 @@ def default_settings() -> list[dict[str, Any]]:
                 {
                     "domain": "sources",
                     "setting_key": f"sources.{profile.source_key}.display_name",
+                    "friendly_name": f"{profile.display_name} display name",
                     "value": profile.display_name,
                     "editable": True,
                     "note_required": False,
@@ -159,6 +171,7 @@ def default_settings() -> list[dict[str, Any]]:
                 {
                     "domain": "sources",
                     "setting_key": f"sources.{profile.source_key}.required",
+                    "friendly_name": f"{profile.display_name} required",
                     "value": profile.required,
                     "editable": True,
                     "note_required": True,
@@ -166,6 +179,7 @@ def default_settings() -> list[dict[str, Any]]:
                 {
                     "domain": "sources",
                     "setting_key": f"sources.{profile.source_key}.enabled",
+                    "friendly_name": f"{profile.display_name} enabled",
                     "value": profile.required,
                     "editable": True,
                     "note_required": True,
@@ -173,6 +187,7 @@ def default_settings() -> list[dict[str, Any]]:
                 {
                     "domain": "freshness",
                     "setting_key": f"sources.{profile.source_key}.freshness_threshold_days",
+                    "friendly_name": f"{profile.display_name} freshness threshold",
                     "value": profile.freshness_threshold_days,
                     "editable": True,
                     "note_required": False,
@@ -180,6 +195,7 @@ def default_settings() -> list[dict[str, Any]]:
                 {
                     "domain": "sources",
                     "setting_key": f"sources.{profile.source_key}.profile_confirmation_status",
+                    "friendly_name": f"{profile.display_name} profile confirmation status",
                     "value": profile.confirmation_status,
                     "editable": True,
                     "note_required": True,
@@ -311,22 +327,29 @@ def _validate_change(change: SettingChange, existing: Setting) -> None:
 
 def list_settings(session: Session) -> list[dict[str, Any]]:
     records = session.scalars(select(Setting).order_by(Setting.domain, Setting.setting_key)).all()
-    return [
-        {
-            "id": record.id,
-            "domain": record.domain,
-            "setting_key": record.setting_key,
-            "value": _load_value(record.value_json),
-            "created_at": record.created_at,
-            "updated_at": record.updated_at,
-            **{
-                key: value
-                for key, value in _setting_metadata(record.domain, record.setting_key).items()
-                if key not in {"domain", "setting_key", "value"}
-            },
-        }
-        for record in records
-    ]
+    settings: list[dict[str, Any]] = []
+    for record in records:
+        metadata = _setting_metadata(record.domain, record.setting_key)
+        value = _load_value(record.value_json)
+        default_value = metadata["value"]
+        settings.append(
+            {
+                "id": record.id,
+                "domain": record.domain,
+                "setting_key": record.setting_key,
+                "value": value,
+                "default_value": default_value,
+                "changed_from_default": value != default_value,
+                "created_at": record.created_at,
+                "updated_at": record.updated_at,
+                **{
+                    key: value
+                    for key, value in metadata.items()
+                    if key not in {"domain", "setting_key", "value"}
+                },
+            }
+        )
+    return settings
 
 
 def list_settings_events(session: Session) -> list[dict[str, Any]]:
@@ -336,6 +359,7 @@ def list_settings_events(session: Session) -> list[dict[str, Any]]:
             "id": record.id,
             "domain": record.domain,
             "setting_key": record.setting_key,
+            "friendly_name": _setting_metadata(record.domain, record.setting_key)["friendly_name"],
             "previous_value": _load_value(record.previous_value_json)
             if record.previous_value_json is not None
             else None,
@@ -447,6 +471,7 @@ def serialize_events(events: Iterable[SettingEvent]) -> list[dict[str, Any]]:
             "id": event.id,
             "domain": event.domain,
             "setting_key": event.setting_key,
+            "friendly_name": _setting_metadata(event.domain, event.setting_key)["friendly_name"],
             "previous_value": _load_value(event.previous_value_json)
             if event.previous_value_json is not None
             else None,

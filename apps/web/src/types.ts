@@ -169,7 +169,10 @@ export type SettingsPayload = {
     id: string;
     domain: string;
     setting_key: string;
+    friendly_name: string;
     value: unknown;
+    default_value: unknown;
+    changed_from_default: boolean;
     editable: boolean;
     note_required: boolean;
   }>;
@@ -177,8 +180,10 @@ export type SettingsPayload = {
     id: string;
     domain: string;
     setting_key: string;
+    friendly_name?: string;
     new_value: unknown;
     actor: string;
+    notes?: string | null;
     created_at: string;
   }>;
   source_profiles: SourceProfile[];

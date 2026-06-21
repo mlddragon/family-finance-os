@@ -520,6 +520,28 @@ input[readonly] {
   gap: 12px;
 }
 
+.settings-view-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 12px;
+  color: #425048;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.settings-view-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-view-controls input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+}
+
 .form-banner {
   border: 1px solid #ded2a4;
   border-radius: 6px;

@@ -4,6 +4,8 @@ This repository contains Family Finance OS, a local-first family financial opera
 
 The landed v1 build is treated as `0.1.0`. The `0.2.0` line prepares the product for future open-source release by adding AGPL licensing, localization scaffolding, generic install defaults, configurable install-specific text, and a stable category catalog.
 
+The `0.3.0` line focuses on small Settings and audit usability improvements before the next user/persona/permission foundation work.
+
 The app runs as a local Docker Compose app, serves the browser UI at `127.0.0.1:8080`, stores operational state in SQLite under an external `DATA_ROOT`, and keeps raw/source evidence and generated artifacts out of git.
 
 ## License

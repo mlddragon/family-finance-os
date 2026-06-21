@@ -1,6 +1,6 @@
 [project]
 name = "dillon-finances"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local-first family financial operating system"
 license = { text = "AGPL-3.0-only" }
 authors = [{ name = "Mason Dillon" }]

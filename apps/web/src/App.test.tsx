@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { App } from "./App";
@@ -182,8 +182,11 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
             id: "setting-branding",
             domain: "branding",
             setting_key: "branding.app_display_name",
+            friendly_name: "App display name",
             value:
               changedSetting?.setting_key === "branding.app_display_name" ? changedSetting.value : "Family Finance OS",
+            default_value: "Family Finance OS",
+            changed_from_default: changedSetting?.setting_key === "branding.app_display_name",
             editable: true,
             note_required: false,
           },
@@ -191,7 +194,10 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
             id: "setting-operator",
             domain: "operator",
             setting_key: "operator.default_actor",
+            friendly_name: "Default operator",
             value: "owner",
+            default_value: "owner",
+            changed_from_default: false,
             editable: true,
             note_required: false,
           },
@@ -199,7 +205,10 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
             id: "setting-1",
             domain: "privacy",
             setting_key: "runtime.local_only",
+            friendly_name: "Local-only mode",
             value: true,
+            default_value: true,
+            changed_from_default: false,
             editable: false,
             note_required: true,
           },
@@ -207,7 +216,11 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
             id: "setting-2",
             domain: "sources",
             setting_key: "sources.chase_prime_visa.required",
+            friendly_name: "Chase Prime Visa required",
             value: changedSetting?.setting_key === "sources.chase_prime_visa.required" ? changedSetting.value : true,
+            default_value: false,
+            changed_from_default:
+              changedSetting?.setting_key === "sources.chase_prime_visa.required" ? changedSetting.value !== false : true,
             editable: true,
             note_required: true,
           },
@@ -217,8 +230,13 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
             id: "setting-event-2",
             domain: changedSetting?.domain ?? "sources",
             setting_key: changedSetting?.setting_key ?? "sources.chase_prime_visa.profile_confirmation_status",
+            friendly_name:
+              changedSetting?.setting_key === "sources.chase_prime_visa.required"
+                ? "Chase Prime Visa required"
+                : "Chase Prime Visa profile confirmation status",
             new_value: changedSetting?.value ?? "owner_confirmed_header_sample",
             actor: "owner",
+            notes: changedSetting?.note ?? "Header-only source profile sample approved.",
             created_at: "2026-06-18T00:01:00Z",
           },
         ],
@@ -366,7 +384,7 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
       "/api/operator-summary": {
         runtime: {
           app: "Family Finance OS",
-          version: "0.2.0",
+          version: "0.3.0",
           local_only: true,
           bind_host: "127.0.0.1",
           data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
@@ -499,7 +517,10 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
             id: "setting-branding",
             domain: "branding",
             setting_key: "branding.app_display_name",
+            friendly_name: "App display name",
             value: "Family Finance OS",
+            default_value: "Family Finance OS",
+            changed_from_default: false,
             editable: true,
             note_required: false,
           },
@@ -507,7 +528,10 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
             id: "setting-operator",
             domain: "operator",
             setting_key: "operator.default_actor",
+            friendly_name: "Default operator",
             value: "owner",
+            default_value: "owner",
+            changed_from_default: false,
             editable: true,
             note_required: false,
           },
@@ -515,7 +539,10 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
             id: "setting-1",
             domain: "privacy",
             setting_key: "runtime.local_only",
+            friendly_name: "Local-only mode",
             value: true,
+            default_value: true,
+            changed_from_default: false,
             editable: false,
             note_required: true,
           },
@@ -523,7 +550,10 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
             id: "setting-2",
             domain: "sources",
             setting_key: "sources.chase_prime_visa.required",
+            friendly_name: "Chase Prime Visa required",
             value: true,
+            default_value: false,
+            changed_from_default: true,
             editable: true,
             note_required: true,
           },
@@ -533,8 +563,10 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
             id: "setting-event-1",
             domain: "privacy",
             setting_key: "runtime.local_only",
+            friendly_name: "Local-only mode",
             new_value: true,
             actor: "system",
+            notes: "Seeded runtime local-only setting.",
             created_at: "2026-06-18T00:00:00Z",
           },
         ],
@@ -599,7 +631,7 @@ test("navigates through the PR8 operator screens", async () => {
 
   fireEvent.click(screen.getByRole("link", { name: "Settings" }));
   expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
-  expect(screen.getAllByText("runtime.local_only").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Local-only mode").length).toBeGreaterThan(0);
   expect(screen.getByText("Settings audit history")).toBeInTheDocument();
 });
 
@@ -982,4 +1014,40 @@ test("settings screen edits editable database-backed settings with required note
       },
     ],
   });
+});
+
+test("settings screen defaults to editable friendly settings with defaults and audit notes", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+  expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
+
+  const editableSetting = await screen.findByLabelText("Editable setting");
+  expect(Array.from((editableSetting as HTMLSelectElement).options).map((option) => option.text)).toEqual([
+    "App display name",
+    "Default operator",
+    "Chase Prime Visa required",
+  ]);
+
+  const activeSettingsPanel = screen.getByText("Active settings").closest("section");
+  expect(activeSettingsPanel).not.toBeNull();
+  const activeSettings = within(activeSettingsPanel as HTMLElement);
+  const activeSettingsTable = within(activeSettings.getByRole("table"));
+  expect(activeSettingsTable.getByRole("columnheader", { name: "Friendly name" })).toBeInTheDocument();
+  expect(activeSettingsTable.getByRole("columnheader", { name: "Value" })).toBeInTheDocument();
+  expect(activeSettingsTable.getByRole("columnheader", { name: "Default Value" })).toBeInTheDocument();
+  expect(activeSettingsTable.getByText("App display name")).toBeInTheDocument();
+  expect(activeSettingsTable.getByText("Chase Prime Visa required")).toBeInTheDocument();
+  expect(activeSettingsTable.queryByText("runtime.local_only")).not.toBeInTheDocument();
+  expect(activeSettingsTable.queryByText("Local-only mode")).not.toBeInTheDocument();
+  expect(screen.getAllByText("Family Finance OS").length).toBeGreaterThan(0);
+  expect(screen.getByText("Seeded runtime local-only setting.")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByLabelText("Show read-only settings"));
+  expect(activeSettingsTable.getByText("Local-only mode")).toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText("Show setting key column"));
+  expect(activeSettingsTable.getByRole("columnheader", { name: "Setting key" })).toBeInTheDocument();
+  expect(activeSettingsTable.getByText("runtime.local_only")).toBeInTheDocument();
 });
