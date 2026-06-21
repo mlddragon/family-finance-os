@@ -71,6 +71,37 @@ http://127.0.0.1:28081
 
 For a guaranteed clean QA baseline, run `make qa-reset CONFIRM="RESET QA DATA"` before `make qa-seed`.
 
+Named QA scenarios are script-level only. The browser does not include reset or reseed controls in v0.4.0. Scenarios are not additive; reset QA before seeding a different scenario.
+
+```bash
+make qa-reset CONFIRM="RESET QA DATA"
+make qa-seed QA_SCENARIO=baseline
+
+make qa-reset CONFIRM="RESET QA DATA"
+make qa-seed QA_SCENARIO=stale-source
+
+make qa-reset CONFIRM="RESET QA DATA"
+make qa-seed QA_SCENARIO=blocked-import
+
+make qa-reset CONFIRM="RESET QA DATA"
+make qa-seed QA_SCENARIO=review-backlog
+
+make qa-reset CONFIRM="RESET QA DATA"
+make qa-seed QA_SCENARIO=monthly-close-ready
+```
+
+Scenario summaries:
+
+| Scenario | Expected QA state |
+| --- | --- |
+| `baseline` | Accepted synthetic source files, a partial review set, reports, draft close, advisor export, and remaining review work. |
+| `stale-source` | Required sources are enabled; Chase imports as stale; final close is blocked by stale required source coverage. |
+| `blocked-import` | A bad synthetic upload creates an open blocking validation finding and a quarantined file. |
+| `review-backlog` | Valid imports are accepted but transactions remain intentionally unreviewed for Ledger Review testing. |
+| `monthly-close-ready` | Required sources are accepted, transactions are reviewed, reports run, final close succeeds, and advisor export exists. |
+
+Each seed writes a manifest under `DATA_ROOT/manifests/` with the scenario name, expected operator state, validation summary, review counts, and synthetic marker. Generated QA manifests, reports, databases, exports, close bundles, logs, and raw files stay outside git.
+
 Direct Compose remains supported. The default host port is `28080`, and it can be overridden with `DILLON_FINANCES_HOST_PORT`.
 
 Stop the app:
