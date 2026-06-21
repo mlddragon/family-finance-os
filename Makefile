@@ -1,5 +1,6 @@
 PERSONAL_DATA_ROOT ?= $(HOME)/Dillon_Finances_Data
 QA_DATA_ROOT ?= $(HOME)/Dillon_Finances_QA_Data
+QA_SCENARIO ?= baseline
 
 .PHONY: personal-up personal-down qa-up qa-down qa-seed qa-reset
 
@@ -34,7 +35,7 @@ qa-seed:
 	APP_ENV_LABEL="QA synthetic demo" \
 	DATASET_KIND=synthetic \
 	DEV_MODE=true \
-	.venv/bin/python scripts/qa_seed.py --scenario baseline --data-root "$(QA_DATA_ROOT)"
+	.venv/bin/python scripts/qa_seed.py --scenario "$(QA_SCENARIO)" --data-root "$(QA_DATA_ROOT)"
 
 qa-reset:
 	APP_ENV=qa \
