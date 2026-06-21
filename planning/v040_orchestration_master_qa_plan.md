@@ -11,6 +11,7 @@ This document defines the v0.4.0 orchestration run for the five current workstre
 - Issues #51, #52, #53, #54, #55, and #59 are tracked under the v0.4.0 milestone.
 - The stale `0.3.0 Planning` milestone has no open issues and was closed during this orchestration setup.
 - The active Codex Goal for execution must stay open until all accepted PRs are merged, branches are deleted, issue state is updated, final verification passes, human QA is approved, and post-QA cleanup is complete.
+- Owner direction updated the execution mode to stacked PR review: Codex should continue creating PRs 2-5 on top of PR 1 so the owner can review the full stack together.
 
 ## Workstreams
 
@@ -42,7 +43,7 @@ Issue #55 remains a tracked later decision for role/user troubleshooting and vie
 4. PR 4: suggestions and approval model.
 5. PR 5: QA scenario expansion.
 
-PRs 2, 3, and 4 may be drafted in parallel after PR 1 is approved. Final merge should still be serialized so the orchestrator can resolve vocabulary and decision consistency. PR 5 may run in parallel with planning review because it is a QA-scenario implementation lane, but it must not add browser reset/reseed controls or permission/approval behavior.
+PRs 2-5 may be drafted before PR 1 is merged by using a stacked-branch sequence. The owner may review the full stack together. Final merge must still be serialized in stack order so the orchestrator can preserve traceability, resolve vocabulary and decision consistency, and clean up branches safely. PR 5 may be prepared while planning PRs are under review because it is a QA-scenario implementation lane, but it must not add browser reset/reseed controls or permission/approval behavior.
 
 ## PR Acceptance Gates
 
@@ -208,15 +209,15 @@ Stop if:
 
 ## Post-QA Cleanup Requirements
 
-After the owner says QA passed for a PR:
+After the owner says QA passed for the stack:
 
-1. Merge the PR using the repo's existing PR merge style.
-2. Delete the remote branch.
-3. Delete the local branch if present and safe.
-4. Pull/update local `main`.
+1. Merge PRs in stack order using the repo's existing PR merge style.
+2. Delete each remote branch after its PR merges.
+3. Delete each local branch if present and safe.
+4. Pull/update local `main` after the full stack is merged.
 5. Update or close linked GitHub issues.
 6. Confirm working tree is clean.
-7. Continue to the next workstream or, for the final PR, run final integration QA.
+7. Run final integration QA.
 
 If a local branch is not cleanly merge-detectable because of squash history, verify patch-equivalence before deleting it. Do not force-delete unrelated branches without inspection.
 
