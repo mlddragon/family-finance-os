@@ -61,6 +61,42 @@ const transaction = {
   imported_fact_count: 1,
 };
 
+const personalRuntime = {
+  app: "Family Finance OS",
+  version: "0.3.0",
+  local_only: true,
+  bind_host: "127.0.0.1",
+  app_env: "personal",
+  app_env_label: "Personal data",
+  dataset_kind: "personal",
+  dev_mode: false,
+  qa_controls_enabled: false,
+  data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
+  database: { status: "present", path: "/tmp/Dillon_Finances_Data/database/dillon_finances.sqlite3" },
+};
+
+const actorsPayload = {
+  default_actor_key: "owner",
+  human_actors: [
+    {
+      actor_key: "owner",
+      actor_type: "human",
+      display_name: "Owner",
+      group_keys: ["administrator", "finance_manager"],
+    },
+  ],
+  system_actors: [{ actor_key: "system", actor_type: "system", display_name: "System", group_keys: [] }],
+  groups: [
+    { group_key: "administrator", display_name: "Administrator" },
+    { group_key: "finance_manager", display_name: "Finance Manager" },
+  ],
+  selectable_personas: [
+    { persona_key: "finance_manager", persona_label: "Finance Manager", group_keys: ["finance_manager"] },
+    { persona_key: "administrator", persona_label: "Administrator", group_keys: ["administrator"] },
+  ],
+  system_personas: [{ system_persona_key: "system:importer", display_name: "System: Importer" }],
+};
+
 async function mockApi(
   page: Page,
   onDecision?: (payload: unknown) => void,
@@ -78,7 +114,8 @@ async function mockApi(
         json: {
           tabs: ["Branding", "Data root", "Sources", "Categories", "Locale", "Operator", "Thresholds", "Reports", "Privacy", "Future integrations"],
           local_only: true,
-          data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
+          data_root: personalRuntime.data_root,
+          runtime: personalRuntime,
           source_profiles: sourceProfiles,
           settings: [
             {
@@ -180,13 +217,7 @@ async function mockApi(
 
     const responses: Record<string, unknown> = {
       "/api/operator-summary": {
-        runtime: {
-          app: "Family Finance OS",
-          version: "0.3.0",
-          local_only: true,
-          bind_host: "127.0.0.1",
-          data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
-        },
+        runtime: personalRuntime,
         latest_import: {
           id: "batch-1",
           status: "accepted",
@@ -269,7 +300,8 @@ async function mockApi(
       "/api/settings": {
         tabs: ["Branding", "Data root", "Sources", "Categories", "Locale", "Operator", "Thresholds", "Reports", "Privacy", "Future integrations"],
         local_only: true,
-        data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
+        data_root: personalRuntime.data_root,
+        runtime: personalRuntime,
         source_profiles: sourceProfiles,
         settings: [
           {
@@ -311,6 +343,7 @@ async function mockApi(
           },
         ],
       },
+      "/api/actors": actorsPayload,
     };
 
     await route.fulfill({ json: responses[path] ?? {} });
@@ -359,6 +392,7 @@ test("saves a category decision through the browser flow", async ({ page }) => {
     field_name: "category",
     approved_value: "family_project",
     actor: "owner",
+    actor_context: { actor_key: "owner", display_name: "Owner", persona_key: "finance_manager" },
     explicit_user_action: true,
     notes: "Creating a new category from the browser review flow.",
   });
@@ -400,6 +434,7 @@ test("saves an editable setting through the browser flow", async ({ page }) => {
   await expect(page.getByText("Setting saved")).toBeVisible();
   expect(settingsPayload).toMatchObject({
     actor: "owner",
+    actor_context: { actor_key: "owner", display_name: "Owner", persona_key: "finance_manager" },
     changes: [
       {
         domain: "sources",

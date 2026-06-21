@@ -22,6 +22,7 @@ import {
   createAdvisorExport,
   draftMonthlyClose,
   fetchArtifacts,
+  fetchActors,
   fetchCategories,
   fetchSettings,
   fetchTransactionDetail,
@@ -42,6 +43,8 @@ import {
 import "./i18n";
 import type {
   Artifact,
+  ActorContext,
+  ActorsPayload,
   Category,
   InboxScan,
   ImportBatch,
@@ -51,6 +54,7 @@ import type {
   Transaction,
   TransactionDetail,
   ValidationFinding,
+  RuntimeStatus,
 } from "./types";
 import "./styles.css";
 
@@ -76,6 +80,11 @@ const emptySummary: OperatorSummary = {
     version: "0.3.0",
     local_only: true,
     bind_host: "127.0.0.1",
+    app_env: "personal",
+    app_env_label: "Personal data",
+    dataset_kind: "personal",
+    dev_mode: false,
+    qa_controls_enabled: false,
     data_root: { path: "DATA_ROOT", exists: false },
   },
   latest_import: {
@@ -142,6 +151,40 @@ function settingValue(settings: SettingsPayload | undefined, domain: string, set
   return typeof setting?.value === "string" && setting.value.trim() ? setting.value : fallback;
 }
 
+const ACTIVE_ACTOR_STORAGE_KEY = "family-finance-os.activeActorKey";
+const ACTIVE_PERSONA_STORAGE_KEY = "family-finance-os.activePersonaKey";
+
+function readLocalStorage(key: string, fallback: string) {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  return window.localStorage.getItem(key) || fallback;
+}
+
+function writeLocalStorage(key: string, value: string) {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(key, value);
+  }
+}
+
+function actorContextFromSelection(
+  actors: ActorsPayload | undefined,
+  actorKey: string,
+  personaKey: string,
+): ActorContext {
+  const actor = actors?.human_actors.find((item) => item.actor_key === actorKey) ?? actors?.human_actors[0];
+  const persona = actors?.selectable_personas.find((item) => item.persona_key === personaKey) ?? actors?.selectable_personas[0];
+  return {
+    actor_key: actor?.actor_key ?? "owner",
+    actor_type: "human",
+    display_name: actor?.display_name ?? "Owner",
+    persona_key: persona?.persona_key ?? "finance_manager",
+    persona_label: persona?.persona_label ?? "Finance Manager",
+    group_keys: persona?.group_keys ?? actor?.group_keys ?? ["finance_manager"],
+    source: "local_selector",
+  };
+}
+
 function createQueryClient() {
   return new QueryClient({
     defaultOptions: {
@@ -170,8 +213,13 @@ function OperatorApp() {
   const { t } = useTranslation();
   const [activeScreen, setActiveScreen] = useState<ScreenKey>("home");
   const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
+  const [activeActorKey, setActiveActorKey] = useState(() => readLocalStorage(ACTIVE_ACTOR_STORAGE_KEY, "owner"));
+  const [activePersonaKey, setActivePersonaKey] = useState(() =>
+    readLocalStorage(ACTIVE_PERSONA_STORAGE_KEY, "finance_manager"),
+  );
 
   const summaryQuery = useQuery({ queryKey: ["operator-summary"], queryFn: fetchOperatorSummary });
+  const actorsQuery = useQuery({ queryKey: ["actors"], queryFn: fetchActors });
   const inboxQuery = useQuery({ queryKey: ["inbox-scan"], queryFn: scanInbox });
   const findingsQuery = useQuery({ queryKey: ["validation-findings"], queryFn: fetchValidationFindings });
   const transactionsQuery = useQuery({ queryKey: ["transactions"], queryFn: fetchTransactions });
@@ -193,11 +241,13 @@ function OperatorApp() {
   });
 
   const summary = summaryQuery.data ?? emptySummary;
+  const actors = actorsQuery.data;
   const findings = findingsQuery.data?.findings ?? [];
   const inbox = inboxQuery.data?.import_batches ?? [];
   const settings = settingsQuery.data;
   const appDisplayName = settingValue(settings, "branding", "branding.app_display_name", summary.runtime.app || t("app.fallbackName"));
-  const operatorActor = settingValue(settings, "operator", "operator.default_actor", "owner");
+  const operatorActorContext = actorContextFromSelection(actors, activeActorKey, activePersonaKey);
+  const operatorActor = operatorActorContext.actor_key;
   const categories = categoriesQuery.data?.categories ?? [];
   const sourceProfileKey = summary.sources.profiles.map((profile) => profile.source_key).join("|") || "no-source-profiles";
   const selectedTransaction =
@@ -207,7 +257,26 @@ function OperatorApp() {
 
   return (
     <div className="app-shell">
-      <Header summary={summary} appDisplayName={appDisplayName} />
+      {summary.runtime.app_env === "qa" ? (
+        <div className="qa-banner" role="status">
+          QA synthetic demo - not real financial data
+        </div>
+      ) : null}
+      <Header
+        summary={summary}
+        appDisplayName={appDisplayName}
+        actors={actors}
+        activeActorKey={operatorActorContext.actor_key}
+        activePersonaKey={operatorActorContext.persona_key ?? "finance_manager"}
+        onActorChange={(value) => {
+          setActiveActorKey(value);
+          writeLocalStorage(ACTIVE_ACTOR_STORAGE_KEY, value);
+        }}
+        onPersonaChange={(value) => {
+          setActivePersonaKey(value);
+          writeLocalStorage(ACTIVE_PERSONA_STORAGE_KEY, value);
+        }}
+      />
 
       <div className="workspace">
         <nav className="sidebar" aria-label="Primary">
@@ -234,9 +303,16 @@ function OperatorApp() {
               profiles={summary.sources.profiles}
               inbox={inbox}
               operatorActor={operatorActor}
+              operatorActorContext={operatorActorContext}
             />
           ) : null}
-          {activeScreen === "validation" ? <ValidationScreen findings={findings} operatorActor={operatorActor} /> : null}
+          {activeScreen === "validation" ? (
+            <ValidationScreen
+              findings={findings}
+              operatorActor={operatorActor}
+              operatorActorContext={operatorActorContext}
+            />
+          ) : null}
           {activeScreen === "review" ? (
             <ReviewScreen
               transactions={transactions}
@@ -244,6 +320,7 @@ function OperatorApp() {
               selectedTransactionId={selectedTransactionId}
               categories={categories}
               operatorActor={operatorActor}
+              operatorActorContext={operatorActorContext}
               onSelectTransaction={setSelectedTransactionId}
             />
           ) : null}
@@ -256,10 +333,21 @@ function OperatorApp() {
             />
           ) : null}
           {activeScreen === "reports" ? (
-            <ReportsScreen summary={summary} artifacts={artifactsQuery.data?.artifacts ?? []} operatorActor={operatorActor} />
+            <ReportsScreen
+              summary={summary}
+              artifacts={artifactsQuery.data?.artifacts ?? []}
+              operatorActor={operatorActor}
+              operatorActorContext={operatorActorContext}
+            />
           ) : null}
           {activeScreen === "settings" ? (
-            <SettingsScreen settings={settings} profiles={summary.sources.profiles} operatorActor={operatorActor} />
+            <SettingsScreen
+              settings={settings}
+              runtime={summary.runtime}
+              profiles={summary.sources.profiles}
+              operatorActor={operatorActor}
+              operatorActorContext={operatorActorContext}
+            />
           ) : null}
         </main>
       </div>
@@ -267,7 +355,23 @@ function OperatorApp() {
   );
 }
 
-function Header({ summary, appDisplayName }: { summary: OperatorSummary; appDisplayName: string }) {
+function Header({
+  summary,
+  appDisplayName,
+  actors,
+  activeActorKey,
+  activePersonaKey,
+  onActorChange,
+  onPersonaChange,
+}: {
+  summary: OperatorSummary;
+  appDisplayName: string;
+  actors?: ActorsPayload;
+  activeActorKey: string;
+  activePersonaKey: string;
+  onActorChange: (value: string) => void;
+  onPersonaChange: (value: string) => void;
+}) {
   const { t } = useTranslation();
   return (
     <header className="topbar">
@@ -275,7 +379,33 @@ function Header({ summary, appDisplayName }: { summary: OperatorSummary; appDisp
         <p className="product-label">{t("app.productLabel")}</p>
         <h1>{appDisplayName}</h1>
       </div>
+      <div className="actor-controls" aria-label="Active local actor">
+        <label>
+          Actor
+          <select value={activeActorKey} onChange={(event) => onActorChange(event.target.value)}>
+            {(actors?.human_actors ?? [{ actor_key: "owner", display_name: "Owner" }]).map((actor) => (
+              <option key={actor.actor_key} value={actor.actor_key}>
+                {actor.display_name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Persona
+          <select value={activePersonaKey} onChange={(event) => onPersonaChange(event.target.value)}>
+            {(actors?.selectable_personas ?? [{ persona_key: "finance_manager", persona_label: "Finance Manager" }]).map(
+              (persona) => (
+                <option key={persona.persona_key} value={persona.persona_key}>
+                  {persona.persona_label}
+                </option>
+              ),
+            )}
+          </select>
+        </label>
+      </div>
       <div className="status-strip" aria-label="Runtime status">
+        <span className={summary.runtime.app_env === "qa" ? "danger" : "ok"}>{summary.runtime.app_env_label}</span>
+        <span>{summary.runtime.dataset_kind}</span>
         <span className={summary.runtime.local_only ? "ok" : "danger"}>{t("runtime.localBrowserMode")}</span>
         <span>{summary.runtime.bind_host}</span>
         <span>{summary.runtime.data_root.exists ? t("runtime.dataRootMounted") : t("runtime.dataRootUnavailable")}</span>
@@ -334,10 +464,12 @@ function SourcesScreen({
   profiles,
   inbox,
   operatorActor,
+  operatorActorContext,
 }: {
   profiles: SourceProfile[];
   inbox: ImportBatch[];
   operatorActor: string;
+  operatorActorContext: ActorContext;
 }) {
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -452,6 +584,7 @@ function SourcesScreen({
       reason: voidReason.trim(),
       destroyFiles: destroyStoredFiles,
       actor: operatorActor,
+      actorContext: operatorActorContext,
     });
   }
 
@@ -663,7 +796,15 @@ function SourcesScreen({
   );
 }
 
-function ValidationScreen({ findings, operatorActor }: { findings: ValidationFinding[]; operatorActor: string }) {
+function ValidationScreen({
+  findings,
+  operatorActor,
+  operatorActorContext,
+}: {
+  findings: ValidationFinding[];
+  operatorActor: string;
+  operatorActorContext: ActorContext;
+}) {
   const queryClient = useQueryClient();
   const [showCleared, setShowCleared] = useState(false);
   const [clearTarget, setClearTarget] = useState<ValidationFinding | null>(null);
@@ -711,7 +852,12 @@ function ValidationScreen({ findings, operatorActor }: { findings: ValidationFin
     if (!clearTarget || !clearNote.trim()) {
       return;
     }
-    clearMutation.mutate({ findingId: clearTarget.id, note: clearNote, actor: operatorActor });
+    clearMutation.mutate({
+      findingId: clearTarget.id,
+      note: clearNote,
+      actor: operatorActor,
+      actorContext: operatorActorContext,
+    });
   }
 
   const columns = useMemo<ColumnDef<ValidationFinding>[]>(
@@ -802,6 +948,7 @@ function ReviewScreen({
   selectedTransactionId,
   categories,
   operatorActor,
+  operatorActorContext,
   onSelectTransaction,
 }: {
   transactions: Transaction[];
@@ -809,6 +956,7 @@ function ReviewScreen({
   selectedTransactionId: string | null;
   categories: Category[];
   operatorActor: string;
+  operatorActorContext: ActorContext;
   onSelectTransaction: (id: string) => void;
 }) {
   const queryClient = useQueryClient();
@@ -921,6 +1069,7 @@ function ReviewScreen({
           transactionId: selectedTransaction.id,
           approvedCategoryKey: categoryKey,
           actor: operatorActor,
+          actorContext: operatorActorContext,
           notes: otherCategoryRequiresNote ? notes.trim() : notes,
         });
       }
@@ -928,6 +1077,7 @@ function ReviewScreen({
         transactionId: selectedTransaction.id,
         approvedStatus: "reviewed",
         actor: operatorActor,
+        actorContext: operatorActorContext,
         notes,
       });
     },
@@ -1107,7 +1257,8 @@ function ReviewScreen({
 
           <div className="audit-preview" aria-label="Audit preview">
             <span>Target: canonical transaction</span>
-            <span>Actor: {operatorActor}</span>
+            <span>Actor: {operatorActorContext.display_name}</span>
+            <span>Persona: {operatorActorContext.persona_label ?? operatorActorContext.persona_key}</span>
             <span>Source: owner</span>
           </div>
 
@@ -1182,7 +1333,9 @@ function TransactionsScreen({
                 <li key={event.id}>
                   <span>{event.created_at}</span>
                   <strong>{formatStatus(event.field_name)}</strong>
+                  <span>{event.actor_context?.display_name ?? event.actor ?? "Unknown actor"}</span>
                   <span>{event.approved_value ?? "cleared"}</span>
+                  {event.notes ? <span>{event.notes}</span> : null}
                 </li>
               ))}
             </ol>
@@ -1199,10 +1352,12 @@ function ReportsScreen({
   summary,
   artifacts,
   operatorActor,
+  operatorActorContext,
 }: {
   summary: OperatorSummary;
   artifacts: Artifact[];
   operatorActor: string;
+  operatorActorContext: ActorContext;
 }) {
   const queryClient = useQueryClient();
   const [actionStatus, setActionStatus] = useState<string | null>(null);
@@ -1285,16 +1440,32 @@ function ReportsScreen({
       <section className="work-panel">
         <h3>Report actions</h3>
         <div className="action-row">
-          <button type="button" onClick={() => runReportsMutation.mutate({ actor: operatorActor })} disabled={actionPending}>
+          <button
+            type="button"
+            onClick={() => runReportsMutation.mutate({ actor: operatorActor, actorContext: operatorActorContext })}
+            disabled={actionPending}
+          >
             Run reports
           </button>
-          <button type="button" onClick={() => draftCloseMutation.mutate({ actor: operatorActor })} disabled={actionPending}>
+          <button
+            type="button"
+            onClick={() => draftCloseMutation.mutate({ actor: operatorActor, actorContext: operatorActorContext })}
+            disabled={actionPending}
+          >
             Draft close
           </button>
-          <button type="button" onClick={() => finalCloseMutation.mutate({ actor: operatorActor })} disabled={actionPending}>
+          <button
+            type="button"
+            onClick={() => finalCloseMutation.mutate({ actor: operatorActor, actorContext: operatorActorContext })}
+            disabled={actionPending}
+          >
             Final close
           </button>
-          <button type="button" onClick={() => advisorExportMutation.mutate({ actor: operatorActor })} disabled={actionPending}>
+          <button
+            type="button"
+            onClick={() => advisorExportMutation.mutate({ actor: operatorActor, actorContext: operatorActorContext })}
+            disabled={actionPending}
+          >
             Advisor export
           </button>
         </div>
@@ -1324,12 +1495,16 @@ function ReportsScreen({
 
 function SettingsScreen({
   settings,
+  runtime,
   profiles,
   operatorActor,
+  operatorActorContext,
 }: {
   settings?: SettingsPayload;
+  runtime: RuntimeStatus;
   profiles: SourceProfile[];
   operatorActor: string;
+  operatorActorContext: ActorContext;
 }) {
   const queryClient = useQueryClient();
   const activeProfiles = settings?.source_profiles ?? profiles;
@@ -1437,6 +1612,7 @@ function SettingsScreen({
       settingKey: selectedSetting.setting_key,
       value: inputToSettingValue(settingDraftValue, selectedSetting.value),
       actor: operatorActor,
+      actorContext: operatorActorContext,
       note: settingNote,
     });
   }
@@ -1449,6 +1625,7 @@ function SettingsScreen({
     confirmationMutation.mutate({
       sourceKey: selectedSourceKey,
       actor: operatorActor,
+      actorContext: operatorActorContext,
       note: confirmationNote,
     });
   }
@@ -1467,6 +1644,36 @@ function SettingsScreen({
           </button>
         ))}
       </div>
+
+      <section className="work-panel environment-panel" aria-label="Runtime environment">
+        <h3>Environment</h3>
+        <dl>
+          <div>
+            <dt>Environment</dt>
+            <dd>{runtime.app_env_label}</dd>
+          </div>
+          <div>
+            <dt>Dataset</dt>
+            <dd>{runtime.dataset_kind}</dd>
+          </div>
+          <div>
+            <dt>Data root</dt>
+            <dd>{runtime.data_root.path}</dd>
+          </div>
+          <div>
+            <dt>Database</dt>
+            <dd>{runtime.database?.status ?? "unknown"}</dd>
+          </div>
+          <div>
+            <dt>Local only</dt>
+            <dd>{runtime.local_only ? "Yes" : "No"}</dd>
+          </div>
+          <div>
+            <dt>Dev mode</dt>
+            <dd>{runtime.dev_mode ? "On" : "Off"}</dd>
+          </div>
+        </dl>
+      </section>
 
       <div className="two-column">
         <section className="work-panel">

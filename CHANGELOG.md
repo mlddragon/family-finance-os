@@ -4,10 +4,17 @@ All notable changes to Family Finance OS will be tracked here.
 
 ## 0.3.0 - Planned
 
+- Add root AI-agent guidance through `AGENTS.md`, `CODEX.md`, and `CHATGPT.md`.
 - Improve Settings usability by hiding read-only settings by default.
 - Show friendly setting names, current values, and default values in the default Settings table.
 - Add optional Settings table columns for changed status, domain, setting key, and editable status.
 - Show saved notes in Settings audit history.
+- Add personal/QA runtime identity with visible UI environment markers.
+- Move personal Docker default to `127.0.0.1:28080` and add QA synthetic default at `127.0.0.1:28081`.
+- Add script-level QA reset/seed foundation with one `baseline` synthetic scenario.
+- Add synthetic markers to QA-generated reports, close bundles, advisor exports, and scenario manifests.
+- Add lightweight local actor/persona context for future audit and permissions work.
+- Document deferred permission matrix, elevated mode, suggestions, approvals, and view-as decisions.
 - Update the PRD immediate roadmap to reflect the current Docker/SQLite product path.
 
 ## 0.2.0 - 2026-06-21

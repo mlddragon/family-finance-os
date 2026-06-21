@@ -11,6 +11,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from dillon_finances import __version__
+from dillon_finances.actors import ActorContext, actors_payload
 from dillon_finances.category_service import (
     CategoryCreateRequest,
     CategoryError,
@@ -51,7 +52,7 @@ from dillon_finances.reporting import (
     list_artifacts,
     run_reports,
 )
-from dillon_finances.runtime import bootstrap_data_root
+from dillon_finances.runtime import RuntimeEnvironment, bootstrap_data_root, runtime_environment_from_env
 from dillon_finances.settings_service import (
     SettingsPatchRequest,
     SettingsValidationError,
@@ -72,12 +73,14 @@ class AcceptImportBatchRequest(BaseModel):
 
 class VoidImportBatchRequest(BaseModel):
     actor: str = Field(min_length=1)
+    actor_context: Optional[ActorContext] = None
     reason: str = Field(min_length=1)
     destroy_files: bool = False
 
 
 class ResolveValidationFindingRequest(BaseModel):
     actor: str = Field(min_length=1)
+    actor_context: Optional[ActorContext] = None
     note: str = Field(min_length=1)
 
 
@@ -96,11 +99,13 @@ def create_app(
     *,
     data_root: Optional[Path] = None,
     local_bind_host: Optional[str] = None,
+    runtime_environment: Optional[RuntimeEnvironment] = None,
 ) -> FastAPI:
     configured_data_root = data_root or _default_data_root()
     resolved_data_root: Optional[Path] = None
     engine: Optional[Engine] = None
     bind_host = local_bind_host or os.environ.get("APP_BIND_HOST", "127.0.0.1")
+    runtime_identity = runtime_environment or runtime_environment_from_env()
 
     def get_data_root() -> Path:
         nonlocal resolved_data_root
@@ -143,6 +148,7 @@ def create_app(
             "version": __version__,
             "local_only": bind_host == "127.0.0.1",
             "bind_host": bind_host,
+            **runtime_identity.to_status_fields(),
             "data_root": {
                 "path": str(active_data_root),
                 "exists": active_data_root.exists(),
@@ -164,6 +170,10 @@ def create_app(
             refresh_source_coverage_findings(session)
             session.commit()
             return operator_summary_payload(session, runtime=status_payload())
+
+    @app.get("/api/actors")
+    def get_actors() -> Dict[str, Any]:
+        return actors_payload()
 
     def import_validation_http_error(exc: ImportValidationError) -> HTTPException:
         return HTTPException(
@@ -242,6 +252,7 @@ def create_app(
                     active_data_root,
                     batch_id,
                     actor=payload.actor,
+                    actor_context=payload.actor_context,
                     reason=payload.reason,
                     destroy_files=payload.destroy_files,
                 )
@@ -261,6 +272,7 @@ def create_app(
                     session,
                     finding_id,
                     actor=payload.actor,
+                    actor_context=payload.actor_context,
                     note=payload.note,
                 )
             except ImportValidationError as exc:
@@ -301,6 +313,7 @@ def create_app(
                 session,
                 data_root=active_data_root,
                 local_only=bind_host == "127.0.0.1",
+                runtime=status_payload(),
             )
 
     @app.patch("/api/settings")
@@ -316,6 +329,7 @@ def create_app(
                         session,
                         data_root=active_data_root,
                         local_only=bind_host == "127.0.0.1",
+                        runtime=status_payload(),
                     ),
                     "events": serialize_events(events),
                 }
@@ -363,7 +377,12 @@ def create_app(
         active_data_root = get_data_root()
         with create_session() as session:
             try:
-                return run_reports(session, active_data_root, payload)
+                return run_reports(
+                    session,
+                    active_data_root,
+                    payload,
+                    synthetic_artifact_marker=runtime_identity.synthetic_artifact_marker,
+                )
             except ReportingError as exc:
                 raise reporting_http_error(exc) from exc
 
@@ -372,7 +391,13 @@ def create_app(
         active_data_root = get_data_root()
         with create_session() as session:
             try:
-                return create_monthly_close(session, active_data_root, payload, status="draft")
+                return create_monthly_close(
+                    session,
+                    active_data_root,
+                    payload,
+                    status="draft",
+                    synthetic_artifact_marker=runtime_identity.synthetic_artifact_marker,
+                )
             except ReportingError as exc:
                 raise reporting_http_error(exc) from exc
 
@@ -381,7 +406,13 @@ def create_app(
         active_data_root = get_data_root()
         with create_session() as session:
             try:
-                return create_monthly_close(session, active_data_root, payload, status="final")
+                return create_monthly_close(
+                    session,
+                    active_data_root,
+                    payload,
+                    status="final",
+                    synthetic_artifact_marker=runtime_identity.synthetic_artifact_marker,
+                )
             except ReportingError as exc:
                 raise reporting_http_error(exc) from exc
 
@@ -390,7 +421,12 @@ def create_app(
         active_data_root = get_data_root()
         with create_session() as session:
             try:
-                return create_advisor_export(session, active_data_root, payload)
+                return create_advisor_export(
+                    session,
+                    active_data_root,
+                    payload,
+                    synthetic_artifact_marker=runtime_identity.synthetic_artifact_marker,
+                )
             except ReportingError as exc:
                 raise reporting_http_error(exc) from exc
 

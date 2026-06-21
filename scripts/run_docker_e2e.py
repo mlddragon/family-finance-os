@@ -170,6 +170,8 @@ def run_closed_loop(base_url: str, repo_root: Path, data_root: Path) -> dict[str
     status = wait_for_status(base_url)
     assert_condition(status["local_only"] is True, "status must report local-only mode")
     assert_condition(status["bind_host"] == "127.0.0.1", "status must report localhost bind")
+    assert_condition(status["app_env"] == "qa", "Docker E2E must run against QA runtime identity")
+    assert_condition(status["dataset_kind"] == "synthetic", "Docker E2E must run against synthetic dataset identity")
     write_source_fixtures(repo_root, data_root)
 
     scan = request_json(base_url, "POST", "/api/inbox/scan")
@@ -230,8 +232,8 @@ def run_closed_loop(base_url: str, repo_root: Path, data_root: Path) -> dict[str
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run the v1 synthetic Docker E2E closed loop.")
-    parser.add_argument("--base-url", default="http://127.0.0.1:8080")
+    parser = argparse.ArgumentParser(description="Run the synthetic Docker E2E closed loop.")
+    parser.add_argument("--base-url", default="http://127.0.0.1:28081")
     parser.add_argument("--data-root", required=True)
     parser.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[1]))
     args = parser.parse_args()

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from dillon_finances.actors import ActorContext, actor_context_from_json, actor_context_to_json, derive_actor_context
 from dillon_finances.category_service import category_display_name, category_identity_for_value, resolve_category_key
 from dillon_finances.models import CanonicalTransaction, DecisionEvent, ValidationFinding
 
@@ -26,6 +27,7 @@ class DecisionEventRequest(BaseModel):
     proposed_value: Optional[Any] = None
     approved_value: Optional[Any] = None
     actor: str = Field(min_length=1)
+    actor_context: Optional[ActorContext] = None
     notes: Optional[str] = None
     suggestion_source: str = "owner"
     explicit_user_action: bool = False
@@ -228,6 +230,7 @@ def serialize_decision_event(
         "proposed_value": _public_value(event.field_name, event.proposed_value),
         "approved_value": _public_value(event.field_name, event.approved_value),
         "actor": event.actor,
+        "actor_context": actor_context_from_json(event.actor_context_json),
         "notes": event.notes,
         "suggestion_source": event.suggestion_source,
         "supersedes_event_id": event.supersedes_event_id,
@@ -415,6 +418,7 @@ def create_decision_event(
         proposed_value=proposed_value,
         approved_value=approved_value,
         actor=request.actor,
+        actor_context_json=actor_context_to_json(derive_actor_context(request.actor, request.actor_context)),
         notes=request.notes.strip() if request.notes else None,
         suggestion_source=request.suggestion_source,
         supersedes_event_id=request.supersedes_event_id,

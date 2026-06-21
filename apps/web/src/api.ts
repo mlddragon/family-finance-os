@@ -1,6 +1,8 @@
 import type {
   Artifact,
   ArtifactActionResponse,
+  ActorContext,
+  ActorsPayload,
   Category,
   DecisionEventResponse,
   InboxScan,
@@ -68,6 +70,10 @@ export function fetchOperatorSummary() {
   return apiJson<OperatorSummary>("/api/operator-summary");
 }
 
+export function fetchActors() {
+  return apiJson<ActorsPayload>("/api/actors");
+}
+
 export function scanInbox() {
   return apiJson<InboxScan>("/api/inbox/scan");
 }
@@ -97,12 +103,19 @@ export function acceptImportBatch(batchId: string) {
   });
 }
 
-export function voidImportBatch(payload: { batchId: string; reason: string; destroyFiles: boolean; actor: string }) {
+export function voidImportBatch(payload: {
+  batchId: string;
+  reason: string;
+  destroyFiles: boolean;
+  actor: string;
+  actorContext?: ActorContext;
+}) {
   return apiJson<{ import_batch: ImportBatch }>(`/api/import-batches/${payload.batchId}/void`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       actor: payload.actor,
+      actor_context: payload.actorContext,
       reason: payload.reason,
       destroy_files: payload.destroyFiles,
     }),
@@ -113,12 +126,18 @@ export function fetchValidationFindings() {
   return apiJson<{ findings: ValidationFinding[] }>("/api/validation-findings");
 }
 
-export function resolveValidationFinding(payload: { findingId: string; note: string; actor: string }) {
+export function resolveValidationFinding(payload: {
+  findingId: string;
+  note: string;
+  actor: string;
+  actorContext?: ActorContext;
+}) {
   return apiJson<{ finding: ValidationFinding; event?: unknown }>(`/api/validation-findings/${payload.findingId}/resolve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       actor: payload.actor,
+      actor_context: payload.actorContext,
       note: payload.note.trim(),
     }),
   });
@@ -136,7 +155,12 @@ export function fetchCategories() {
   return apiJson<{ categories: Category[] }>("/api/categories");
 }
 
-export function createCategory(payload: { displayName: string; aliases?: string[]; note: string; actor: string }) {
+export function createCategory(payload: {
+  displayName: string;
+  aliases?: string[];
+  note: string;
+  actor: string;
+}) {
   return apiJson<{ category: Category }>("/api/categories", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -153,6 +177,7 @@ export function saveCategoryDecision(payload: {
   transactionId: string;
   approvedCategoryKey: string;
   actor: string;
+  actorContext?: ActorContext;
   notes?: string;
 }) {
   return apiJson<DecisionEventResponse>("/api/decision-events", {
@@ -166,6 +191,7 @@ export function saveCategoryDecision(payload: {
       proposed_value: payload.approvedCategoryKey,
       approved_value: payload.approvedCategoryKey,
       actor: payload.actor,
+      actor_context: payload.actorContext,
       suggestion_source: "owner",
       explicit_user_action: true,
       notes: payload.notes?.trim() || null,
@@ -177,6 +203,7 @@ export function saveReviewStatusDecision(payload: {
   transactionId: string;
   approvedStatus: "reviewed";
   actor: string;
+  actorContext?: ActorContext;
   notes?: string;
 }) {
   return apiJson<DecisionEventResponse>("/api/decision-events", {
@@ -190,6 +217,7 @@ export function saveReviewStatusDecision(payload: {
       proposed_value: payload.approvedStatus,
       approved_value: payload.approvedStatus,
       actor: payload.actor,
+      actor_context: payload.actorContext,
       suggestion_source: "owner",
       explicit_user_action: true,
       notes: payload.notes?.trim() || null,
@@ -205,12 +233,14 @@ export function confirmSourceProfileSample(payload: {
   sourceKey: string;
   note: string;
   actor: string;
+  actorContext?: ActorContext;
 }) {
   return apiJson<SettingsPayload>("/api/settings", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       actor: payload.actor,
+      actor_context: payload.actorContext,
       changes: [
         {
           domain: "sources",
@@ -228,6 +258,7 @@ export function saveSettingChange(payload: {
   settingKey: string;
   value: unknown;
   actor: string;
+  actorContext?: ActorContext;
   note?: string;
 }) {
   return apiJson<SettingsPayload>("/api/settings", {
@@ -235,6 +266,7 @@ export function saveSettingChange(payload: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       actor: payload.actor,
+      actor_context: payload.actorContext,
       changes: [
         {
           domain: payload.domain,
@@ -251,34 +283,34 @@ export function fetchArtifacts() {
   return apiJson<{ artifacts: Artifact[] }>("/api/artifacts");
 }
 
-export function runReports(payload: { actor: string }) {
+export function runReports(payload: { actor: string; actorContext?: ActorContext }) {
   return apiJson<ArtifactActionResponse>("/api/reports/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ actor: payload.actor }),
+    body: JSON.stringify({ actor: payload.actor, actor_context: payload.actorContext }),
   });
 }
 
-export function draftMonthlyClose(payload: { actor: string }) {
+export function draftMonthlyClose(payload: { actor: string; actorContext?: ActorContext }) {
   return apiJson<ArtifactActionResponse>("/api/monthly-close/draft", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ actor: payload.actor }),
+    body: JSON.stringify({ actor: payload.actor, actor_context: payload.actorContext }),
   });
 }
 
-export function finalizeMonthlyClose(payload: { actor: string }) {
+export function finalizeMonthlyClose(payload: { actor: string; actorContext?: ActorContext }) {
   return apiJson<ArtifactActionResponse>("/api/monthly-close/finalize", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ actor: payload.actor }),
+    body: JSON.stringify({ actor: payload.actor, actor_context: payload.actorContext }),
   });
 }
 
-export function createAdvisorExport(payload: { actor: string }) {
+export function createAdvisorExport(payload: { actor: string; actorContext?: ActorContext }) {
   return apiJson<ArtifactActionResponse>("/api/exports/advisor", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ actor: payload.actor }),
+    body: JSON.stringify({ actor: payload.actor, actor_context: payload.actorContext }),
   });
 }

@@ -14,7 +14,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     DATA_ROOT=/data \
-    APP_BIND_HOST=127.0.0.1
+    APP_BIND_HOST=127.0.0.1 \
+    APP_ENV=personal \
+    APP_ENV_LABEL="Personal data" \
+    DATASET_KIND=personal \
+    DEV_MODE=false
 
 WORKDIR /app
 RUN groupadd --gid 10001 appuser \
