@@ -141,25 +141,28 @@ For PR 5:
 1. Pull the PR branch.
 2. Start QA at `http://127.0.0.1:28081`.
 3. Run `make qa-reset CONFIRM="RESET QA DATA"`.
-4. Seed `baseline` and confirm current behavior still works.
-5. Seed `stale-source`.
-6. Confirm the scenario manifest exists under QA `DATA_ROOT` and clearly marks synthetic data.
-7. Confirm operator summary shows stale or missing source behavior.
-8. Run reset again.
-9. Seed `blocked-import`.
-10. Confirm operator summary and UI show blocking validation/quarantine behavior.
-11. Run reset again.
-12. Seed `review-backlog`.
-13. Confirm review queue state visibly contains unreviewed work.
-14. Run reset again.
-15. Seed `monthly-close-ready`.
-16. Confirm reports/monthly close/export readiness state matches the scenario expectation.
-17. Confirm the red QA banner appears on every screen checked.
-18. Confirm generated QA artifacts include `QA synthetic demo - not real financial data` where applicable.
+4. Seed `baseline` with `make qa-seed QA_SCENARIO=baseline`.
+5. Confirm current baseline behavior still works.
+6. Confirm `DATA_ROOT/manifests/baseline-0.4.0.json` exists and clearly marks synthetic data.
+7. Run `make qa-reset CONFIRM="RESET QA DATA"`.
+8. Seed `stale-source` with `make qa-seed QA_SCENARIO=stale-source`.
+9. Confirm `DATA_ROOT/manifests/stale-source-0.4.0.json` exists and operator summary shows stale required source behavior.
+10. Run `make qa-reset CONFIRM="RESET QA DATA"`.
+11. Seed `blocked-import` with `make qa-seed QA_SCENARIO=blocked-import`.
+12. Confirm `DATA_ROOT/manifests/blocked-import-0.4.0.json` exists and operator summary/UI show blocking validation/quarantine behavior.
+13. Run `make qa-reset CONFIRM="RESET QA DATA"`.
+14. Seed `review-backlog` with `make qa-seed QA_SCENARIO=review-backlog`.
+15. Confirm `DATA_ROOT/manifests/review-backlog-0.4.0.json` exists and review queue state visibly contains unreviewed work.
+16. Run `make qa-reset CONFIRM="RESET QA DATA"`.
+17. Seed `monthly-close-ready` with `make qa-seed QA_SCENARIO=monthly-close-ready`.
+18. Confirm `DATA_ROOT/manifests/monthly-close-ready-0.4.0.json` exists and reports/monthly close/export readiness state matches the scenario expectation.
+19. Confirm the red QA banner appears on every screen checked.
+20. Confirm generated QA artifacts include `QA synthetic demo - not real financial data` where applicable.
 
 Expected result:
 
 - Every named scenario can be reset and seeded without personal data.
+- Scenarios are treated as non-additive; QA is reset before changing scenarios.
 - QA remains obviously synthetic.
 - Scenario manifests and generated artifacts stay outside git.
 
