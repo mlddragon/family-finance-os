@@ -1,6 +1,7 @@
 import type {
   Artifact,
   ArtifactActionResponse,
+  Category,
   DecisionEventResponse,
   InboxScan,
   ImportBatch,
@@ -96,12 +97,12 @@ export function acceptImportBatch(batchId: string) {
   });
 }
 
-export function voidImportBatch(payload: { batchId: string; reason: string; destroyFiles: boolean }) {
+export function voidImportBatch(payload: { batchId: string; reason: string; destroyFiles: boolean; actor: string }) {
   return apiJson<{ import_batch: ImportBatch }>(`/api/import-batches/${payload.batchId}/void`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      actor: "mason",
+      actor: payload.actor,
       reason: payload.reason,
       destroy_files: payload.destroyFiles,
     }),
@@ -112,12 +113,12 @@ export function fetchValidationFindings() {
   return apiJson<{ findings: ValidationFinding[] }>("/api/validation-findings");
 }
 
-export function resolveValidationFinding(payload: { findingId: string; note: string }) {
+export function resolveValidationFinding(payload: { findingId: string; note: string; actor: string }) {
   return apiJson<{ finding: ValidationFinding; event?: unknown }>(`/api/validation-findings/${payload.findingId}/resolve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      actor: "mason",
+      actor: payload.actor,
       note: payload.note.trim(),
     }),
   });
@@ -131,9 +132,27 @@ export function fetchTransactionDetail(transactionId: string) {
   return apiJson<{ transaction: TransactionDetail }>(`/api/transactions/${transactionId}`);
 }
 
+export function fetchCategories() {
+  return apiJson<{ categories: Category[] }>("/api/categories");
+}
+
+export function createCategory(payload: { displayName: string; aliases?: string[]; note: string; actor: string }) {
+  return apiJson<{ category: Category }>("/api/categories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      display_name: payload.displayName.trim(),
+      aliases: payload.aliases ?? [],
+      actor: payload.actor,
+      note: payload.note.trim(),
+    }),
+  });
+}
+
 export function saveCategoryDecision(payload: {
   transactionId: string;
-  approvedCategory: string;
+  approvedCategoryKey: string;
+  actor: string;
   notes?: string;
 }) {
   return apiJson<DecisionEventResponse>("/api/decision-events", {
@@ -144,9 +163,9 @@ export function saveCategoryDecision(payload: {
       target_id: payload.transactionId,
       decision_type: "category_change",
       field_name: "category",
-      proposed_value: payload.approvedCategory,
-      approved_value: payload.approvedCategory,
-      actor: "mason",
+      proposed_value: payload.approvedCategoryKey,
+      approved_value: payload.approvedCategoryKey,
+      actor: payload.actor,
       suggestion_source: "owner",
       explicit_user_action: true,
       notes: payload.notes?.trim() || null,
@@ -157,6 +176,7 @@ export function saveCategoryDecision(payload: {
 export function saveReviewStatusDecision(payload: {
   transactionId: string;
   approvedStatus: "reviewed";
+  actor: string;
   notes?: string;
 }) {
   return apiJson<DecisionEventResponse>("/api/decision-events", {
@@ -169,7 +189,7 @@ export function saveReviewStatusDecision(payload: {
       field_name: "review_status",
       proposed_value: payload.approvedStatus,
       approved_value: payload.approvedStatus,
-      actor: "mason",
+      actor: payload.actor,
       suggestion_source: "owner",
       explicit_user_action: true,
       notes: payload.notes?.trim() || null,
@@ -184,12 +204,13 @@ export function fetchSettings() {
 export function confirmSourceProfileSample(payload: {
   sourceKey: string;
   note: string;
+  actor: string;
 }) {
   return apiJson<SettingsPayload>("/api/settings", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      actor: "mason",
+      actor: payload.actor,
       changes: [
         {
           domain: "sources",
@@ -206,13 +227,14 @@ export function saveSettingChange(payload: {
   domain: string;
   settingKey: string;
   value: unknown;
+  actor: string;
   note?: string;
 }) {
   return apiJson<SettingsPayload>("/api/settings", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      actor: "mason",
+      actor: payload.actor,
       changes: [
         {
           domain: payload.domain,
@@ -229,34 +251,34 @@ export function fetchArtifacts() {
   return apiJson<{ artifacts: Artifact[] }>("/api/artifacts");
 }
 
-export function runReports() {
+export function runReports(payload: { actor: string }) {
   return apiJson<ArtifactActionResponse>("/api/reports/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ actor: "mason" }),
+    body: JSON.stringify({ actor: payload.actor }),
   });
 }
 
-export function draftMonthlyClose() {
+export function draftMonthlyClose(payload: { actor: string }) {
   return apiJson<ArtifactActionResponse>("/api/monthly-close/draft", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ actor: "mason" }),
+    body: JSON.stringify({ actor: payload.actor }),
   });
 }
 
-export function finalizeMonthlyClose() {
+export function finalizeMonthlyClose(payload: { actor: string }) {
   return apiJson<ArtifactActionResponse>("/api/monthly-close/finalize", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ actor: "mason" }),
+    body: JSON.stringify({ actor: payload.actor }),
   });
 }
 
-export function createAdvisorExport() {
+export function createAdvisorExport(payload: { actor: string }) {
   return apiJson<ArtifactActionResponse>("/api/exports/advisor", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ actor: "mason" }),
+    body: JSON.stringify({ actor: payload.actor }),
   });
 }

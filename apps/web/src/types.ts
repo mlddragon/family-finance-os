@@ -20,6 +20,9 @@ export type SourceProfile = {
   amount_sign_policy?: string;
   parser_version?: string;
   confirmation_status: string;
+  is_template?: boolean;
+  enabled?: boolean;
+  template_required_default?: boolean;
   imported?: boolean;
   latest_import_status?: string;
   latest_transaction_date?: string | null;
@@ -122,10 +125,22 @@ export type Transaction = {
   normalized_merchant?: string | null;
   amount: string;
   initial_category?: string | null;
+  category_key_current?: string | null;
+  category_display_name_current?: string | null;
   category_current: string | null;
   review_status: string;
   validation_status: string;
   imported_fact_count?: number;
+};
+
+export type Category = {
+  id: string;
+  category_key: string;
+  display_name: string;
+  category_type: "system" | "custom" | string;
+  aliases: string[];
+  sort_order: number;
+  active: boolean;
 };
 
 export type TransactionDetail = Transaction & {
@@ -174,6 +189,8 @@ export type DecisionEventResponse = {
     id: string;
   };
   current_state?: {
+    category_key_current?: string | null;
+    category_display_name_current?: string | null;
     category_current?: string | null;
     review_status?: string;
   };

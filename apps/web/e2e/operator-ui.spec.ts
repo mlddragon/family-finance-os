@@ -5,19 +5,44 @@ const sourceProfiles = [
     source_key: "alliant_checking",
     display_name: "Alliant Checking",
     account_type: "checking",
-    required: true,
+    required: false,
     freshness_threshold_days: 14,
     accepted_file_extensions: [".csv"],
     confirmation_status: "pending_owner_sample",
+    is_template: true,
+    enabled: false,
   },
   {
     source_key: "chase_prime_visa",
     display_name: "Chase Prime Visa",
     account_type: "credit_card",
-    required: true,
+    required: false,
     freshness_threshold_days: 14,
     accepted_file_extensions: [".csv"],
     confirmation_status: "pending_owner_sample",
+    is_template: true,
+    enabled: false,
+  },
+];
+
+const categories = [
+  {
+    id: "category-groceries",
+    category_key: "groceries",
+    display_name: "Groceries",
+    category_type: "system",
+    aliases: ["Food"],
+    sort_order: 40,
+    active: true,
+  },
+  {
+    id: "category-family-project",
+    category_key: "family_project",
+    display_name: "Family Project",
+    category_type: "custom",
+    aliases: [],
+    sort_order: 220,
+    active: true,
   },
 ];
 
@@ -28,7 +53,9 @@ const transaction = {
   normalized_merchant: "synthetic grocery",
   amount: "12.34",
   initial_category: "Food",
-  category_current: "Food",
+  category_key_current: "groceries",
+  category_display_name_current: "Groceries",
+  category_current: "Groceries",
   review_status: "unreviewed",
   validation_status: "ready_for_review",
   imported_fact_count: 1,
@@ -49,11 +76,27 @@ async function mockApi(
       onSettingChange?.(payload);
       await route.fulfill({
         json: {
-          tabs: ["Data root", "Sources", "Thresholds", "Reports", "Privacy", "Future integrations"],
+          tabs: ["Branding", "Data root", "Sources", "Categories", "Locale", "Operator", "Thresholds", "Reports", "Privacy", "Future integrations"],
           local_only: true,
           data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
           source_profiles: sourceProfiles,
           settings: [
+            {
+              id: "setting-branding",
+              domain: "branding",
+              setting_key: "branding.app_display_name",
+              value: "Family Finance OS",
+              editable: true,
+              note_required: false,
+            },
+            {
+              id: "setting-operator",
+              domain: "operator",
+              setting_key: "operator.default_actor",
+              value: "owner",
+              editable: true,
+              note_required: false,
+            },
             {
               id: "setting-1",
               domain: "sources",
@@ -69,7 +112,7 @@ async function mockApi(
               domain: "sources",
               setting_key: "sources.chase_prime_visa.required",
               new_value: false,
-              actor: "mason",
+              actor: "owner",
               created_at: "2026-06-18T00:00:00Z",
             },
           ],
@@ -110,11 +153,26 @@ async function mockApi(
     }
 
     if (path === "/api/decision-events") {
-      onDecision?.(request.postDataJSON());
+      const payload = request.postDataJSON();
+      onDecision?.(payload);
       await route.fulfill({
         json: {
           event: { id: "event-2" },
-          current_state: { category_current: "Groceries", review_status: "unreviewed" },
+          current_state: {
+            category_key_current: payload.approved_value,
+            category_display_name_current: "Family Project",
+            category_current: "Family Project",
+            review_status: "unreviewed",
+          },
+        },
+      });
+      return;
+    }
+
+    if (path === "/api/categories" && request.method() === "POST") {
+      await route.fulfill({
+        json: {
+          category: categories[1],
         },
       });
       return;
@@ -123,8 +181,8 @@ async function mockApi(
     const responses: Record<string, unknown> = {
       "/api/operator-summary": {
         runtime: {
-          app: "Dillon Finances",
-          version: "0.1.0",
+          app: "Family Finance OS",
+          version: "0.2.0",
           local_only: true,
           bind_host: "127.0.0.1",
           data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
@@ -138,8 +196,8 @@ async function mockApi(
           transaction_date_max: "2026-06-17",
         },
         sources: {
-          required_count: 4,
-          missing_required_count: 3,
+          required_count: 0,
+          missing_required_count: 0,
           imported_source_keys: ["chase_prime_visa"],
           profiles: sourceProfiles,
         },
@@ -200,6 +258,7 @@ async function mockApi(
         ],
       },
       "/api/transactions": { transactions: [transaction] },
+      "/api/categories": { categories },
       "/api/transactions/tx-1": {
         transaction: {
           ...transaction,
@@ -208,11 +267,27 @@ async function mockApi(
         },
       },
       "/api/settings": {
-        tabs: ["Data root", "Sources", "Thresholds", "Reports", "Privacy", "Future integrations"],
+        tabs: ["Branding", "Data root", "Sources", "Categories", "Locale", "Operator", "Thresholds", "Reports", "Privacy", "Future integrations"],
         local_only: true,
         data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
         source_profiles: sourceProfiles,
         settings: [
+          {
+            id: "setting-branding",
+            domain: "branding",
+            setting_key: "branding.app_display_name",
+            value: "Family Finance OS",
+            editable: true,
+            note_required: false,
+          },
+          {
+            id: "setting-operator",
+            domain: "operator",
+            setting_key: "operator.default_actor",
+            value: "owner",
+            editable: true,
+            note_required: false,
+          },
           {
             id: "setting-1",
             domain: "sources",
@@ -272,7 +347,7 @@ test("saves a category decision through the browser flow", async ({ page }) => {
   await page.getByRole("link", { name: "Review" }).click();
   await expect(page.getByRole("cell", { name: "SYNTHETIC GROCERY" })).toBeVisible();
   await page.getByLabel("Approved category").selectOption("__other__");
-  await page.getByLabel("Other category").fill("Groceries");
+  await page.getByLabel("Other category").fill("Family Project");
   await page.getByLabel("Notes").fill("Creating a new category from the browser review flow.");
   await page.getByRole("button", { name: "Save decision" }).click();
 
@@ -282,7 +357,8 @@ test("saves a category decision through the browser flow", async ({ page }) => {
     target_id: "tx-1",
     decision_type: "category_change",
     field_name: "category",
-    approved_value: "Groceries",
+    approved_value: "family_project",
+    actor: "owner",
     explicit_user_action: true,
     notes: "Creating a new category from the browser review flow.",
   });
@@ -323,7 +399,7 @@ test("saves an editable setting through the browser flow", async ({ page }) => {
 
   await expect(page.getByText("Setting saved")).toBeVisible();
   expect(settingsPayload).toMatchObject({
-    actor: "mason",
+    actor: "owner",
     changes: [
       {
         domain: "sources",

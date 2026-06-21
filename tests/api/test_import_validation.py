@@ -75,6 +75,25 @@ def write_rendered_fixture(data_root: Path, fixture_name: str) -> Path:
     return write_inbox_file(data_root, fixture_name, rendered_fixture(fixture_name))
 
 
+def enable_required_sources(client: TestClient, *source_keys: str) -> None:
+    response = client.patch(
+        "/api/settings",
+        json={
+            "actor": "mason",
+            "changes": [
+                {
+                    "domain": "sources",
+                    "setting_key": f"sources.{source_key}.required",
+                    "value": True,
+                    "note": f"Synthetic test enables required source coverage for {source_key}.",
+                }
+                for source_key in source_keys
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+
 def accept_latest_batch(client: TestClient, *, acknowledge_warnings: bool = False) -> dict:
     batch_id = client.post("/api/inbox/scan").json()["import_batches"][-1]["id"]
     validate_response = client.post(f"/api/import-batches/{batch_id}/validate")
@@ -1048,6 +1067,13 @@ def test_missing_required_sources_are_first_class_validation_findings_and_resolv
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
     with TestClient(app) as client:
+        enable_required_sources(
+            client,
+            "alliant_checking",
+            "alliant_savings",
+            "alliant_credit_card",
+            "chase_prime_visa",
+        )
         accept_latest_batch(client)
         missing_response = client.get("/api/validation-findings")
 
@@ -1087,6 +1113,7 @@ def test_missing_required_source_findings_resolve_duplicate_open_warnings(tmp_pa
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
     with TestClient(app) as client:
+        enable_required_sources(client, "alliant_checking", "chase_prime_visa")
         accept_latest_batch(client)
         engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
         Session = sessionmaker(bind=engine)

@@ -50,8 +50,8 @@ def save_decision(client: TestClient, transaction_id: str, **overrides) -> dict:
         "target_id": transaction_id,
         "decision_type": "category_change",
         "field_name": "category",
-        "proposed_value": "Groceries",
-        "approved_value": "Groceries",
+        "proposed_value": "business",
+        "approved_value": "business",
         "actor": "mason",
         "suggestion_source": "owner",
         "explicit_user_action": True,
@@ -71,13 +71,16 @@ def test_category_decision_is_append_only_and_updates_current_state(tmp_path):
         detail_response = client.get(f"/api/transactions/{transaction['id']}")
 
     assert response_body["event"]["decision_type"] == "category_change"
-    assert response_body["event"]["previous_value"] == "Food"
+    assert response_body["event"]["previous_value"] == "groceries"
     detail = detail_response.json()["transaction"]
-    assert detail["category_original"] == "Food"
-    assert detail["category_current"] == "Groceries"
+    assert detail["category_original"] == "Groceries"
+    assert detail["category_key_original"] == "groceries"
+    assert detail["category_current"] == "Business"
+    assert detail["category_key_current"] == "business"
+    assert detail["category_display_name_current"] == "Business"
     assert detail["review_status"] == "unreviewed"
     assert detail["decision_history_count"] == 1
-    assert detail["decision_history"][0]["approved_value"] == "Groceries"
+    assert detail["decision_history"][0]["approved_value"] == "business"
     assert detail["imported_facts"][0]["initial_category"] == "Food"
 
 
@@ -93,8 +96,8 @@ def test_explicit_user_action_is_required_before_suggestion_becomes_decision(tmp
                 "target_id": transaction["id"],
                 "decision_type": "category_change",
                 "field_name": "category",
-                "proposed_value": "Groceries",
-                "approved_value": "Groceries",
+                "proposed_value": "business",
+                "approved_value": "business",
                 "actor": "mason",
                 "suggestion_source": "codex",
                 "explicit_user_action": False,
@@ -104,7 +107,8 @@ def test_explicit_user_action_is_required_before_suggestion_becomes_decision(tmp
 
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "explicit_user_action_required"
-    assert detail["category_current"] == "Food"
+    assert detail["category_current"] == "Groceries"
+    assert detail["category_key_current"] == "groceries"
     assert detail["decision_history_count"] == 0
 
 
@@ -297,8 +301,8 @@ def test_codex_and_future_ai_suggestions_require_owner_note_even_after_explicit_
                 "target_id": transaction["id"],
                 "decision_type": "category_change",
                 "field_name": "category",
-                "proposed_value": "Groceries",
-                "approved_value": "Groceries",
+                "proposed_value": "business",
+                "approved_value": "business",
                 "actor": "mason",
                 "suggestion_source": "codex",
                 "explicit_user_action": True,
@@ -307,8 +311,8 @@ def test_codex_and_future_ai_suggestions_require_owner_note_even_after_explicit_
         saved = save_decision(
             client,
             transaction["id"],
-            proposed_value="Groceries",
-            approved_value="Groceries",
+            proposed_value="business",
+            approved_value="business",
             suggestion_source="future_ai_proposal",
             notes="Owner reviewed synthetic future-AI proposal before saving.",
         )
@@ -385,23 +389,24 @@ def test_supersede_and_revert_events_update_current_state_without_editing_histor
         second = save_decision(
             client,
             transaction["id"],
-            proposed_value="Medical",
-            approved_value="Medical",
+            proposed_value="health",
+            approved_value="health",
             notes="Correcting category after receipt review.",
             supersedes_event_id=first["event"]["id"],
         )
         reverted = save_decision(
             client,
             transaction["id"],
-            proposed_value="Food",
-            approved_value="Food",
+            proposed_value="groceries",
+            approved_value="groceries",
             notes="Reverting correction after final review.",
             reverts_event_id=second["event"]["id"],
         )
         detail = client.get(f"/api/transactions/{transaction['id']}").json()["transaction"]
 
     assert reverted["event"]["reverts_event_id"] == second["event"]["id"]
-    assert detail["category_current"] == "Food"
+    assert detail["category_current"] == "Groceries"
+    assert detail["category_key_current"] == "groceries"
     assert detail["decision_history_count"] == 3
     event_status_by_id = {event["id"]: event["active"] for event in detail["decision_history"]}
     assert event_status_by_id[first["event"]["id"]] is False

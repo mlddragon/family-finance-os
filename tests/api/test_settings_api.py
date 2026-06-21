@@ -18,8 +18,12 @@ def test_get_settings_seeds_sqlite_settings_and_source_profiles(tmp_path):
     assert body["data_root"]["path"] == str(tmp_path.resolve())
     assert body["local_only"] is True
     assert body["tabs"] == [
+        "Branding",
         "Data root",
         "Sources",
+        "Categories",
+        "Locale",
+        "Operator",
         "Thresholds",
         "Reports",
         "Privacy",
@@ -32,11 +36,36 @@ def test_get_settings_seeds_sqlite_settings_and_source_profiles(tmp_path):
         "chase_prime_visa",
     }
     assert any(
+        setting["domain"] == "branding"
+        and setting["setting_key"] == "branding.app_display_name"
+        and setting["value"] == "Family Finance OS"
+        for setting in body["settings"]
+    )
+    assert any(
+        setting["domain"] == "operator"
+        and setting["setting_key"] == "operator.default_actor"
+        and setting["value"] == "owner"
+        for setting in body["settings"]
+    )
+    assert any(
         setting["domain"] == "freshness"
         and setting["setting_key"] == "sources.chase_prime_visa.freshness_threshold_days"
         and setting["value"] == 14
         for setting in body["settings"]
     )
+    assert any(
+        setting["domain"] == "sources"
+        and setting["setting_key"] == "sources.chase_prime_visa.enabled"
+        and setting["value"] is False
+        for setting in body["settings"]
+    )
+    chase_profile = next(
+        profile for profile in body["source_profiles"] if profile["source_key"] == "chase_prime_visa"
+    )
+    assert chase_profile["is_template"] is True
+    assert chase_profile["enabled"] is False
+    assert chase_profile["template_required_default"] is False
+    assert chase_profile["required"] is False
 
     engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
     with engine.connect() as connection:
@@ -117,7 +146,7 @@ def test_high_impact_setting_change_requires_note(tmp_path):
                 {
                     "domain": "sources",
                     "setting_key": "sources.chase_prime_visa.required",
-                    "value": False,
+                    "value": True,
                 }
             ],
         },

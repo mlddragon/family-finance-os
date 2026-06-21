@@ -80,6 +80,25 @@ def disable_unavailable_required_sources(client: TestClient) -> None:
     assert response.status_code == 200
 
 
+def enable_required_sources(client: TestClient, *source_keys: str) -> None:
+    response = client.patch(
+        "/api/settings",
+        json={
+            "actor": "mason",
+            "changes": [
+                {
+                    "domain": "sources",
+                    "setting_key": f"sources.{source_key}.required",
+                    "value": True,
+                    "note": f"Synthetic test enables required source coverage for {source_key}.",
+                }
+                for source_key in source_keys
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+
 def confirm_source_profile_sample(client: TestClient, source_key: str) -> None:
     response = client.patch(
         "/api/settings",
@@ -130,7 +149,7 @@ def test_report_run_generates_registered_core_artifacts(tmp_path):
     body = response.json()
     assert body["job"]["status"] == "completed"
     assert body["report_run"]["status"] == "completed"
-    assert body["report_run"]["validation_status"] == "passed_with_warnings"
+    assert body["report_run"]["validation_status"] == "passed"
     artifact_types = {artifact["artifact_type"] for artifact in body["artifacts"]}
     assert {
         "import_validation_summary",
@@ -203,7 +222,7 @@ def test_monthly_close_draft_writes_provisional_manifest_and_bundle(tmp_path):
     assert body["monthly_close"]["status"] == "draft"
     assert body["monthly_close"]["provisional"] is True
     assert summary_response.json()["monthly_close"]["status"] == "draft"
-    assert body["validation_summary"]["missing_required_count"] == 3
+    assert body["validation_summary"]["missing_required_count"] == 0
     artifact_types = {artifact["artifact_type"] for artifact in body["artifacts"]}
     assert {"monthly_close_manifest", "monthly_close_memo", "settings_snapshot", "decision_event_export"}.issubset(
         artifact_types
@@ -265,6 +284,13 @@ def test_final_close_blocks_missing_required_source_coverage(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
     with TestClient(app) as client:
+        enable_required_sources(
+            client,
+            "alliant_checking",
+            "alliant_savings",
+            "alliant_credit_card",
+            "chase_prime_visa",
+        )
         create_accepted_chase_batch(client, tmp_path)
         response = client.post("/api/monthly-close/finalize", json={"actor": "mason"})
 
@@ -279,8 +305,8 @@ def test_final_close_blocks_unconfirmed_required_source_profiles(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
     with TestClient(app) as client:
+        enable_required_sources(client, "chase_prime_visa")
         create_accepted_chase_batch(client, tmp_path)
-        disable_unavailable_required_sources(client)
         readiness_before_confirmation = client.post(
             "/api/monthly-close/finalize",
             json={"actor": "mason", "notes": "Synthetic final close should wait for source confirmation."},
@@ -319,8 +345,8 @@ def test_final_close_writes_immutable_bundle_after_owner_required_source_setting
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
     with TestClient(app) as client:
+        enable_required_sources(client, "chase_prime_visa")
         create_accepted_chase_batch(client, tmp_path)
-        disable_unavailable_required_sources(client)
         confirm_source_profile_sample(client, "chase_prime_visa")
         response = client.post(
             "/api/monthly-close/finalize",
@@ -351,7 +377,7 @@ def test_advisor_export_is_explicit_owner_action_and_carries_validation_state(tm
     assert response.status_code == 200
     body = response.json()
     assert body["job"]["job_type"] == "advisor_export"
-    assert body["validation_summary"]["missing_required_count"] == 3
+    assert body["validation_summary"]["missing_required_count"] == 0
     artifact_types = {artifact["artifact_type"] for artifact in body["artifacts"]}
     assert {"advisor_summary", "advisor_transactions_export"}.issubset(artifact_types)
     assert all(path.exists() and path.is_relative_to(tmp_path / "exports") for path in artifact_paths(body))

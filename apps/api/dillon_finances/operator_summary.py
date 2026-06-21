@@ -131,6 +131,18 @@ def _source_summary(session: Session, import_batches: list[ImportBatch]) -> dict
                     ("sources", f"sources.{profile.source_key}.profile_confirmation_status"),
                     profile.confirmation_status,
                 ),
+                "is_template": True,
+                "enabled": bool(
+                    settings.get(
+                        ("sources", f"sources.{profile.source_key}.enabled"),
+                        profile.required,
+                    )
+                    or settings.get(
+                        ("sources", f"sources.{profile.source_key}.required"),
+                        profile.required,
+                    )
+                ),
+                "template_required_default": profile.required,
                 "imported": profile.source_key in imported_key_set,
                 "latest_import_status": latest_by_source.get(profile.source_key).status
                 if profile.source_key in latest_by_source
@@ -197,6 +209,11 @@ def _next_action(
     monthly_close: dict[str, Any],
 ) -> dict[str, str]:
     if latest_import["status"] == "none":
+        if sources["required_count"] == 0:
+            return {
+                "code": "upload_source_files",
+                "label": "Upload source files",
+            }
         return {
             "code": "import_required_source_files",
             "label": "Import required source files",

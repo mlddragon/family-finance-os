@@ -22,3 +22,4 @@
 
 - [ ] File inventory checked for sensitive artifacts.
 - [ ] Relevant docs reviewed.
+- [ ] Human QA script included for app/UI/API/Docker behavior changes, or not applicable.

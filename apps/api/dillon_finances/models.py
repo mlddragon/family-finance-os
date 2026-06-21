@@ -248,6 +248,21 @@ class DecisionEvent(TimestampedModel):
     reverts_event_id: Mapped[Optional[str]] = mapped_column(ForeignKey("decision_events.id"))
 
 
+class Category(TimestampedModel):
+    __tablename__ = "categories"
+
+    category_key: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    category_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    aliases_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(120), default="system", nullable=False)
+    created_note: Mapped[Optional[str]] = mapped_column(Text)
+    updated_by: Mapped[Optional[str]] = mapped_column(String(120))
+    updated_note: Mapped[Optional[str]] = mapped_column(Text)
+
+
 class Job(TimestampedModel):
     __tablename__ = "jobs"
 
