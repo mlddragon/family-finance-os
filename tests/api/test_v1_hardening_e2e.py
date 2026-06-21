@@ -243,7 +243,7 @@ def test_owner_smoke_checklist_and_runbook_are_present_and_sanitized():
     assert "Do not record raw transaction" in checklist_text
 
     readme = (REPO_ROOT / "README.md").read_text()
-    for expected in ["docker compose up", "127.0.0.1:8080", "DATA_ROOT", "backup", "troubleshooting"]:
+    for expected in ["make personal-up", "127.0.0.1:28080", "127.0.0.1:28081", "DATA_ROOT", "backup", "troubleshooting"]:
         assert expected in readme
 
 
@@ -305,7 +305,7 @@ def test_docker_e2e_script_exercises_blocked_validation_path(tmp_path, monkeypat
 
     monkeypatch.setattr(module, "request_json", fake_request_json)
 
-    result = module.run_blocked_validation_path("http://127.0.0.1:8080", tmp_path)
+    result = module.run_blocked_validation_path("http://127.0.0.1:28081", tmp_path)
 
     assert (tmp_path / "inbox" / "SYNTHETIC_docker_blocked_wrong_header.csv").exists()
     assert result == {

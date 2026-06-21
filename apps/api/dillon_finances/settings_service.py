@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from dillon_finances.actors import ActorContext, actor_context_from_json, actor_context_to_json, derive_actor_context
 from dillon_finances.models import Setting, SettingEvent
 from dillon_finances.source_profiles import iter_source_profiles, list_source_profiles
 
@@ -54,6 +55,7 @@ class SettingChange(BaseModel):
 
 class SettingsPatchRequest(BaseModel):
     actor: str = Field(min_length=1)
+    actor_context: Optional[ActorContext] = None
     changes: list[SettingChange] = Field(min_length=1)
 
 
@@ -365,6 +367,7 @@ def list_settings_events(session: Session) -> list[dict[str, Any]]:
             else None,
             "new_value": _load_value(record.new_value_json),
             "actor": record.actor,
+            "actor_context": actor_context_from_json(record.actor_context_json),
             "notes": record.notes,
             "created_at": record.created_at,
         }
@@ -374,6 +377,7 @@ def list_settings_events(session: Session) -> list[dict[str, Any]]:
 
 def apply_settings_patch(session: Session, patch: SettingsPatchRequest) -> list[SettingEvent]:
     events: list[SettingEvent] = []
+    actor_context_json = actor_context_to_json(derive_actor_context(patch.actor, patch.actor_context))
     for change in patch.changes:
         existing = session.scalar(
             select(Setting).where(
@@ -398,6 +402,7 @@ def apply_settings_patch(session: Session, patch: SettingsPatchRequest) -> list[
             previous_value_json=previous_value_json,
             new_value_json=new_value_json,
             actor=patch.actor,
+            actor_context_json=actor_context_json,
             notes=change.note,
             validation_result_json=_dump_value({"status": "passed"}),
         )
@@ -413,6 +418,7 @@ def settings_payload(
     *,
     data_root: Path,
     local_only: bool,
+    runtime: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     seed_default_settings(session)
     settings_by_key = {
@@ -426,6 +432,7 @@ def settings_payload(
             "path": str(data_root),
             "exists": data_root.exists(),
         },
+        "runtime": runtime,
         "settings": list_settings(session),
         "settings_events": list_settings_events(session),
         "source_profiles": [
@@ -477,6 +484,7 @@ def serialize_events(events: Iterable[SettingEvent]) -> list[dict[str, Any]]:
             else None,
             "new_value": _load_value(event.new_value_json),
             "actor": event.actor,
+            "actor_context": actor_context_from_json(event.actor_context_json),
             "notes": event.notes,
             "created_at": event.created_at,
         }

@@ -72,10 +72,13 @@ def main(argv: list[str]) -> int:
     dockerfile = (repo_root / "Dockerfile").read_text()
     dockerignore = (repo_root / ".dockerignore").read_text()
 
-    if "127.0.0.1:${DILLON_FINANCES_HOST_PORT:-8080}:8080" not in compose:
-        return fail("Docker Compose must bind the browser app to 127.0.0.1 and default the host port to 8080.")
+    if "127.0.0.1:${DILLON_FINANCES_HOST_PORT:-28080}:8080" not in compose:
+        return fail("Docker Compose must bind the browser app to 127.0.0.1 and default the personal host port to 28080.")
     if "APP_BIND_HOST: 127.0.0.1" not in compose:
         return fail("Docker Compose must keep APP_BIND_HOST at 127.0.0.1 by default.")
+    for required in ("APP_ENV: ${APP_ENV:-personal}", "DATASET_KIND: ${DATASET_KIND:-personal}", "DEV_MODE: ${DEV_MODE:-false}"):
+        if required not in compose:
+            return fail(f"Docker Compose is missing runtime identity default: {required}")
     if "DATA_ROOT: /data" not in compose:
         return fail("Docker Compose must mount runtime state under /data.")
     if "USER 10001:10001" not in dockerfile:

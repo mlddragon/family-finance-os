@@ -7,6 +7,7 @@ import { enUS } from "./locales/en-US";
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
 });
 
 test("en-US locale covers primary UI surfaces", () => {
@@ -123,6 +124,53 @@ const categories = [
   },
 ];
 
+const personalRuntime = {
+  app: "Family Finance OS",
+  version: "0.3.0",
+  local_only: true,
+  bind_host: "127.0.0.1",
+  app_env: "personal",
+  app_env_label: "Personal data",
+  dataset_kind: "personal",
+  dev_mode: false,
+  qa_controls_enabled: false,
+  data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
+  database: { status: "present", path: "/tmp/Dillon_Finances_Data/database/dillon_finances.sqlite3" },
+};
+
+const qaRuntime = {
+  ...personalRuntime,
+  app_env: "qa",
+  app_env_label: "QA synthetic demo",
+  dataset_kind: "synthetic",
+  dev_mode: true,
+  qa_controls_enabled: true,
+  data_root: { path: "/tmp/Dillon_Finances_QA_Data", exists: true },
+  database: { status: "present", path: "/tmp/Dillon_Finances_QA_Data/database/dillon_finances.sqlite3" },
+};
+
+const actorsPayload = {
+  default_actor_key: "owner",
+  human_actors: [
+    {
+      actor_key: "owner",
+      actor_type: "human",
+      display_name: "Owner",
+      group_keys: ["administrator", "finance_manager"],
+    },
+  ],
+  system_actors: [{ actor_key: "system", actor_type: "system", display_name: "System", group_keys: [] }],
+  groups: [
+    { group_key: "administrator", display_name: "Administrator" },
+    { group_key: "finance_manager", display_name: "Finance Manager" },
+  ],
+  selectable_personas: [
+    { persona_key: "finance_manager", persona_label: "Finance Manager", group_keys: ["finance_manager"] },
+    { persona_key: "administrator", persona_label: "Administrator", group_keys: ["administrator"] },
+  ],
+  system_personas: [{ system_persona_key: "system:importer", display_name: "System: Importer" }],
+};
+
 function response(body: unknown) {
   return {
     ok: true,
@@ -149,9 +197,10 @@ function pathFor(input: RequestInfo | URL) {
   return new URL(input.url).pathname;
 }
 
-function installApiMock(options: { acceptImportError?: boolean } = {}) {
+function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof personalRuntime } = {}) {
   let importBatchVoided = false;
   let validationFindingCleared = false;
+  const runtime = options.runtime ?? personalRuntime;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = pathFor(input);
     if (path === "/api/validation-findings/finding-warning/resolve" && init?.method === "POST") {
@@ -382,13 +431,7 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
 
     const responses: Record<string, unknown> = {
       "/api/operator-summary": {
-        runtime: {
-          app: "Family Finance OS",
-          version: "0.3.0",
-          local_only: true,
-          bind_host: "127.0.0.1",
-          data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
-        },
+        runtime,
         latest_import: {
           id: "batch-1",
           status: "accepted",
@@ -510,7 +553,8 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
       "/api/settings": {
         tabs: ["Branding", "Data root", "Sources", "Categories", "Locale", "Operator", "Thresholds", "Reports", "Privacy", "Future integrations"],
         local_only: true,
-        data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
+        data_root: runtime.data_root,
+        runtime,
         source_profiles: sourceProfiles,
         settings: [
           {
@@ -582,6 +626,7 @@ function installApiMock(options: { acceptImportError?: boolean } = {}) {
           },
         ],
       },
+      "/api/actors": actorsPayload,
     };
 
     return response(responses[path] ?? {});
@@ -597,11 +642,37 @@ test("renders operator home from API state", async () => {
   render(<App />);
 
   expect(screen.getByRole("heading", { name: "Family Finance OS" })).toBeInTheDocument();
+  expect(await screen.findByText("Personal data")).toBeInTheDocument();
   expect(await screen.findByText("Local browser mode")).toBeInTheDocument();
   expect(await screen.findByText("Resolve blocking validation findings")).toBeInTheDocument();
   expect(screen.getByText("Open blockers")).toBeInTheDocument();
   expect(screen.getByText("Review queue")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Validation Issues" })).toBeInTheDocument();
+});
+
+test("shows persistent QA environment marker for synthetic runtime", async () => {
+  installApiMock({ runtime: qaRuntime });
+
+  render(<App />);
+
+  expect(await screen.findByText("QA synthetic demo - not real financial data")).toBeInTheDocument();
+  expect(screen.getByText("QA synthetic demo")).toBeInTheDocument();
+  expect(screen.getByText("synthetic")).toBeInTheDocument();
+});
+
+test("renders local actor and persona selectors", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  const actorGroup = await screen.findByLabelText("Active local actor");
+  await screen.findByRole("option", { name: "Administrator" });
+  expect(within(actorGroup).getByLabelText("Actor")).toHaveValue("owner");
+  expect(within(actorGroup).getByLabelText("Persona")).toHaveValue("finance_manager");
+
+  fireEvent.change(within(actorGroup).getByLabelText("Persona"), { target: { value: "administrator" } });
+
+  expect(window.localStorage.getItem("family-finance-os.activePersonaKey")).toBe("administrator");
 });
 
 test("navigates through the PR8 operator screens", async () => {
@@ -717,8 +788,9 @@ test("sources screen voids an upload with confirmation and optional file destruc
     );
     expect(voidCall).toBeTruthy();
     const body = JSON.parse(String(voidCall?.[1]?.body));
-    expect(body).toEqual({
+    expect(body).toMatchObject({
       actor: "owner",
+      actor_context: { actor_key: "owner", display_name: "Owner", persona_key: "finance_manager" },
       reason: "Wrong export file uploaded",
       destroy_files: true,
     });
@@ -788,8 +860,9 @@ test("validation screen clears acknowledged findings from the default open queue
       ([input, init]) => pathFor(input) === "/api/validation-findings/finding-warning/resolve" && init?.method === "POST",
     );
     expect(clearCall).toBeTruthy();
-    expect(JSON.parse(String(clearCall?.[1]?.body))).toEqual({
+    expect(JSON.parse(String(clearCall?.[1]?.body))).toMatchObject({
       actor: "owner",
+      actor_context: { actor_key: "owner", display_name: "Owner", persona_key: "finance_manager" },
       note: "Acknowledged stale source while waiting for next export.",
     });
   });

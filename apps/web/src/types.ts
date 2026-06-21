@@ -3,10 +3,49 @@ export type RuntimeStatus = {
   version: string;
   local_only: boolean;
   bind_host: string;
+  app_env: "personal" | "qa";
+  app_env_label: string;
+  dataset_kind: "personal" | "synthetic";
+  dev_mode: boolean;
+  qa_controls_enabled: boolean;
   data_root: {
     path: string;
     exists: boolean;
   };
+  database?: {
+    status: string;
+    path: string;
+  };
+};
+
+export type ActorContext = {
+  actor_key: string;
+  actor_type: "human" | "system";
+  display_name: string;
+  persona_key?: string;
+  persona_label?: string;
+  group_keys: string[];
+  system_persona_key?: string;
+  source: "local_selector" | "system" | "compat_actor_string";
+};
+
+export type ActorsPayload = {
+  default_actor_key: string;
+  human_actors: Array<{
+    actor_key: string;
+    actor_type: "human";
+    display_name: string;
+    group_keys: string[];
+  }>;
+  system_actors: Array<{
+    actor_key: string;
+    actor_type: "system";
+    display_name: string;
+    group_keys: string[];
+  }>;
+  groups: Array<{ group_key: string; display_name: string }>;
+  selectable_personas: Array<{ persona_key: string; persona_label: string; group_keys: string[] }>;
+  system_personas: Array<{ system_persona_key: string; display_name: string }>;
 };
 
 export type SourceProfile = {
@@ -156,6 +195,9 @@ export type TransactionDetail = Transaction & {
     decision_type: string;
     field_name: string;
     approved_value: string | null;
+    actor?: string;
+    actor_context?: ActorContext | null;
+    notes?: string | null;
     active: boolean;
     created_at: string;
   }>;
@@ -165,6 +207,7 @@ export type SettingsPayload = {
   tabs: string[];
   local_only: boolean;
   data_root: RuntimeStatus["data_root"];
+  runtime?: RuntimeStatus;
   settings: Array<{
     id: string;
     domain: string;
@@ -183,6 +226,7 @@ export type SettingsPayload = {
     friendly_name?: string;
     new_value: unknown;
     actor: string;
+    actor_context?: ActorContext | null;
     notes?: string | null;
     created_at: string;
   }>;
@@ -192,6 +236,7 @@ export type SettingsPayload = {
 export type DecisionEventResponse = {
   event: {
     id: string;
+    actor_context?: ActorContext | null;
   };
   current_state?: {
     category_key_current?: string | null;

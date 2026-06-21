@@ -4,6 +4,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from dillon_finances.actors import ActorContext, actor_context_to_json, derive_actor_context
 from dillon_finances.models import Job
 
 
@@ -13,6 +14,7 @@ def record_job(
     job_type: str,
     status: str,
     actor: str,
+    actor_context: Optional[ActorContext] = None,
     input_json: Optional[str] = None,
     output_json: Optional[str] = None,
     error_summary: Optional[str] = None,
@@ -23,6 +25,7 @@ def record_job(
         job_type=job_type,
         status=status,
         actor=actor,
+        actor_context_json=actor_context_to_json(derive_actor_context(actor, actor_context)),
         input_json=input_json,
         output_json=output_json,
         error_summary=error_summary,

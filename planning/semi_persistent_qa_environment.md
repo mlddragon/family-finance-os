@@ -5,8 +5,9 @@ This document captures the approved planning direction for a semi-persistent QA 
 ## Status
 
 - Approved owner direction was captured in chat on 2026-06-21.
-- Implementation has not started.
-- No QA data root has been created by this document.
+- v0.3.0 implements the first foundation: personal/QA runtime identity, side-by-side Docker commands, script-level QA reset/seed, one `baseline` scenario, QA UI markers, and synthetic artifact markers.
+- Additional named scenarios remain deferred.
+- No QA data root is committed by this document.
 - No personal data root should be changed by this document.
 - This document should guide the later implementation plan and pull request scope.
 

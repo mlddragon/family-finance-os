@@ -11,7 +11,8 @@ This checklist is for an owner-approved local real-data smoke run after the synt
 ## Preflight
 
 - Confirm Docker is running locally.
-- Confirm the app opens at `http://127.0.0.1:8080`.
+- Confirm the personal app opens at `http://127.0.0.1:28080`.
+- Confirm the QA synthetic app opens at `http://127.0.0.1:28081` when running QA.
 - Confirm `DATA_ROOT` is outside the git repo.
 - Confirm the repo has no raw financial data, generated reports, database files, credentials, or API keys.
 

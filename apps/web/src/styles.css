@@ -61,6 +61,15 @@ button:disabled {
   flex-direction: column;
 }
 
+.qa-banner {
+  padding: 7px 18px;
+  background: #9b1c1c;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+}
+
 .topbar {
   min-height: 74px;
   display: flex;
@@ -70,6 +79,36 @@ button:disabled {
   padding: 12px 22px;
   border-bottom: 1px solid #d2d6cf;
   background: #ffffff;
+}
+
+.actor-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.actor-controls label {
+  display: grid;
+  gap: 3px;
+  color: #56615a;
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.actor-controls select {
+  min-width: 150px;
+  height: 32px;
+  border: 1px solid #cbd1c9;
+  border-radius: 6px;
+  padding: 0 8px;
+  background: #ffffff;
+  color: #222725;
+  font-size: 13px;
+  font-weight: 650;
+  text-transform: none;
 }
 
 .topbar h1,
@@ -232,6 +271,32 @@ button:disabled {
 
 .metric-grid.compact {
   grid-template-columns: repeat(3, minmax(0, 240px));
+}
+
+.environment-panel dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.environment-panel div {
+  min-width: 0;
+}
+
+.environment-panel dt {
+  color: #647066;
+  font-size: 12px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.environment-panel dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  color: #222725;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .metric,

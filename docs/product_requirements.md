@@ -1709,24 +1709,27 @@ The current build has already received owner smoke testing for the implemented v
 
 Owner real-data smoke testing remains a manual checkpoint. Evidence captured in the repository must be sanitized counts, source names, and pass/fail notes only.
 
-## 21.3 Version 0.3.0 quality-of-life patch
+## 21.3 Version 0.3.0 reviewability, QA, and audit foundation
 
-The next patch should address the first usability follow-ups from the owner review:
+Version `0.3.0` should combine the already-merged Settings/audit quality-of-life work with reviewability, QA/demo, and local actor audit foundations.
+
+Scope:
 
 - Settings that cannot be edited should be hidden by default, with an explicit control to show read-only settings.
-- Settings lists should use friendly names by default, not technical setting keys.
-- Settings lists should show value and default value by default.
-- Settings lists should support optional technical columns such as changed-from-default, domain, raw setting key, and editable status.
+- Settings lists should use friendly names, current values, and default values by default, with optional technical columns.
 - Settings audit history should show saved notes.
+- AI-agent repo guidance should live at the root through `AGENTS.md`, `CODEX.md`, and `CHATGPT.md`.
+- Personal and QA Docker instances should run side by side with visible runtime identity.
+- QA should support script-level reset/seed with a single `baseline` synthetic scenario.
+- QA-generated reports, close bundles, advisor exports, and manifests should carry a clear synthetic marker.
+- Local actor/persona context should be selectable in the UI and persisted beside existing actor strings for future audit/RBAC work.
 
-This is tracked by GitHub issues `#47`, `#48`, and `#49`.
+Settings QoL was tracked by GitHub issues `#47`, `#48`, and `#49`. The v0.3.0 foundation work adds the QA/demo and local actor audit slice without implementing full RBAC.
 
-## 21.4 User, persona, permission, and audit foundations
+## 21.4 Post-v0.3.0 permission, elevation, suggestion, and approval foundations
 
-After `0.3.0`, the next product foundation is the lightweight multi-user framing discussed with the owner:
+After the lightweight local actor foundation lands, the next product foundation is the permission and approval framing discussed with the owner:
 
-- selectable local user/persona context before full authentication
-- system actor with system personas such as importer, validator, report generator, and scheduler
 - Administrator as an elevated administrative persona, not the owner of financial data
 - Finance Manager as the highest financial-data authority
 - lightweight permission matrix with immutable permission-state audit records
@@ -1734,8 +1737,10 @@ After `0.3.0`, the next product foundation is the lightweight multi-user framing
 - current display names in main audit views, with historical names available in details when audit fidelity requires them
 - admin/elevated mode for risky settings and approval-rule changes
 - optional approval mode for risky or high-value changes, hidden unless enabled
+- suggestions queue versus approvals queue
+- view-as/troubleshooting simulation without true impersonation until auth and audit guarantees mature
 
-This work is tracked by GitHub issues `#50`, `#51`, `#52`, `#53`, `#54`, and `#55`.
+This work is further captured in `planning/post_v030_permissions_elevation_approvals.md`.
 
 ## 21.5 Later product foundations
 

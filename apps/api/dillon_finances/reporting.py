@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from dillon_finances.actors import ActorContext, actor_context_from_json, actor_context_to_json, derive_actor_context
 from dillon_finances.decision_events import serialize_decision_event
 from dillon_finances.ledger_normalization import list_transactions
 from dillon_finances.models import (
@@ -44,21 +45,30 @@ class ReportingError(RuntimeError):
 
 class ReportRunRequest(BaseModel):
     actor: str = Field(min_length=1)
+    actor_context: Optional[ActorContext] = None
     month: Optional[str] = None
 
 
 class MonthlyCloseRequest(BaseModel):
     actor: str = Field(min_length=1)
+    actor_context: Optional[ActorContext] = None
     month: Optional[str] = None
     notes: Optional[str] = None
 
 
 class AdvisorExportRequest(BaseModel):
     actor: str = Field(min_length=1)
+    actor_context: Optional[ActorContext] = None
     month: Optional[str] = None
 
 
-def run_reports(session: Session, data_root: Path, request: ReportRunRequest) -> dict[str, Any]:
+def run_reports(
+    session: Session,
+    data_root: Path,
+    request: ReportRunRequest,
+    *,
+    synthetic_artifact_marker: Optional[str] = None,
+) -> dict[str, Any]:
     month = request.month or default_month(session)
     validation_summary = close_readiness(session, month=month)
     validation_status = _validation_status(validation_summary)
@@ -68,6 +78,7 @@ def run_reports(session: Session, data_root: Path, request: ReportRunRequest) ->
         job_type="report_run",
         status="running",
         actor=request.actor,
+        actor_context_json=actor_context_to_json(derive_actor_context(request.actor, request.actor_context)),
         input_json=_dump(input_snapshot),
     )
     report_run = ReportRun(
@@ -75,6 +86,7 @@ def run_reports(session: Session, data_root: Path, request: ReportRunRequest) ->
         status="running",
         job=job,
         validation_status=validation_status,
+        actor_context_json=actor_context_to_json(derive_actor_context(request.actor, request.actor_context)),
         input_snapshot_json=_dump(input_snapshot),
     )
     session.add_all([job, report_run])
@@ -94,6 +106,7 @@ def run_reports(session: Session, data_root: Path, request: ReportRunRequest) ->
             title=title,
             description=description,
             sensitivity="household_financial_summary",
+            synthetic_artifact_marker=synthetic_artifact_marker,
         )
         for artifact_type, title, description, payload in reports
     ]
@@ -106,10 +119,11 @@ def run_reports(session: Session, data_root: Path, request: ReportRunRequest) ->
             rows=_reviewed_transaction_rows(session),
             job=job,
             source_inputs=input_snapshot,
-            title="Reviewed Transaction Export",
-            description="Reviewed/current transaction export for v1 reports.",
-            sensitivity="household_financial_export",
-        )
+        title="Reviewed Transaction Export",
+        description="Reviewed/current transaction export for v1 reports.",
+        sensitivity="household_financial_export",
+        synthetic_artifact_marker=synthetic_artifact_marker,
+    )
     )
 
     output_summary = {
@@ -139,6 +153,7 @@ def create_monthly_close(
     request: MonthlyCloseRequest,
     *,
     status: str,
+    synthetic_artifact_marker: Optional[str] = None,
 ) -> dict[str, Any]:
     month = request.month or default_month(session)
     validation_summary = close_readiness(session, month=month)
@@ -164,12 +179,14 @@ def create_monthly_close(
         job_type=f"monthly_close_{status}",
         status="running",
         actor=request.actor,
+        actor_context_json=actor_context_to_json(derive_actor_context(request.actor, request.actor_context)),
         input_json=_dump({"month": month, "status": status, "validation_summary": validation_summary}),
     )
     monthly_close = MonthlyClose(
         month=month,
         status=status,
         actor=request.actor,
+        actor_context_json=actor_context_to_json(derive_actor_context(request.actor, request.actor_context)),
         validation_summary=_dump(validation_summary),
         source_import_batch_ids_json=_dump(validation_summary["accepted_import_batch_ids"]),
         report_run_ids_json=_dump(_completed_report_run_ids(session)),
@@ -215,6 +232,7 @@ def create_monthly_close(
         title=memo_title,
         description="Human-readable v1 monthly close memo.",
         sensitivity="household_financial_summary",
+        synthetic_artifact_marker=synthetic_artifact_marker,
     )
     settings_artifact = _write_json_artifact(
         session,
@@ -227,6 +245,7 @@ def create_monthly_close(
         title="Settings Snapshot",
         description="Settings state captured for monthly close reproducibility.",
         sensitivity="household_financial_configuration",
+        synthetic_artifact_marker=synthetic_artifact_marker,
     )
     decision_artifact = _write_json_artifact(
         session,
@@ -239,6 +258,7 @@ def create_monthly_close(
         title="Decision Event Export",
         description="Append-only decision events included in the close bundle.",
         sensitivity="household_financial_export",
+        synthetic_artifact_marker=synthetic_artifact_marker,
     )
     monthly_close.settings_snapshot_artifact_id = settings_artifact.id
     monthly_close.decision_export_artifact_id = decision_artifact.id
@@ -254,6 +274,8 @@ def create_monthly_close(
         "report_run_ids": _completed_report_run_ids(session),
         "artifacts": [serialize_artifact(artifact) for artifact in bundle_artifacts],
     }
+    if synthetic_artifact_marker:
+        manifest_payload["synthetic_artifact_marker"] = synthetic_artifact_marker
     manifest_artifact = _write_json_artifact(
         session,
         bundle_dir / "manifest.json",
@@ -266,6 +288,7 @@ def create_monthly_close(
         description="Machine-readable manifest for the monthly close bundle.",
         sensitivity="household_financial_summary",
         compact=True,
+        synthetic_artifact_marker=synthetic_artifact_marker,
     )
     artifacts = [*bundle_artifacts, manifest_artifact]
 
@@ -288,7 +311,13 @@ def create_monthly_close(
     }
 
 
-def create_advisor_export(session: Session, data_root: Path, request: AdvisorExportRequest) -> dict[str, Any]:
+def create_advisor_export(
+    session: Session,
+    data_root: Path,
+    request: AdvisorExportRequest,
+    *,
+    synthetic_artifact_marker: Optional[str] = None,
+) -> dict[str, Any]:
     month = request.month or default_month(session)
     validation_summary = close_readiness(session, month=month)
     input_snapshot = _input_snapshot(session, month=month, validation_summary=validation_summary)
@@ -296,6 +325,7 @@ def create_advisor_export(session: Session, data_root: Path, request: AdvisorExp
         job_type="advisor_export",
         status="running",
         actor=request.actor,
+        actor_context_json=actor_context_to_json(derive_actor_context(request.actor, request.actor_context)),
         input_json=_dump(input_snapshot),
     )
     session.add(job)
@@ -319,6 +349,7 @@ def create_advisor_export(session: Session, data_root: Path, request: AdvisorExp
         title="Advisor Summary",
         description="Explicit owner-requested advisor summary export with validation state.",
         sensitivity="household_financial_summary",
+        synthetic_artifact_marker=synthetic_artifact_marker,
     )
     transactions_artifact = _write_csv_artifact(
         session,
@@ -331,6 +362,7 @@ def create_advisor_export(session: Session, data_root: Path, request: AdvisorExp
         title="Advisor Transaction Export",
         description="Explicit owner-requested transaction export for advisor review.",
         sensitivity="household_financial_export",
+        synthetic_artifact_marker=synthetic_artifact_marker,
     )
     artifacts = [summary_artifact, transactions_artifact]
     output_summary = {
@@ -475,6 +507,7 @@ def serialize_job(job: Job) -> dict[str, Any]:
         "job_type": job.job_type,
         "status": job.status,
         "actor": job.actor,
+        "actor_context": actor_context_from_json(job.actor_context_json),
         "started_at": job.started_at,
         "finished_at": job.finished_at,
         "output": _loads_optional(job.output_json),
@@ -488,6 +521,7 @@ def serialize_report_run(report_run: ReportRun) -> dict[str, Any]:
         "status": report_run.status,
         "job_id": report_run.job_id,
         "validation_status": report_run.validation_status,
+        "actor_context": actor_context_from_json(report_run.actor_context_json),
         "input_snapshot": _loads_optional(report_run.input_snapshot_json),
         "output_summary": _loads_optional(report_run.output_summary_json),
     }
@@ -517,6 +551,7 @@ def serialize_monthly_close(monthly_close: MonthlyClose) -> dict[str, Any]:
         "month": monthly_close.month,
         "status": monthly_close.status,
         "actor": monthly_close.actor,
+        "actor_context": actor_context_from_json(monthly_close.actor_context_json),
         "validation_summary": _loads_optional(monthly_close.validation_summary),
         "source_import_batch_ids": _loads_optional(monthly_close.source_import_batch_ids_json),
         "report_run_ids": _loads_optional(monthly_close.report_run_ids_json),
@@ -786,7 +821,10 @@ def _write_json_artifact(
     description: str,
     sensitivity: str,
     compact: bool = False,
+    synthetic_artifact_marker: Optional[str] = None,
 ) -> Artifact:
+    if synthetic_artifact_marker:
+        payload = {"synthetic_artifact_marker": synthetic_artifact_marker, **payload}
     if compact:
         content = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     else:
@@ -817,7 +855,10 @@ def _write_text_artifact(
     title: str,
     description: str,
     sensitivity: str,
+    synthetic_artifact_marker: Optional[str] = None,
 ) -> Artifact:
+    if synthetic_artifact_marker:
+        text = f"{synthetic_artifact_marker}\n\n{text}"
     return _write_artifact(
         session,
         path,
@@ -844,8 +885,17 @@ def _write_csv_artifact(
     title: str,
     description: str,
     sensitivity: str,
+    synthetic_artifact_marker: Optional[str] = None,
 ) -> Artifact:
     buffer = io.StringIO()
+    if synthetic_artifact_marker:
+        rows = [
+            {
+                "synthetic_artifact_marker": synthetic_artifact_marker,
+                **row,
+            }
+            for row in rows
+        ]
     fieldnames = sorted({key for row in rows for key in row.keys()}) or ["empty"]
     writer = csv.DictWriter(buffer, fieldnames=fieldnames)
     writer.writeheader()

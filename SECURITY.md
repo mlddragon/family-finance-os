@@ -17,6 +17,8 @@ Do not commit:
 
 Financial data should remain local by default. Any workflow that sends raw or transaction-level data to an external service requires explicit owner review before implementation or use.
 
+Personal and QA/demo Docker instances must use separate external data roots. QA/demo mode must use synthetic data only, should run with visible QA environment identity, and must not expose controls that reset or switch personal data roots.
+
 ## Required Review Gates
 
 Stop for explicit owner approval before:

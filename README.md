@@ -4,9 +4,9 @@ This repository contains Family Finance OS, a local-first family financial opera
 
 The landed v1 build is treated as `0.1.0`. The `0.2.0` line prepares the product for future open-source release by adding AGPL licensing, localization scaffolding, generic install defaults, configurable install-specific text, and a stable category catalog.
 
-The `0.3.0` line focuses on small Settings and audit usability improvements before the next user/persona/permission foundation work.
+The `0.3.0` line adds reviewability, QA/demo, and audit foundations: side-by-side personal/QA Docker operation, visible runtime identity, synthetic QA seed/reset scripts, AI-agent repo guidance, and the first local actor context slice.
 
-The app runs as a local Docker Compose app, serves the browser UI at `127.0.0.1:8080`, stores operational state in SQLite under an external `DATA_ROOT`, and keeps raw/source evidence and generated artifacts out of git.
+The app runs as a local Docker Compose app, serves the personal browser UI at `127.0.0.1:28080` by default, serves QA synthetic demo mode at `127.0.0.1:28081`, stores operational state in SQLite under an external `DATA_ROOT`, and keeps raw/source evidence and generated artifacts out of git.
 
 ## License
 
@@ -19,6 +19,7 @@ Family Finance OS is licensed under `AGPL-3.0-only`. See [LICENSE](LICENSE). Cop
 - Repository data-handling rules live in [docs/data_handling_policy.md](docs/data_handling_policy.md).
 - Security expectations live in [SECURITY.md](SECURITY.md).
 - Contribution expectations live in [CONTRIBUTING.md](CONTRIBUTING.md).
+- AI-agent repository instructions live in [AGENTS.md](AGENTS.md).
 - Release history lives in [CHANGELOG.md](CHANGELOG.md).
 
 ## Current Scope
@@ -41,31 +42,42 @@ This repo intentionally does not contain:
 
 ## Local Docker Runbook
 
-Default local data root for examples:
+Personal default:
 
 ```bash
-mkdir -p ~/Dillon_Finances_Data
-export DILLON_FINANCES_DATA_ROOT=~/Dillon_Finances_Data
+make personal-up
 ```
 
-Start the app:
-
-```bash
-docker compose up --build
-```
-
-Open the browser UI at:
+Open personal mode at:
 
 ```text
-http://127.0.0.1:8080
+http://127.0.0.1:28080
 ```
 
-To run a second local stack without occupying port `8080`, set `DILLON_FINANCES_HOST_PORT` before starting Compose.
+QA synthetic demo default:
+
+```bash
+make qa-up
+make qa-seed
+```
+
+Open QA mode at:
+
+```text
+http://127.0.0.1:28081
+```
+
+`make qa-reset CONFIRM="RESET QA DATA"` resets only the configured QA synthetic data root and refuses personal environment identity.
+
+For a guaranteed clean QA baseline, run `make qa-reset CONFIRM="RESET QA DATA"` before `make qa-seed`.
+
+Direct Compose remains supported. The default host port is `28080`, and it can be overridden with `DILLON_FINANCES_HOST_PORT`.
 
 Stop the app:
 
 ```bash
-docker compose down
+make personal-down
+make qa-down
 ```
 
 Reset local runtime state only after confirming the selected `DATA_ROOT` does not contain needed evidence:
@@ -89,6 +101,7 @@ The app stores runtime state under `DATA_ROOT`, mounted into the container as `/
 - `monthly_close/` for monthly close bundles and manifests.
 - `exports/` for advisor/export bundles.
 - `logs/` for local operational logs.
+- `manifests/` for QA scenario manifests and runtime manifests.
 
 `DATA_ROOT` must stay outside the git repository. The app refuses unsafe in-repo data roots.
 
@@ -104,7 +117,7 @@ Generated advisor exports are written under `DATA_ROOT/exports/`. Monthly close 
 
 Use this troubleshooting checklist before changing code or moving data.
 
-- If the browser does not load, confirm Docker is running and the app is bound to `127.0.0.1:8080`.
+- If the browser does not load, confirm Docker is running and the app is bound to `127.0.0.1:28080` for personal mode or `127.0.0.1:28081` for QA mode.
 - If imports do not appear, confirm files are in `DATA_ROOT/inbox/` and have supported v1 CSV headers.
 - If final close is blocked, review Validation Issues for required-source coverage, stale sources, unconfirmed source profiles, or blocking validation findings.
 - If Docker cannot write runtime files, confirm the host `DILLON_FINANCES_DATA_ROOT` exists and is writable.

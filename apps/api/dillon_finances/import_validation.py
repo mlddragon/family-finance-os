@@ -14,6 +14,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from dillon_finances.actors import ActorContext, actor_context_from_json, actor_context_to_json, derive_actor_context
 from dillon_finances.models import (
     ImportBatch,
     ImportBatchEvent,
@@ -176,6 +177,7 @@ def serialize_finding_event(event: ValidationFindingEvent) -> dict[str, Any]:
         "validation_finding_id": event.validation_finding_id,
         "event_type": event.event_type,
         "actor": event.actor,
+        "actor_context": actor_context_from_json(event.actor_context_json),
         "notes": event.notes,
         "created_at": event.created_at,
     }
@@ -859,6 +861,7 @@ def resolve_validation_finding(
     *,
     actor: str,
     note: str,
+    actor_context: Optional[ActorContext] = None,
 ) -> dict[str, Any]:
     finding = session.get(ValidationFinding, finding_id)
     if finding is None:
@@ -876,6 +879,7 @@ def resolve_validation_finding(
         validation_finding=finding,
         event_type="resolved",
         actor=actor,
+        actor_context_json=actor_context_to_json(derive_actor_context(actor, actor_context)),
         notes=note,
         metadata_json=json.dumps(
             {
@@ -976,11 +980,13 @@ def _record_import_batch_event(
     actor: str,
     notes: str,
     metadata: dict[str, Any],
+    actor_context: Optional[ActorContext] = None,
 ) -> ImportBatchEvent:
     event = ImportBatchEvent(
         import_batch=batch,
         event_type=event_type,
         actor=actor,
+        actor_context_json=actor_context_to_json(derive_actor_context(actor, actor_context)),
         notes=notes,
         metadata_json=json.dumps(metadata, sort_keys=True),
     )
@@ -1036,6 +1042,7 @@ def void_import_batch(
     actor: str,
     reason: str,
     destroy_files: bool = False,
+    actor_context: Optional[ActorContext] = None,
 ) -> dict[str, Any]:
     batch = session.get(ImportBatch, batch_id)
     if batch is None:
@@ -1110,6 +1117,7 @@ def void_import_batch(
         event_type="voided",
         actor=actor,
         notes=reason,
+        actor_context=actor_context,
         metadata={
             "destroy_files": destroy_files,
             "preserved_file_count": preserved_file_count,
@@ -1124,6 +1132,7 @@ def void_import_batch(
             event_type="files_destroyed",
             actor=actor,
             notes=reason,
+            actor_context=actor_context,
             metadata={"destroyed_file_count": destroyed_file_count},
         )
     refresh_source_coverage_findings(session)
