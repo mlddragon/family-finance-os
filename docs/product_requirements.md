@@ -1326,6 +1326,21 @@ Advisor should answer:
 
 The AI advisor must cite or point to source files/outputs when possible.
 
+## 13.16 QA and demo environment
+
+The product should support a semi-persistent QA and demo environment as a single additive feature of this PRD.
+
+The QA feature is specified in `docs/qa_feature_requirements.md`. That FRD defines the environment model, QA data lifecycle, synthetic scenario requirements, visual environment markers, QA-only dev mode boundary, reset rules, and contributor setup expectations.
+
+The PRD-level requirement is:
+
+- personal and QA environments must remain clearly separated
+- personal data must run on `127.0.0.1:28080` by default
+- QA synthetic data must run on `127.0.0.1:28081` by default
+- QA data must be synthetic, clearly labeled, and stored outside git
+- QA reset and dev controls must not create a routine path to mutate or delete personal data
+- the main product mission, ledger integrity rules, and local-first privacy requirements remain unchanged
+
 ---
 
 # 14. Non-Functional Requirements
