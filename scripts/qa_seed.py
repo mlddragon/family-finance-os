@@ -8,7 +8,6 @@ from typing import Any, Callable
 
 from fastapi.testclient import TestClient
 
-from dillon_finances import __version__
 from dillon_finances.main import create_app
 from dillon_finances.runtime import SYNTHETIC_ARTIFACT_MARKER, bootstrap_data_root, runtime_environment_from_env
 from dillon_finances.source_profiles import list_source_profiles
@@ -19,7 +18,7 @@ STALE_SOURCE_SCENARIO = "stale-source"
 BLOCKED_IMPORT_SCENARIO = "blocked-import"
 REVIEW_BACKLOG_SCENARIO = "review-backlog"
 MONTHLY_CLOSE_READY_SCENARIO = "monthly-close-ready"
-SCENARIO_VERSION = __version__
+SCENARIO_VERSION = "0.4.0"
 
 SOURCE_KEYS = (
     "alliant_checking",

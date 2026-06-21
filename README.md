@@ -71,14 +71,22 @@ http://127.0.0.1:28081
 
 For a guaranteed clean QA baseline, run `make qa-reset CONFIRM="RESET QA DATA"` before `make qa-seed`.
 
-Named QA scenarios are script-level only. The browser does not include reset or reseed controls in v0.4.0.
+Named QA scenarios are script-level only. The browser does not include reset or reseed controls in v0.4.0. Scenarios are not additive; reset QA before seeding a different scenario.
 
 ```bash
 make qa-reset CONFIRM="RESET QA DATA"
 make qa-seed QA_SCENARIO=baseline
+
+make qa-reset CONFIRM="RESET QA DATA"
 make qa-seed QA_SCENARIO=stale-source
+
+make qa-reset CONFIRM="RESET QA DATA"
 make qa-seed QA_SCENARIO=blocked-import
+
+make qa-reset CONFIRM="RESET QA DATA"
 make qa-seed QA_SCENARIO=review-backlog
+
+make qa-reset CONFIRM="RESET QA DATA"
 make qa-seed QA_SCENARIO=monthly-close-ready
 ```
 

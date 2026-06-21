@@ -275,6 +275,7 @@ v0.4.0 implementation note:
 - named scenarios are available through `make qa-seed QA_SCENARIO=<scenario-name>`
 - reset remains script-level only through `make qa-reset CONFIRM="RESET QA DATA"`
 - browser reset, reseed, and scenario-picker controls remain deferred
+- scenarios are not additive; reset QA before changing scenarios
 
 Expected command sequence for one scenario:
 
@@ -284,7 +285,7 @@ make qa-seed QA_SCENARIO=monthly-close-ready
 make qa-up
 ```
 
-Scenario manifests are written to `DATA_ROOT/manifests/` and include the scenario name, expected operator state, validation/review summaries, generated artifact counts where applicable, and the synthetic marker.
+Scenario manifests are written to `DATA_ROOT/manifests/` and include the scenario name, v0.4.0 scenario version, expected operator state, validation/review summaries, generated artifact counts where applicable, and the synthetic marker.
 
 ---
 

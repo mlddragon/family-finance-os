@@ -68,6 +68,7 @@ def test_baseline_seed_writes_manifest_and_closed_loop_outputs(tmp_path, monkeyp
 
     manifest = json.loads(manifest_path.read_text())
     assert manifest["scenario"] == "baseline"
+    assert manifest["scenario_version"] == "0.4.0"
     assert manifest["dataset_kind"] == "synthetic"
     assert sorted(manifest["accepted_source_keys"]) == [
         "alliant_checking",
