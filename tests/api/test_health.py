@@ -12,7 +12,7 @@ def test_health_reports_local_only_data_root_and_database_status(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert body["app"] == "Family Finance OS"
-    assert body["version"] == "0.2.0"
+    assert body["version"] == "0.3.0"
     assert body["local_only"] is True
     assert body["bind_host"] == "127.0.0.1"
     assert body["data_root"]["path"] == str(tmp_path)

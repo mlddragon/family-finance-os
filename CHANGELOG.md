@@ -2,7 +2,15 @@
 
 All notable changes to Family Finance OS will be tracked here.
 
-## 0.2.0 - Planned
+## 0.3.0 - Planned
+
+- Improve Settings usability by hiding read-only settings by default.
+- Show friendly setting names, current values, and default values in the default Settings table.
+- Add optional Settings table columns for changed status, domain, setting key, and editable status.
+- Show saved notes in Settings audit history.
+- Update the PRD immediate roadmap to reflect the current Docker/SQLite product path.
+
+## 0.2.0 - 2026-06-21
 
 - Add AGPL-3.0-only licensing and basic contribution/security guidance.
 - Add i18n scaffolding with maintained `en-US` resources.

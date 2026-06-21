@@ -38,7 +38,10 @@ def test_get_settings_seeds_sqlite_settings_and_source_profiles(tmp_path):
     assert any(
         setting["domain"] == "branding"
         and setting["setting_key"] == "branding.app_display_name"
+        and setting["friendly_name"] == "App display name"
         and setting["value"] == "Family Finance OS"
+        and setting["default_value"] == "Family Finance OS"
+        and setting["changed_from_default"] is False
         for setting in body["settings"]
     )
     assert any(
@@ -94,6 +97,14 @@ def test_patch_settings_updates_value_and_appends_event(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
+    changed_setting = next(
+        setting
+        for setting in body["settings"]
+        if setting["setting_key"] == "sources.chase_prime_visa.freshness_threshold_days"
+    )
+    assert changed_setting["friendly_name"] == "Chase Prime Visa freshness threshold"
+    assert changed_setting["default_value"] == 14
+    assert changed_setting["changed_from_default"] is True
     assert body["events"][0]["previous_value"] == 14
     assert body["events"][0]["new_value"] == 21
 

@@ -55,6 +55,7 @@ import type {
 import "./styles.css";
 
 type ScreenKey = "home" | "sources" | "validation" | "review" | "transactions" | "reports" | "settings";
+type SettingRow = SettingsPayload["settings"][number];
 
 const screens: Array<{ key: ScreenKey; labelKey: string }> = [
   { key: "home", labelKey: "nav.home" },
@@ -72,7 +73,7 @@ const OTHER_LIST_LABEL = "Other";
 const emptySummary: OperatorSummary = {
   runtime: {
     app: "Family Finance OS",
-    version: "0.2.0",
+    version: "0.3.0",
     local_only: true,
     bind_host: "127.0.0.1",
     data_root: { path: "DATA_ROOT", exists: false },
@@ -1336,6 +1337,17 @@ function SettingsScreen({
     () => (settings?.settings ?? []).filter((setting) => setting.editable),
     [settings?.settings],
   );
+  const [showReadOnlySettings, setShowReadOnlySettings] = useState(false);
+  const [settingColumnVisibility, setSettingColumnVisibility] = useState({
+    changed: false,
+    domain: false,
+    settingKey: false,
+    editable: false,
+  });
+  const visibleSettings = useMemo(
+    () => (showReadOnlySettings ? settings?.settings ?? [] : editableSettings),
+    [editableSettings, settings?.settings, showReadOnlySettings],
+  );
   const pendingProfiles = activeProfiles.filter((profile) => profile.confirmation_status === "pending_owner_sample");
   const [selectedSettingKey, setSelectedSettingKey] = useState(editableSettings[0]?.setting_key ?? "");
   const selectedSetting = editableSettings.find((setting) => setting.setting_key === selectedSettingKey);
@@ -1345,6 +1357,26 @@ function SettingsScreen({
   const [selectedSourceKey, setSelectedSourceKey] = useState(pendingProfiles[0]?.source_key ?? "");
   const [confirmationNote, setConfirmationNote] = useState("");
   const [confirmationStatus, setConfirmationStatus] = useState<string | null>(null);
+  const settingsColumns = useMemo<ColumnDef<SettingRow>[]>(() => {
+    const columns: ColumnDef<SettingRow>[] = [
+      { header: "Friendly name", cell: ({ row }) => settingLabel(row.original) },
+      { header: "Value", cell: ({ row }) => formatSettingValue(row.original.value) },
+      { header: "Default Value", cell: ({ row }) => formatSettingValue(row.original.default_value) },
+    ];
+    if (settingColumnVisibility.changed) {
+      columns.push({ header: "Changed", cell: ({ row }) => (row.original.changed_from_default ? "Yes" : "No") });
+    }
+    if (settingColumnVisibility.domain) {
+      columns.push({ header: "Domain", accessorKey: "domain" });
+    }
+    if (settingColumnVisibility.settingKey) {
+      columns.push({ header: "Setting key", accessorKey: "setting_key" });
+    }
+    if (settingColumnVisibility.editable) {
+      columns.push({ header: "Editable", cell: ({ row }) => (row.original.editable ? "Yes" : "No") });
+    }
+    return columns;
+  }, [settingColumnVisibility]);
 
   useEffect(() => {
     if (!selectedSettingKey && editableSettings.length > 0) {
@@ -1446,7 +1478,7 @@ function SettingsScreen({
                 <select value={selectedSettingKey} onChange={(event) => setSelectedSettingKey(event.target.value)}>
                   {editableSettings.map((setting) => (
                     <option key={setting.id} value={setting.setting_key}>
-                      {setting.setting_key}
+                      {settingLabel(setting)}
                     </option>
                   ))}
                 </select>
@@ -1487,16 +1519,57 @@ function SettingsScreen({
           ) : (
             <p className="empty-state">No editable settings loaded</p>
           )}
-          <DataTable
-            data={settings?.settings ?? []}
-            emptyLabel="No settings loaded"
-            columns={[
-              { header: "Domain", accessorKey: "domain" },
-              { header: "Setting", accessorKey: "setting_key" },
-              { header: "Value", cell: ({ row }) => formatSettingValue(row.original.value) },
-              { header: "Editable", cell: ({ row }) => (row.original.editable ? "Yes" : "No") },
-            ]}
-          />
+          <DataTable data={visibleSettings} emptyLabel="No settings loaded" columns={settingsColumns} />
+          <div className="settings-view-controls" aria-label="Settings table view controls">
+            <label>
+              <input
+                type="checkbox"
+                checked={showReadOnlySettings}
+                onChange={(event) => setShowReadOnlySettings(event.target.checked)}
+              />
+              Show read-only settings
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={settingColumnVisibility.changed}
+                onChange={(event) =>
+                  setSettingColumnVisibility((current) => ({ ...current, changed: event.target.checked }))
+                }
+              />
+              Show changed column
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={settingColumnVisibility.domain}
+                onChange={(event) =>
+                  setSettingColumnVisibility((current) => ({ ...current, domain: event.target.checked }))
+                }
+              />
+              Show domain column
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={settingColumnVisibility.settingKey}
+                onChange={(event) =>
+                  setSettingColumnVisibility((current) => ({ ...current, settingKey: event.target.checked }))
+                }
+              />
+              Show setting key column
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={settingColumnVisibility.editable}
+                onChange={(event) =>
+                  setSettingColumnVisibility((current) => ({ ...current, editable: event.target.checked }))
+                }
+              />
+              Show editable column
+            </label>
+          </div>
         </section>
 
         <section className="work-panel">
@@ -1556,8 +1629,9 @@ function SettingsScreen({
           columns={[
             { header: "When", accessorKey: "created_at" },
             { header: "Domain", accessorKey: "domain" },
-            { header: "Setting", accessorKey: "setting_key" },
+            { header: "Setting", cell: ({ row }) => row.original.friendly_name || row.original.setting_key },
             { header: "Actor", accessorKey: "actor" },
+            { header: "Notes", cell: ({ row }) => row.original.notes || "" },
           ]}
         />
       </section>
@@ -1661,6 +1735,10 @@ function inputToSettingValue(input: string, currentValue: unknown) {
   } catch {
     return input;
   }
+}
+
+function settingLabel(setting: SettingsPayload["settings"][number]) {
+  return setting.friendly_name || setting.setting_key;
 }
 
 function formatSettingValue(value: unknown) {
