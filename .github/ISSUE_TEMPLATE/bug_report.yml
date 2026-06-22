@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a reproducible problem in app behavior, repo content, templates, scripts, or docs.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not include real financial data, secrets, tokens, account IDs, hostnames, public IPs, private endpoints, recovery keys, SSH keys, or passphrases.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Steps to reproduce the issue using synthetic, placeholder, or redacted data only.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Share generic version/runtime details only. Do not include hostnames, IPs, account IDs, or file paths containing personal data.
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Data and secret boundary
+      options:
+        - label: I removed or redacted real financial data, secrets, tokens, account IDs, hostnames, IPs, private endpoints, recovery keys, SSH keys, and passphrases.
+          required: true
