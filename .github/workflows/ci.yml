@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   synthetic-checks:
     runs-on: ubuntu-latest
@@ -27,6 +30,9 @@ jobs:
 
       - name: Run sensitive artifact scan
         run: python scripts/check_sensitive_artifacts.py .
+
+      - name: Run secret pattern scan
+        run: python scripts/check_secret_patterns.py .
 
       - name: Run v1 security contract check
         run: python scripts/check_v1_security_contract.py .

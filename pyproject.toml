@@ -2,7 +2,7 @@
 name = "dillon-finances"
 version = "0.3.0"
 description = "Local-first family financial operating system"
-license = { text = "AGPL-3.0-only" }
+license = { text = "MPL-2.0" }
 authors = [{ name = "Mason Dillon" }]
 requires-python = ">=3.9"
 dependencies = [

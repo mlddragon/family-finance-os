@@ -14,11 +14,18 @@ Family Finance OS is being prepared for future open-source release. The reposito
 
 Use branches and pull requests for meaningful work. Keep PRs focused, run the relevant tests, and document data-integrity, privacy, and security impact.
 
+## Contribution Licensing
+
+By submitting a contribution, you represent that you have the right to license it to this project. Unless a file explicitly says otherwise, contributions to code, tests, documentation, examples, templates, and configuration are licensed under the same license as the repository: `MPL-2.0`.
+
+Do not submit third-party material unless its license is compatible with `MPL-2.0` and the source, copyright notice, and license obligations are clearly documented in the contribution.
+
 Useful checks:
 
 ```bash
 python -m pytest -p no:cacheprovider
 python scripts/check_sensitive_artifacts.py .
+python scripts/check_secret_patterns.py .
 cd apps/web && npm test && npm run build
 ```
 

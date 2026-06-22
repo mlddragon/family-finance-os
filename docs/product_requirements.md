@@ -1701,7 +1701,7 @@ This section tracks the current versioned path from the local Docker MVP toward 
 
 Version `0.1.0` established the local Docker MVP with synthetic data, SQLite operational state, import/validation/quarantine, review decisions, reports, monthly close, and advisor export.
 
-Version `0.2.0` established open-source readiness foundations: AGPL-3.0-only licensing, generic default branding, i18n scaffolding with maintained `en-US`, database-backed install settings, source templates separated from required sources, and a stable category catalog.
+Version `0.2.0` established open-source readiness foundations: MPL-2.0 licensing, generic default branding, i18n scaffolding with maintained `en-US`, database-backed install settings, source templates separated from required sources, and a stable category catalog.
 
 ## 21.2 Finish current verification and owner smoke tracking
 
