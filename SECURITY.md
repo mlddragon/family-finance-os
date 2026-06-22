@@ -30,6 +30,17 @@ Stop for explicit owner approval before:
 - Migrating any data from the prior prototype repository.
 - Storing credentials, tokens, browser sessions, or account identifiers.
 
+## Reporting A Security Issue
+
+Do not open a public GitHub issue for vulnerabilities, suspected secrets, leaked financial data, or deployment-specific exposure. Use GitHub private vulnerability reporting when it is enabled for the repository. If private vulnerability reporting is not available yet, contact the repository owner directly and share only the minimum detail needed to start triage.
+
+A safe report should include:
+
+- The affected branch, commit, file, endpoint, or workflow.
+- Whether any token, account data, host, or financial artifact may be exposed.
+- Reproduction steps using synthetic data whenever possible.
+- No real secrets, raw financial exports, screenshots with account data, or exploit payloads beyond what is needed for confirmation.
+
 ## Reporting A Vulnerability Or Data Leak
 
 If sensitive data is committed or exposed:
@@ -49,3 +60,5 @@ If sensitive data is committed or exposed:
 - Pull requests should document whether raw, normalized, or generated financial artifacts were excluded.
 - App behavior changes should include a human QA script with observable verification steps.
 - Open-source preparation must not add real household data, credentials, account identifiers, or owner-specific runtime defaults.
+- Repository workflows should use least-privilege GitHub token permissions and include sensitive-artifact and secret-pattern scans.
+- Public release should enable secret scanning, push protection, Dependabot alerts, and protected `main` branch rules where available.

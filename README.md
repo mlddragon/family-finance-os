@@ -2,7 +2,7 @@
 
 This repository contains Family Finance OS, a local-first family financial operating system. The GitHub repository is currently named `Dillon_Finances`, but runtime defaults are intentionally generic so other households can install and adapt the product.
 
-The landed v1 build is treated as `0.1.0`. The `0.2.0` line prepares the product for future open-source release by adding AGPL licensing, localization scaffolding, generic install defaults, configurable install-specific text, and a stable category catalog.
+The landed v1 build is treated as `0.1.0`. The `0.2.0` line prepares the product for future open-source release by using MPL-2.0 licensing, localization scaffolding, generic install defaults, configurable install-specific text, and a stable category catalog.
 
 The `0.3.0` line adds reviewability, QA/demo, and audit foundations: side-by-side personal/QA Docker operation, visible runtime identity, synthetic QA seed/reset scripts, AI-agent repo guidance, and the first local actor context slice.
 
@@ -10,7 +10,7 @@ The app runs as a local Docker Compose app, serves the personal browser UI at `1
 
 ## License
 
-Family Finance OS is licensed under `AGPL-3.0-only`. See [LICENSE](LICENSE). Copyright notice: [NOTICE](NOTICE).
+Family Finance OS is licensed under `MPL-2.0`. See [LICENSE](LICENSE). Copyright notice: [NOTICE](NOTICE).
 
 ## Source Of Truth
 
@@ -136,6 +136,12 @@ The app stores runtime state under `DATA_ROOT`, mounted into the container as `/
 
 `DATA_ROOT` must stay outside the git repository. The app refuses unsafe in-repo data roots.
 
+## Deployment Safety
+
+Family Finance OS is local-first by default. Do not bind the app to `0.0.0.0`, expose it through a tunnel, publish it on the public internet, or attach hosted infrastructure unless you have explicitly reviewed authentication, TLS, backups, data retention, logs, and secret handling for that deployment.
+
+Keep `DATA_ROOT` outside the git repository and outside cloud-synced folders unless that storage location has been reviewed for financial-data safety.
+
 ## Backup And Export
 
 Use this section as the backup and export reference for v1 operations.
@@ -152,7 +158,7 @@ Use this troubleshooting checklist before changing code or moving data.
 - If imports do not appear, confirm files are in `DATA_ROOT/inbox/` and have supported v1 CSV headers.
 - If final close is blocked, review Validation Issues for required-source coverage, stale sources, unconfirmed source profiles, or blocking validation findings.
 - If Docker cannot write runtime files, confirm the host `DILLON_FINANCES_DATA_ROOT` exists and is writable.
-- If sensitive-artifact checks fail, remove raw financial data, generated reports, database files, or credentials from the repo and keep them only under `DATA_ROOT`.
+- If sensitive-artifact or secret-pattern checks fail, remove raw financial data, generated reports, database files, credentials, tokens, or deployment-local values from the repo and keep runtime artifacts only under `DATA_ROOT`.
 
 ## Working Principle
 

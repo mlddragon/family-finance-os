@@ -37,3 +37,56 @@ receipts
 *.duckdb
 .env
 .env.*
+
+# Infrastructure, provider, and deployment-local state
+.terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+terraform.tfvars
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Local override and machine-specific config
+.envrc
+*.local
+*.local.*
+*.override
+*.override.*
+docker-compose.override.yml
+docker-compose.*.override.yml
+*.bak
+*.backup
+*.orig
+*.tmp
+
+# Provider CLI and registry credentials
+.aws
+.azure
+.config/gcloud
+.fly
+.vercel
+.netlify
+.npmrc
+.pypirc
+.netrc
+
+# SSH keys and additional key material
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+*.asc
+*.gpg
+
+# Local model/data blobs
+models
+model_data
+*.safetensors
+*.gguf
+*.ggml
+*.onnx
