@@ -17,7 +17,7 @@ Use branches and pull requests for meaningful work. Keep PRs focused, run the re
 ## Roles
 
 - **Contributors / Cursor**: features, fixes, tests, docs, and Docker/CI changes via pull request.
-- **Codex**: security and privacy analyst; reviews for P0/P1 findings once GitHub integration is enabled.
+- **Codex**: security analyst via manual `@codex review` on PRs (ChatGPT subscription quota; see [docs/runbooks/codex-subscription-setup.md](docs/runbooks/codex-subscription-setup.md)).
 - **Maintainers**: merge after CI, Security workflow, and human review.
 
 ## Contribution Licensing

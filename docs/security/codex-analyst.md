@@ -4,36 +4,35 @@ Family Finance OS uses **Codex as security and privacy analyst**, not primary en
 
 Implementation belongs to human contributors and Cursor via pull requests.
 
-## Current status
+## Integration model (subscription, not API)
 
-GitHub `@codex` integration is **not enabled yet**. Until it is:
+| Path | Billing | Status |
+| --- | --- | --- |
+| `@codex review` on GitHub PRs | ChatGPT **Code Reviews** quota | Configure in [codex-subscription-setup.md](../runbooks/codex-subscription-setup.md) |
+| `Security` GitHub Actions workflow | GitHub Actions minutes only | **Active** — no Codex/OpenAI usage |
+| `openai/codex-action` + `OPENAI_API_KEY` | API token charges | **Not used** |
 
-- Security review runs through the `Security` GitHub Actions workflow.
-- Human maintainers review privacy and data-integrity impact in PRs.
-- Follow [CODEX.md](../../CODEX.md) and **Codex Review Guidelines** in [AGENTS.md](../../AGENTS.md).
+## Owner setup
 
-## When integration is enabled
+Follow [docs/runbooks/codex-subscription-setup.md](../runbooks/codex-subscription-setup.md):
 
-Configure in Codex Cloud settings:
+1. Connect `mlddragon/family-finance-os` in [Codex settings](https://chatgpt.com/codex/settings).
+2. Enable **code review** for this repo at [code review settings](https://chatgpt.com/codex/settings/code-review).
+3. Keep **Automatic reviews OFF** to avoid burning quota on every PR.
 
-1. Connect repository `mlddragon/family-finance-os`.
-2. Enable **Code review** and **Automatic reviews** for pull requests.
-3. Point Codex at `AGENTS.md` Review guidelines.
+Repository review guidance lives in root `AGENTS.md` → **`## Review guidelines`**.
 
-### Commands
+## Commands (manual, quota-aware)
 
-| Comment | Purpose |
-| --- | --- |
-| `@codex review` | Security and privacy review; P0/P1 only |
-| `@codex review for security regressions` | Narrow security pass |
-| `@codex review for dependency and supply chain risk` | CVE and new dependency focus |
-| `@codex fix the P1 issue` | Minimal fix for a confirmed finding when explicitly requested |
+| Comment | Quota bucket | When to use |
+| --- | --- | --- |
+| `@codex review` | Code Reviews | Security/privacy pass on a PR |
+| `@codex review for security regressions` | Code Reviews | Narrow security focus |
+| `@codex fix the P1 issue` | Cloud Tasks | Only after a review finding, owner-approved |
 
-### Out of scope
+Do **not** use `@codex` for feature implementation or routine engineering.
 
-Do **not** use `@codex` for feature implementation, refactors, or routine engineering unless tied to a confirmed security finding.
-
-## CI backstop
+## CI backstop (non-Codex)
 
 The `Security` workflow runs on every PR:
 
@@ -42,8 +41,6 @@ The `Security` workflow runs on every PR:
 - pip-audit and Bandit
 - Trivy container scan
 - Repository hygiene checks
-
-Optional future addition: `openai/codex-action` workflow posting review comments when `OPENAI_API_KEY` is configured.
 
 ## Reporting issues
 

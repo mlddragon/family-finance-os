@@ -32,6 +32,7 @@
 
 - [ ] CI `Security` workflow passed
 - [ ] No open P0/P1 security findings (or documented owner waiver)
+- [ ] Optional: requested manual Codex pass with `@codex review` (uses subscription Code Reviews quota; automatic reviews stay off)
 
 ## Reviewer Notes
 
