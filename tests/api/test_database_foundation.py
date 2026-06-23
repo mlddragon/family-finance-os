@@ -6,13 +6,13 @@ import pytest
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import sessionmaker
 
-from dillon_finances.database import (
+from family_finance_os.database import (
     DatabaseConfigurationError,
     create_sqlite_engine,
     upgrade_database,
 )
-from dillon_finances.jobs import record_job
-from dillon_finances.models import (
+from family_finance_os.jobs import record_job
+from family_finance_os.models import (
     Artifact,
     CanonicalTransaction,
     DecisionEvent,
@@ -54,7 +54,7 @@ EXPECTED_TABLES = {
 
 
 def test_migration_upgrade_creates_all_v1_tables(tmp_path):
-    database_path = tmp_path / "database" / "dillon_finances.sqlite3"
+    database_path = tmp_path / "database" / "family_finance_os.sqlite3"
 
     upgrade_database(database_path)
     engine = create_sqlite_engine(database_path)
@@ -68,7 +68,7 @@ def test_create_sqlite_engine_rejects_database_parent_symlink_escape(tmp_path):
     (tmp_path / "database").symlink_to(outside_database_dir, target_is_directory=True)
 
     with pytest.raises(DatabaseConfigurationError, match="database parent"):
-        create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+        create_sqlite_engine(tmp_path / "database" / "family_finance_os.sqlite3")
 
     assert list(outside_database_dir.iterdir()) == []
 
@@ -79,7 +79,7 @@ def test_upgrade_database_rejects_database_parent_symlink_escape(tmp_path):
     (tmp_path / "database").symlink_to(outside_database_dir, target_is_directory=True)
 
     with pytest.raises(DatabaseConfigurationError, match="database parent"):
-        upgrade_database(tmp_path / "database" / "dillon_finances.sqlite3")
+        upgrade_database(tmp_path / "database" / "family_finance_os.sqlite3")
 
     assert list(outside_database_dir.iterdir()) == []
 
@@ -88,7 +88,7 @@ def test_upgrade_database_rejects_database_parent_file_collision(tmp_path):
     (tmp_path / "database").write_text("not a directory")
 
     with pytest.raises(DatabaseConfigurationError, match="database parent"):
-        upgrade_database(tmp_path / "database" / "dillon_finances.sqlite3")
+        upgrade_database(tmp_path / "database" / "family_finance_os.sqlite3")
 
 
 def test_upgrade_database_rejects_database_file_symlink_escape(tmp_path):
@@ -96,16 +96,16 @@ def test_upgrade_database_rejects_database_file_symlink_escape(tmp_path):
     database_dir.mkdir()
     outside_database_file = tmp_path / "outside_database.sqlite3"
     outside_database_file.write_text("")
-    (database_dir / "dillon_finances.sqlite3").symlink_to(outside_database_file)
+    (database_dir / "family_finance_os.sqlite3").symlink_to(outside_database_file)
 
     with pytest.raises(DatabaseConfigurationError, match="database file"):
-        upgrade_database(database_dir / "dillon_finances.sqlite3")
+        upgrade_database(database_dir / "family_finance_os.sqlite3")
 
     assert outside_database_file.read_text() == ""
 
 
 def test_models_insert_and_query_v1_audit_records(tmp_path):
-    database_path = tmp_path / "database" / "dillon_finances.sqlite3"
+    database_path = tmp_path / "database" / "family_finance_os.sqlite3"
     upgrade_database(database_path)
     engine = create_sqlite_engine(database_path)
     Session = sessionmaker(bind=engine)
@@ -283,7 +283,7 @@ def test_models_insert_and_query_v1_audit_records(tmp_path):
 
 
 def test_import_batch_void_event_and_source_file_destruction_metadata(tmp_path):
-    database_path = tmp_path / "database" / "dillon_finances.sqlite3"
+    database_path = tmp_path / "database" / "family_finance_os.sqlite3"
 
     upgrade_database(database_path)
     engine = create_sqlite_engine(database_path)
@@ -344,7 +344,7 @@ def test_import_batch_void_event_and_source_file_destruction_metadata(tmp_path):
 
 
 def test_imported_rows_are_immutable_after_insert(tmp_path):
-    database_path = tmp_path / "database" / "dillon_finances.sqlite3"
+    database_path = tmp_path / "database" / "family_finance_os.sqlite3"
     upgrade_database(database_path)
     engine = create_sqlite_engine(database_path)
     Session = sessionmaker(bind=engine)

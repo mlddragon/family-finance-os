@@ -5,13 +5,13 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from dillon_finances.ledger_normalization import (
+from family_finance_os.ledger_normalization import (
     NormalizedLedgerRow,
     canonical_transaction_identity,
     imported_row_hash,
     imported_row_identity,
 )
-from dillon_finances.main import create_app
+from family_finance_os.main import create_app
 
 
 CHASE_HEADER = "Transaction Date,Post Date,Description,Category,Amount\n"

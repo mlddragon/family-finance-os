@@ -9,9 +9,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from dillon_finances.actors import ActorContext, actor_context_from_json, actor_context_to_json, derive_actor_context
-from dillon_finances.models import Setting, SettingEvent
-from dillon_finances.source_profiles import iter_source_profiles, list_source_profiles
+from family_finance_os.actors import ActorContext, actor_context_from_json, actor_context_to_json, derive_actor_context
+from family_finance_os.models import Setting, SettingEvent
+from family_finance_os.source_profiles import iter_source_profiles, list_source_profiles
 
 
 SETTINGS_TABS = [

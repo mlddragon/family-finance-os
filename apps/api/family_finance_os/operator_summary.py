@@ -6,10 +6,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from dillon_finances.ledger_normalization import list_transactions
-from dillon_finances.models import Artifact, ImportBatch, MonthlyClose, Setting, SourceFile, ValidationFinding
-from dillon_finances.reporting import close_readiness
-from dillon_finances.source_profiles import list_source_profiles
+from family_finance_os.ledger_normalization import list_transactions
+from family_finance_os.models import Artifact, ImportBatch, MonthlyClose, Setting, SourceFile, ValidationFinding
+from family_finance_os.reporting import close_readiness
+from family_finance_os.source_profiles import list_source_profiles
 
 
 def operator_summary_payload(

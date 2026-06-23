@@ -14,10 +14,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from dillon_finances.actors import ActorContext, actor_context_from_json, actor_context_to_json, derive_actor_context
-from dillon_finances.decision_events import serialize_decision_event
-from dillon_finances.ledger_normalization import list_transactions
-from dillon_finances.models import (
+from family_finance_os.actors import ActorContext, actor_context_from_json, actor_context_to_json, derive_actor_context
+from family_finance_os.decision_events import serialize_decision_event
+from family_finance_os.ledger_normalization import list_transactions
+from family_finance_os.models import (
     Artifact,
     DecisionEvent,
     ImportBatch,
@@ -30,8 +30,8 @@ from dillon_finances.models import (
     ValidationFinding,
     utc_now_iso,
 )
-from dillon_finances.settings_service import CONFIRMED_SOURCE_PROFILE_STATUSES, list_settings
-from dillon_finances.source_profiles import list_source_profiles
+from family_finance_os.settings_service import CONFIRMED_SOURCE_PROFILE_STATUSES, list_settings
+from family_finance_os.source_profiles import list_source_profiles
 
 
 class ReportingError(RuntimeError):

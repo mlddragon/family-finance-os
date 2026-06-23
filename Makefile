@@ -1,34 +1,34 @@
-PERSONAL_DATA_ROOT ?= $(HOME)/Dillon_Finances_Data
-QA_DATA_ROOT ?= $(HOME)/Dillon_Finances_QA_Data
+PERSONAL_DATA_ROOT ?= $(HOME)/FamilyFinanceOS_Data
+QA_DATA_ROOT ?= $(HOME)/FamilyFinanceOS_QA_Data
 QA_SCENARIO ?= baseline
 
 .PHONY: personal-up personal-down qa-up qa-down qa-seed qa-reset
 
 personal-up:
 	mkdir -p "$(PERSONAL_DATA_ROOT)"
-	DILLON_FINANCES_HOST_PORT=28080 \
-	DILLON_FINANCES_DATA_ROOT="$(PERSONAL_DATA_ROOT)" \
+	FFOS_HOST_PORT=28080 \
+	FFOS_DATA_ROOT="$(PERSONAL_DATA_ROOT)" \
 	APP_ENV=personal \
 	APP_ENV_LABEL="Personal data" \
 	DATASET_KIND=personal \
 	DEV_MODE=false \
-	docker compose -p dillon-personal up -d --build
+	docker compose -p ffos-personal up -d --build
 
 personal-down:
-	DILLON_FINANCES_DATA_ROOT="$(PERSONAL_DATA_ROOT)" docker compose -p dillon-personal down --remove-orphans
+	FFOS_DATA_ROOT="$(PERSONAL_DATA_ROOT)" docker compose -p ffos-personal down --remove-orphans
 
 qa-up:
 	mkdir -p "$(QA_DATA_ROOT)"
-	DILLON_FINANCES_HOST_PORT=28081 \
-	DILLON_FINANCES_DATA_ROOT="$(QA_DATA_ROOT)" \
+	FFOS_HOST_PORT=28081 \
+	FFOS_DATA_ROOT="$(QA_DATA_ROOT)" \
 	APP_ENV=qa \
 	APP_ENV_LABEL="QA synthetic demo" \
 	DATASET_KIND=synthetic \
 	DEV_MODE=true \
-	docker compose -p dillon-qa up -d --build
+	docker compose -p ffos-qa up -d --build
 
 qa-down:
-	DILLON_FINANCES_DATA_ROOT="$(QA_DATA_ROOT)" docker compose -p dillon-qa down --remove-orphans
+	FFOS_DATA_ROOT="$(QA_DATA_ROOT)" docker compose -p ffos-qa down --remove-orphans
 
 qa-seed:
 	APP_ENV=qa \

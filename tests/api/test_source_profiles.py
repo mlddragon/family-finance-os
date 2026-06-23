@@ -1,4 +1,4 @@
-from dillon_finances.source_profiles import get_source_profile, list_source_profiles
+from family_finance_os.source_profiles import get_source_profile, list_source_profiles
 
 
 def test_source_profile_registry_contains_approved_v1_sources():

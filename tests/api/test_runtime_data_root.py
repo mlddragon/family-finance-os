@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from dillon_finances.runtime import (
+from family_finance_os.runtime import (
     DataRootConfigurationError,
     REQUIRED_DATA_ROOT_DIRS,
     bootstrap_data_root,

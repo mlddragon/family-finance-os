@@ -3,7 +3,7 @@ from __future__ import annotations
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from dillon_finances.models import Base
+from family_finance_os.models import Base
 
 
 config = context.config

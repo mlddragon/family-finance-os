@@ -4,8 +4,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from dillon_finances.actors import ActorContext, actor_context_to_json, derive_actor_context
-from dillon_finances.models import Job
+from family_finance_os.actors import ActorContext, actor_context_to_json, derive_actor_context
+from family_finance_os.models import Job
 
 
 def record_job(

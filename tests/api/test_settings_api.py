@@ -2,9 +2,9 @@ from sqlalchemy import select
 
 from fastapi.testclient import TestClient
 
-from dillon_finances.database import create_sqlite_engine
-from dillon_finances.main import create_app
-from dillon_finances.models import Setting, SettingEvent
+from family_finance_os.database import create_sqlite_engine
+from family_finance_os.main import create_app
+from family_finance_os.models import Setting, SettingEvent
 
 
 def test_get_settings_seeds_sqlite_settings_and_source_profiles(tmp_path):
@@ -70,7 +70,7 @@ def test_get_settings_seeds_sqlite_settings_and_source_profiles(tmp_path):
     assert chase_profile["template_required_default"] is False
     assert chase_profile["required"] is False
 
-    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    engine = create_sqlite_engine(tmp_path / "database" / "family_finance_os.sqlite3")
     with engine.connect() as connection:
         assert connection.execute(select(Setting)).first() is not None
 
@@ -108,7 +108,7 @@ def test_patch_settings_updates_value_and_appends_event(tmp_path):
     assert body["events"][0]["previous_value"] == 14
     assert body["events"][0]["new_value"] == 21
 
-    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    engine = create_sqlite_engine(tmp_path / "database" / "family_finance_os.sqlite3")
     with engine.connect() as connection:
         events = connection.execute(select(SettingEvent)).all()
         setting_value = connection.execute(

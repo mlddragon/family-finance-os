@@ -1,10 +1,12 @@
 # Family Finance OS
 
-This repository contains Family Finance OS, a local-first family financial operating system. The GitHub repository is currently named `Dillon_Finances`, but runtime defaults are intentionally generic so other households can install and adapt the product.
+This repository contains **Family Finance OS**, a local-first family financial operating system. The public GitHub home is [`mlddragon/family-finance-os`](https://github.com/mlddragon/family-finance-os) after rehome; runtime defaults stay generic so other households can install and adapt the product.
 
 The landed v1 build is treated as `0.1.0`. The `0.2.0` line prepares the product for future open-source release by using MPL-2.0 licensing, localization scaffolding, generic install defaults, configurable install-specific text, and a stable category catalog.
 
 The `0.3.0` line adds reviewability, QA/demo, and audit foundations: side-by-side personal/QA Docker operation, visible runtime identity, synthetic QA seed/reset scripts, AI-agent repo guidance, and the first local actor context slice.
+
+The `0.4.0` line rehomes the product to `family-finance-os`, renames runtime env vars to `FFOS_*`, and prepares public release while keeping legacy `DILLON_FINANCES_*` Compose fallbacks for one release.
 
 The app runs as a local Docker Compose app, serves the personal browser UI at `127.0.0.1:28080` by default, serves QA synthetic demo mode at `127.0.0.1:28081`, stores operational state in SQLite under an external `DATA_ROOT`, and keeps raw/source evidence and generated artifacts out of git.
 
@@ -102,7 +104,7 @@ Scenario summaries:
 
 Each seed writes a manifest under `DATA_ROOT/manifests/` with the scenario name, expected operator state, validation summary, review counts, and synthetic marker. Generated QA manifests, reports, databases, exports, close bundles, logs, and raw files stay outside git.
 
-Direct Compose remains supported. The default host port is `28080`, and it can be overridden with `DILLON_FINANCES_HOST_PORT`.
+Direct Compose remains supported. The default host port is `28080`, and it can be overridden with `FFOS_HOST_PORT` (legacy: `DILLON_FINANCES_HOST_PORT`).
 
 Stop the app:
 
@@ -115,9 +117,11 @@ Reset local runtime state only after confirming the selected `DATA_ROOT` does no
 
 ```bash
 docker compose down
-rm -rf "$DILLON_FINANCES_DATA_ROOT"
-mkdir -p "$DILLON_FINANCES_DATA_ROOT"
+rm -rf "$FFOS_DATA_ROOT"
+mkdir -p "$FFOS_DATA_ROOT"
 ```
+
+Legacy env vars `DILLON_FINANCES_DATA_ROOT` and `DILLON_FINANCES_HOST_PORT` still work in Compose for one release. See [docs/migration/v0.4.0-rehome.md](docs/migration/v0.4.0-rehome.md).
 
 ## DATA_ROOT Layout
 
@@ -127,7 +131,7 @@ The app stores runtime state under `DATA_ROOT`, mounted into the container as `/
 - `raw/` for accepted preserved source files.
 - `processed/` for future controlled processed artifacts.
 - `quarantine/` for blocked files and reason metadata.
-- `database/` for `dillon_finances.sqlite3`.
+- `database/` for `family_finance_os.sqlite3`.
 - `reports/` for generated report artifacts.
 - `monthly_close/` for monthly close bundles and manifests.
 - `exports/` for advisor/export bundles.
@@ -157,7 +161,7 @@ Use this troubleshooting checklist before changing code or moving data.
 - If the browser does not load, confirm Docker is running and the app is bound to `127.0.0.1:28080` for personal mode or `127.0.0.1:28081` for QA mode.
 - If imports do not appear, confirm files are in `DATA_ROOT/inbox/` and have supported v1 CSV headers.
 - If final close is blocked, review Validation Issues for required-source coverage, stale sources, unconfirmed source profiles, or blocking validation findings.
-- If Docker cannot write runtime files, confirm the host `DILLON_FINANCES_DATA_ROOT` exists and is writable.
+- If Docker cannot write runtime files, confirm the host `FFOS_DATA_ROOT` exists and is writable.
 - If sensitive-artifact or secret-pattern checks fail, remove raw financial data, generated reports, database files, credentials, tokens, or deployment-local values from the repo and keep runtime artifacts only under `DATA_ROOT`.
 
 ## Working Principle

@@ -12,16 +12,16 @@ from typing import Any, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from dillon_finances.decision_events import derive_decision_state, decision_history
-from dillon_finances.ledger_parsing import decimal_string, parse_ledger_date, parse_money
-from dillon_finances.models import (
+from family_finance_os.decision_events import derive_decision_state, decision_history
+from family_finance_os.ledger_parsing import decimal_string, parse_ledger_date, parse_money
+from family_finance_os.models import (
     CanonicalTransaction,
     ImportBatch,
     ImportedRow,
     SourceFile,
     ValidationFinding,
 )
-from dillon_finances.source_profiles import get_source_profile
+from family_finance_os.source_profiles import get_source_profile
 
 
 @dataclass(frozen=True)

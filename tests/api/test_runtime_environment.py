@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 import pytest
 
-from dillon_finances.main import create_app
-from dillon_finances.runtime import RuntimeEnvironmentConfigurationError
+from family_finance_os.main import create_app
+from family_finance_os.runtime import RuntimeEnvironmentConfigurationError
 
 
 def test_status_reports_personal_runtime_identity_by_default(tmp_path, monkeypatch):

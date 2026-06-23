@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from dillon_finances.models import Category
+from family_finance_os.models import Category
 
 
 SYSTEM_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (

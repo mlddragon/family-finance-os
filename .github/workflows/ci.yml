@@ -64,12 +64,12 @@ jobs:
           DATA_ROOT="$(mktemp -d)"
           mkdir -p "$DATA_ROOT"/{inbox,raw,processed,quarantine,database,reports,monthly_close,exports,logs,manifests}
           chmod -R 0777 "$DATA_ROOT"
-          export DILLON_FINANCES_DATA_ROOT="$DATA_ROOT"
-          export DILLON_FINANCES_HOST_PORT=28081
+          export FFOS_DATA_ROOT="$DATA_ROOT"
+          export FFOS_HOST_PORT=28081
           export APP_ENV=qa
           export APP_ENV_LABEL="QA synthetic demo"
           export DATASET_KIND=synthetic
           export DEV_MODE=true
-          trap 'docker compose -p dillon-ci-qa down >/dev/null 2>&1 || true; chmod -R 0777 "$DATA_ROOT" >/dev/null 2>&1 || true; rm -rf "$DATA_ROOT" >/dev/null 2>&1 || true' EXIT
-          docker compose -p dillon-ci-qa up -d --build
+          trap 'docker compose -p ffos-ci-qa down >/dev/null 2>&1 || true; chmod -R 0777 "$DATA_ROOT" >/dev/null 2>&1 || true; rm -rf "$DATA_ROOT" >/dev/null 2>&1 || true' EXIT
+          docker compose -p ffos-ci-qa up -d --build
           python scripts/run_docker_e2e.py --base-url http://127.0.0.1:28081 --data-root "$DATA_ROOT"
