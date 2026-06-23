@@ -15,13 +15,22 @@ This file is the canonical repo guidance for AI agents working in Family Finance
 - Runtime state belongs under an external `DATA_ROOT`, never inside the git repository.
 - Do not introduce paid tooling, hosted services, cloud dependencies, provider calls, or AI model calls without explicit owner approval.
 
+## Primary Engineer Responsibilities
+
+Cursor, human contributors, and other implementation agents own product engineering:
+
+- Features, bug fixes, refactors, tests, docs, and Docker/CI changes via pull requests.
+- Routine low-impact engineering decisions that fit the approved stack and repository patterns.
+- Human QA scripts for app, UI, API, Docker, import, review, report, or data-integrity changes.
+
+Primary engineers must not weaken security boundaries, skip required CI checks, or merge with open P0/P1 security findings.
+
 ## Workflow And Review
 
 - Create a feature branch for meaningful work and use GitHub pull requests for traceability.
 - Do not push directly to `main`.
 - Include a human QA script in PR notes for app behavior, UI, API, Docker, import, review, report, or data-integrity changes.
 - Stop for owner review on impactful product/architecture decisions, data-integrity/security/privacy decisions, and cost-bearing decisions.
-- Make routine low-impact engineering decisions directly when they fit the approved stack and repository patterns.
 
 ## Engineering Guardrails
 
@@ -38,8 +47,33 @@ This file is the canonical repo guidance for AI agents working in Family Finance
 - Add or update tests for behavior changes before implementation when practical.
 - Human QA scripts should include scope, preconditions, exact steps, expected results, stop conditions, and known intentional gaps.
 
+## Codex Review Guidelines
+
+Codex acts as security and privacy analyst, not primary engineer.
+
+### Priority definitions
+
+- **P0**: Secret or credential exposure, raw financial data in git, public binding of the local app, auth bypass, SQL injection, path traversal into `DATA_ROOT`, missing protection for sensitive exports.
+- **P1**: Weakened `.gitignore` or CI security checks, new external data transmission, dependency with known critical CVE, audit log bypass, personal/QA data-root confusion, Docker/network exposure regressions.
+- **P2+**: Style, refactors, feature gaps — note but do not block merge.
+
+### Required review focus on every PR
+
+- Sensitive-artifact and secret-pattern boundaries.
+- `DATA_ROOT` / `APP_ENV` separation between personal and QA runtimes.
+- New dependencies: supply chain, network egress, license compatibility.
+- Docker and network exposure changes.
+- Auth, permissions, actor context, and audit trail integrity.
+
+### Out of scope for Codex
+
+- Feature implementation unless explicitly requested to fix a confirmed P0/P1 finding.
+- Product architecture decisions.
+- Routine refactors without security impact.
+
 ## Current Defaults
 
 - Local personal runtime defaults to Docker on `127.0.0.1`.
 - QA/demo runtime must be visibly distinct from personal runtime and must use synthetic data only.
 - The default product name is `Family Finance OS`.
+- GitHub home (after rehome): `mlddragon/family-finance-os`.
