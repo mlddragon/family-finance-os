@@ -47,6 +47,20 @@ Primary engineers must not weaken security boundaries, skip required CI checks, 
 - Add or update tests for behavior changes before implementation when practical.
 - Human QA scripts should include scope, preconditions, exact steps, expected results, stop conditions, and known intentional gaps.
 
+## Review guidelines
+
+Codex GitHub code review reads this section from `AGENTS.md`. Codex is the **security and privacy analyst**, not the primary implementer.
+
+- Flag only **P0** and **P1** issues in GitHub reviews.
+- **P0**: secret/credential exposure, raw financial data in git, public app binding, auth bypass, SQL injection, path traversal into `DATA_ROOT`, missing protection for sensitive exports.
+- **P1**: weakened `.gitignore` or CI security checks, new external data transmission, dependency with known critical CVE, audit log bypass, personal/QA data-root confusion, Docker/network exposure regressions.
+- **P2+**: style, refactors, feature gaps — note briefly but do not block merge.
+- On every PR, check: sensitive-artifact boundaries, `DATA_ROOT` / `APP_ENV` separation, new dependencies (supply chain, egress, license), Docker/network exposure, auth/permissions/audit integrity.
+- Do not suggest feature work or refactors unless they fix a confirmed P0/P1 finding.
+- Do not request or reproduce real household financial data in review comments.
+
+Subscription setup: [docs/runbooks/codex-subscription-setup.md](docs/runbooks/codex-subscription-setup.md). Request reviews manually with `@codex review` only — **automatic reviews stay off** unless the owner enables them.
+
 ## Codex Review Guidelines
 
 Codex acts as security and privacy analyst, not primary engineer.
