@@ -1,6 +1,6 @@
 [project]
-name = "dillon-finances"
-version = "0.3.0"
+name = "family-finance-os"
+version = "0.4.0"
 description = "Local-first family financial operating system"
 license = { text = "MPL-2.0" }
 authors = [{ name = "Mason Dillon" }]
@@ -28,7 +28,7 @@ build-backend = "setuptools.build_meta"
 where = ["apps/api"]
 
 [tool.setuptools.package-data]
-dillon_finances = ["static/*", "static/assets/*"]
+family_finance_os = ["static/*", "static/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/api", "tests/scripts"]

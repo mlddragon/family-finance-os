@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from dillon_finances.main import create_app
+from family_finance_os.main import create_app
 
 
 def test_health_reports_local_only_data_root_and_database_status(tmp_path):

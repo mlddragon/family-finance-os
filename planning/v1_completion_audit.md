@@ -23,13 +23,13 @@ The product remains local-first for v1:
 | Area | Status | Evidence |
 | --- | --- | --- |
 | Scaffold, Docker, and safety | Complete | `docker-compose.yml`, Dockerfile, `README.md`, `.github/workflows/ci.yml`, `scripts/check_sensitive_artifacts.py`, `scripts/check_v1_security_contract.py` |
-| SQLite foundation and audit core | Complete | `apps/api/dillon_finances/database.py`, migrations, models, `tests/api/test_database_foundation.py` |
-| Settings and source profiles | Complete | `apps/api/dillon_finances/settings_service.py`, `apps/api/dillon_finances/source_profiles.py`, `tests/api/test_settings_api.py`, `tests/api/test_source_profiles.py` |
-| Import, validation, and quarantine | Complete | `apps/api/dillon_finances/import_validation.py`, `tests/api/test_import_validation.py`, synthetic fixtures |
-| Normalization and ledger identity | Complete | `apps/api/dillon_finances/ledger_normalization.py`, `tests/api/test_ledger_normalization.py` |
-| Controlled decision events | Complete | `apps/api/dillon_finances/decision_events.py`, `tests/api/test_decision_events.py` |
-| Backend API and UI MVP | Complete | `apps/api/dillon_finances/main.py`, `apps/web/src/App.tsx`, `apps/web/e2e/operator-ui.spec.ts` |
-| Reports, monthly close, advisor export | Complete | `apps/api/dillon_finances/reporting.py`, `tests/api/test_reports_monthly_close.py` |
+| SQLite foundation and audit core | Complete | `apps/api/family_finance_os/database.py`, migrations, models, `tests/api/test_database_foundation.py` |
+| Settings and source profiles | Complete | `apps/api/family_finance_os/settings_service.py`, `apps/api/family_finance_os/source_profiles.py`, `tests/api/test_settings_api.py`, `tests/api/test_source_profiles.py` |
+| Import, validation, and quarantine | Complete | `apps/api/family_finance_os/import_validation.py`, `tests/api/test_import_validation.py`, synthetic fixtures |
+| Normalization and ledger identity | Complete | `apps/api/family_finance_os/ledger_normalization.py`, `tests/api/test_ledger_normalization.py` |
+| Controlled decision events | Complete | `apps/api/family_finance_os/decision_events.py`, `tests/api/test_decision_events.py` |
+| Backend API and UI MVP | Complete | `apps/api/family_finance_os/main.py`, `apps/web/src/App.tsx`, `apps/web/e2e/operator-ui.spec.ts` |
+| Reports, monthly close, advisor export | Complete | `apps/api/family_finance_os/reporting.py`, `tests/api/test_reports_monthly_close.py` |
 | Hardening and synthetic E2E | Complete for synthetic v1 | `tests/api/test_v1_hardening_e2e.py`, `scripts/run_docker_e2e.py`, PRs #23 through #42 |
 | Owner real-data smoke | Pending explicit owner approval | `docs/owner_smoke_checklist_v1.md` |
 

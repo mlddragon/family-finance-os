@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from dillon_finances.main import create_app
-from dillon_finances.runtime import DataRootConfigurationError
+from family_finance_os.main import create_app
+from family_finance_os.runtime import DataRootConfigurationError
 
 
 CHASE_HEADER = "Transaction Date,Post Date,Description,Category,Amount\n"

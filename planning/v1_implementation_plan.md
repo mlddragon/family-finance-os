@@ -27,7 +27,7 @@
 - Container data mount: `/data`.
 - App port: host `127.0.0.1:8080` to container `8080`.
 - Default `DATA_ROOT`: `/data`.
-- SQLite path: `/data/database/dillon_finances.sqlite3`.
+- SQLite path: `/data/database/family_finance_os.sqlite3`.
 - App actor for v1 audit records: `mason`.
 - Container user: non-root UID/GID `10001:10001`.
 
@@ -77,7 +77,7 @@ Create structure:
 ```text
 apps/
   api/
-    dillon_finances/
+    family_finance_os/
       __init__.py
       main.py
   web/

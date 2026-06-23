@@ -64,7 +64,7 @@ jobs:
         run: pip-audit
 
       - name: Run Bandit
-        run: bandit -r apps/api -q -x apps/api/dillon_finances/migrations
+        run: bandit -r apps/api -q -x apps/api/family_finance_os/migrations
 
   container-scan:
     name: Container image scan

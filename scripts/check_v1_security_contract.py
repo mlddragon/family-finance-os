@@ -72,7 +72,11 @@ def main(argv: list[str]) -> int:
     dockerfile = (repo_root / "Dockerfile").read_text()
     dockerignore = (repo_root / ".dockerignore").read_text()
 
-    if "127.0.0.1:${DILLON_FINANCES_HOST_PORT:-28080}:8080" not in compose:
+    bind_patterns = (
+        "127.0.0.1:${FFOS_HOST_PORT:-28080}:8080",
+        "127.0.0.1:${FFOS_HOST_PORT:-${DILLON_FINANCES_HOST_PORT:-28080}}:8080",
+    )
+    if not any(pattern in compose for pattern in bind_patterns):
         return fail("Docker Compose must bind the browser app to 127.0.0.1 and default the personal host port to 28080.")
     if "APP_BIND_HOST: 127.0.0.1" not in compose:
         return fail("Docker Compose must keep APP_BIND_HOST at 127.0.0.1 by default.")

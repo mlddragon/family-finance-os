@@ -14,8 +14,8 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from dillon_finances.actors import ActorContext, actor_context_from_json, actor_context_to_json, derive_actor_context
-from dillon_finances.models import (
+from family_finance_os.actors import ActorContext, actor_context_from_json, actor_context_to_json, derive_actor_context
+from family_finance_os.models import (
     ImportBatch,
     ImportBatchEvent,
     Setting,
@@ -26,9 +26,9 @@ from dillon_finances.models import (
     ValidationFindingEvent,
     utc_now_iso,
 )
-from dillon_finances.ledger_normalization import normalize_import_batch
-from dillon_finances.ledger_parsing import parse_ledger_date, parse_money
-from dillon_finances.source_profiles import SourceProfile, get_source_profile, list_source_profiles
+from family_finance_os.ledger_normalization import normalize_import_batch
+from family_finance_os.ledger_parsing import parse_ledger_date, parse_money
+from family_finance_os.source_profiles import SourceProfile, get_source_profile, list_source_profiles
 
 
 VALIDATION_CODES = {

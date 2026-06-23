@@ -6,8 +6,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from dillon_finances.main import create_app
-from dillon_finances.runtime import SYNTHETIC_ARTIFACT_MARKER
+from family_finance_os.main import create_app
+from family_finance_os.runtime import SYNTHETIC_ARTIFACT_MARKER
 
 
 CHASE_HEADER = "Transaction Date,Post Date,Description,Category,Amount\n"

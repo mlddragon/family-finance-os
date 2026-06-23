@@ -8,9 +8,9 @@ from typing import Any, Callable
 
 from fastapi.testclient import TestClient
 
-from dillon_finances.main import create_app
-from dillon_finances.runtime import SYNTHETIC_ARTIFACT_MARKER, bootstrap_data_root, runtime_environment_from_env
-from dillon_finances.source_profiles import list_source_profiles
+from family_finance_os.main import create_app
+from family_finance_os.runtime import SYNTHETIC_ARTIFACT_MARKER, bootstrap_data_root, runtime_environment_from_env
+from family_finance_os.source_profiles import list_source_profiles
 
 
 BASELINE_SCENARIO = "baseline"

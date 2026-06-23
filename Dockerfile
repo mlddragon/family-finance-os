@@ -26,9 +26,9 @@ RUN groupadd --gid 10001 appuser \
 
 COPY pyproject.toml ./
 COPY apps/api ./apps/api
-COPY --from=web-build /app/apps/web/dist ./apps/api/dillon_finances/static
+COPY --from=web-build /app/apps/web/dist ./apps/api/family_finance_os/static
 RUN pip install --no-cache-dir --root-user-action=ignore .
 
 USER 10001:10001
 EXPOSE 8080
-CMD ["uvicorn", "dillon_finances.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "family_finance_os.main:app", "--host", "0.0.0.0", "--port", "8080"]

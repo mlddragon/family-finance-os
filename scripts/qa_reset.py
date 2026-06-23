@@ -5,7 +5,7 @@ import os
 import shutil
 from pathlib import Path
 
-from dillon_finances.runtime import REQUIRED_DATA_ROOT_DIRS, validate_data_root
+from family_finance_os.runtime import REQUIRED_DATA_ROOT_DIRS, validate_data_root
 
 
 RESET_CONFIRMATION = "RESET QA DATA"
@@ -20,7 +20,7 @@ def _repo_root() -> Path:
 
 
 def _personal_default_path() -> Path:
-    return (Path.home() / "Dillon_Finances_Data").expanduser().resolve()
+    return (Path.home() / "FamilyFinanceOS_Data").expanduser().resolve()
 
 
 def reset_qa_data_root(

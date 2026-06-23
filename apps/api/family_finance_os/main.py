@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
-from dillon_finances import __version__
-from dillon_finances.actors import ActorContext, actors_payload
-from dillon_finances.category_service import (
+from family_finance_os import __version__
+from family_finance_os.actors import ActorContext, actors_payload
+from family_finance_os.category_service import (
     CategoryCreateRequest,
     CategoryError,
     CategoryPatchRequest,
@@ -21,13 +21,13 @@ from dillon_finances.category_service import (
     seed_default_categories,
     update_category,
 )
-from dillon_finances.database import create_sqlite_engine, upgrade_database
-from dillon_finances.decision_events import (
+from family_finance_os.database import create_sqlite_engine, resolve_database_path, upgrade_database
+from family_finance_os.decision_events import (
     DecisionEventError,
     DecisionEventRequest,
     create_decision_event,
 )
-from dillon_finances.import_validation import (
+from family_finance_os.import_validation import (
     ImportValidationError,
     accept_import_batch,
     list_validation_findings,
@@ -39,9 +39,9 @@ from dillon_finances.import_validation import (
     validate_import_batch,
     void_import_batch,
 )
-from dillon_finances.ledger_normalization import get_transaction, list_transactions
-from dillon_finances.operator_summary import operator_summary_payload
-from dillon_finances.reporting import (
+from family_finance_os.ledger_normalization import get_transaction, list_transactions
+from family_finance_os.operator_summary import operator_summary_payload
+from family_finance_os.reporting import (
     AdvisorExportRequest,
     MonthlyCloseRequest,
     ReportRunRequest,
@@ -52,8 +52,8 @@ from dillon_finances.reporting import (
     list_artifacts,
     run_reports,
 )
-from dillon_finances.runtime import RuntimeEnvironment, bootstrap_data_root, runtime_environment_from_env
-from dillon_finances.settings_service import (
+from family_finance_os.runtime import RuntimeEnvironment, bootstrap_data_root, runtime_environment_from_env
+from family_finance_os.settings_service import (
     SettingsPatchRequest,
     SettingsValidationError,
     apply_settings_patch,
@@ -89,7 +89,7 @@ def _default_data_root() -> Path:
 
 
 def _database_status(data_root: Path) -> Dict[str, str]:
-    database_path = data_root / "database" / "dillon_finances.sqlite3"
+    database_path = resolve_database_path(data_root / "database")
     if database_path.exists():
         return {"status": "present", "path": str(database_path)}
     return {"status": "not_initialized", "path": str(database_path)}
@@ -114,7 +114,7 @@ def create_app(
         return resolved_data_root
 
     def get_database_path() -> Path:
-        return get_data_root() / "database" / "dillon_finances.sqlite3"
+        return resolve_database_path(get_data_root() / "database")
 
     def get_engine() -> Engine:
         nonlocal engine

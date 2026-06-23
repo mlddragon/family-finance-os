@@ -11,7 +11,7 @@ services:
       DATASET_KIND: ${DATASET_KIND:-personal}
       DEV_MODE: ${DEV_MODE:-false}
     ports:
-      - "127.0.0.1:${DILLON_FINANCES_HOST_PORT:-28080}:8080"
+      - "127.0.0.1:${FFOS_HOST_PORT:-${DILLON_FINANCES_HOST_PORT:-28080}}:8080"
     volumes:
-      - "${DILLON_FINANCES_DATA_ROOT:-${HOME}/Dillon_Finances_Data}:/data"
+      - "${FFOS_DATA_ROOT:-${DILLON_FINANCES_DATA_ROOT:-${HOME}/FamilyFinanceOS_Data}}:/data"
     user: "10001:10001"
