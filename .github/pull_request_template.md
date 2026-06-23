@@ -28,6 +28,11 @@
 
 - [ ] Any examples, screenshots, logs, or fixtures use synthetic, placeholder, or redacted data only.
 
+## Security Review
+
+- [ ] CI `Security` workflow passed
+- [ ] No open P0/P1 security findings (or documented owner waiver)
+
 ## Reviewer Notes
 
 - 
