@@ -1,0 +1,12 @@
+---
+description: Bootstrap agent context for Family Finance OS
+alwaysApply: true
+---
+
+# Agent Bootstrap
+
+- Read [AGENTS.md](../../AGENTS.md) before product-shaping or implementation work.
+- Read [SECURITY.md](../../SECURITY.md) and [docs/data_handling_policy.md](../../docs/data_handling_policy.md) before changes that touch data handling, auth, Docker, CI, or dependencies.
+- Do not commit raw financial data, credentials, or local runtime artifacts.
+- Use branches and pull requests; do not push directly to `main`.
+- Include a human QA script in PR notes for app, UI, API, or Docker behavior changes.

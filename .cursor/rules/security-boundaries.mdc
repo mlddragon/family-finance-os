@@ -1,0 +1,14 @@
+---
+description: Security and privacy boundaries for code changes
+globs: "**/*.{py,ts,tsx,yml,yaml,md,Dockerfile,Makefile}"
+alwaysApply: false
+---
+
+# Security Boundaries
+
+- Runtime financial state belongs under external `DATA_ROOT` / `FFOS_DATA_ROOT`, never in git.
+- Keep personal and QA/demo environments separate (`APP_ENV`, distinct data roots, synthetic-only QA).
+- Do not bind the app to `0.0.0.0` or add external data transmission without explicit owner approval.
+- Preserve append-only audit behavior for financial decisions and settings changes.
+- New dependencies need license compatibility (MPL-2.0) and a quick supply-chain review.
+- CI and repo checks must stay synthetic-only and must not weaken secret or sensitive-artifact scans.
