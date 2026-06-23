@@ -13,9 +13,9 @@
 ### Task 1: Data Model And Migration
 
 **Files:**
-- Modify: `apps/api/dillon_finances/models.py`
-- Modify: `apps/api/dillon_finances/migrations/versions/0001_create_audit_core.py`
-- Create: `apps/api/dillon_finances/migrations/versions/0002_import_batch_void_events.py`
+- Modify: `apps/api/family_finance_os/models.py`
+- Modify: `apps/api/family_finance_os/migrations/versions/0001_create_audit_core.py`
+- Create: `apps/api/family_finance_os/migrations/versions/0002_import_batch_void_events.py`
 - Test: `tests/api/test_database_foundation.py`
 
 - [x] Add `storage_status`, `destroyed_at`, `destroyed_by`, and `destroyed_reason` to `SourceFile`.
@@ -26,8 +26,8 @@
 ### Task 2: Backend Void Service And API
 
 **Files:**
-- Modify: `apps/api/dillon_finances/import_validation.py`
-- Modify: `apps/api/dillon_finances/main.py`
+- Modify: `apps/api/family_finance_os/import_validation.py`
+- Modify: `apps/api/family_finance_os/main.py`
 - Test: `tests/api/test_import_validation.py`
 
 - [x] Add `POST /api/import-batches/{id}/void`.

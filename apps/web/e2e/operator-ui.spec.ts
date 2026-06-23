@@ -72,7 +72,7 @@ const personalRuntime = {
   dev_mode: false,
   qa_controls_enabled: false,
   data_root: { path: "/tmp/Dillon_Finances_Data", exists: true },
-  database: { status: "present", path: "/tmp/Dillon_Finances_Data/database/dillon_finances.sqlite3" },
+  database: { status: "present", path: "/tmp/Dillon_Finances_Data/database/family_finance_os.sqlite3" },
 };
 
 const actorsPayload = {

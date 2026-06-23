@@ -6,9 +6,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from dillon_finances.actors import ActorContext, actor_context_from_json, actor_context_to_json, derive_actor_context
-from dillon_finances.category_service import category_display_name, category_identity_for_value, resolve_category_key
-from dillon_finances.models import CanonicalTransaction, DecisionEvent, ValidationFinding
+from family_finance_os.actors import ActorContext, actor_context_from_json, actor_context_to_json, derive_actor_context
+from family_finance_os.category_service import category_display_name, category_identity_for_value, resolve_category_key
+from family_finance_os.models import CanonicalTransaction, DecisionEvent, ValidationFinding
 
 
 class DecisionEventError(ValueError):

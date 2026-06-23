@@ -10,9 +10,22 @@ from sqlalchemy.engine import Engine
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
+PRIMARY_DATABASE_FILENAME = "family_finance_os.sqlite3"
+LEGACY_DATABASE_FILENAME = "dillon_finances.sqlite3"
+
 
 class DatabaseConfigurationError(RuntimeError):
     pass
+
+
+def resolve_database_path(database_dir: Path) -> Path:
+    primary_path = database_dir / PRIMARY_DATABASE_FILENAME
+    legacy_path = database_dir / LEGACY_DATABASE_FILENAME
+    if primary_path.exists():
+        return primary_path
+    if legacy_path.exists():
+        return legacy_path
+    return primary_path
 
 
 def _ensure_safe_database_path(database_path: Path) -> Path:

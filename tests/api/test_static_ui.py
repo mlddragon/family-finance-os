@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-import dillon_finances.main as main_module
+import family_finance_os.main as main_module
 
 
 def test_static_ui_route_does_not_serve_paths_outside_static_dir(tmp_path, monkeypatch):

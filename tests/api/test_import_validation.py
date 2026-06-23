@@ -7,10 +7,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
-from dillon_finances.database import create_sqlite_engine
-from dillon_finances.import_validation import VALIDATION_CODES
-from dillon_finances.main import create_app
-from dillon_finances.models import (
+from family_finance_os.database import create_sqlite_engine
+from family_finance_os.import_validation import VALIDATION_CODES
+from family_finance_os.main import create_app
+from family_finance_os.models import (
     ImportedRow,
     ImportBatch,
     ImportBatchEvent,
@@ -258,7 +258,7 @@ def test_void_import_batch_can_destroy_files_for_unaccepted_upload(tmp_path):
     assert not inbox_file.exists()
     assert not Path(source_file_body["stored_path"]).exists()
 
-    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    engine = create_sqlite_engine(tmp_path / "database" / "family_finance_os.sqlite3")
     Session = sessionmaker(bind=engine)
     with Session() as session:
         source_file = session.scalar(select(SourceFile).where(SourceFile.import_batch_id == batch_id))
@@ -306,7 +306,7 @@ def test_voided_destroyed_import_batch_cannot_be_revalidated(tmp_path):
         if finding["target_id"] == batch_id and finding["status"] == "open"
     ] == []
 
-    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    engine = create_sqlite_engine(tmp_path / "database" / "family_finance_os.sqlite3")
     Session = sessionmaker(bind=engine)
     with Session() as session:
         batch = session.get(ImportBatch, batch_id)
@@ -399,7 +399,7 @@ def test_void_import_batch_rejects_accepted_batches(tmp_path):
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "accepted_import_void_blocked"
 
-    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    engine = create_sqlite_engine(tmp_path / "database" / "family_finance_os.sqlite3")
     Session = sessionmaker(bind=engine)
     with Session() as session:
         batch = session.get(ImportBatch, accepted["id"])
@@ -608,7 +608,7 @@ def test_real_chase_export_with_type_and_memo_validates_and_keeps_credit_card_di
     assert validate_response.json()["findings"] == []
     assert accept_response.status_code == 200
 
-    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    engine = create_sqlite_engine(tmp_path / "database" / "family_finance_os.sqlite3")
     Session = sessionmaker(bind=engine)
     with Session() as session:
         rows = session.scalars(select(ImportedRow).order_by(ImportedRow.raw_description)).all()
@@ -853,7 +853,7 @@ def test_warning_validation_finding_can_be_acknowledged_with_audit_event(tmp_pat
     ]
     assert stale_findings[0]["status"] == "resolved"
 
-    engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+    engine = create_sqlite_engine(tmp_path / "database" / "family_finance_os.sqlite3")
     Session = sessionmaker(bind=engine)
     with Session() as session:
         finding = session.get(ValidationFinding, finding_id)
@@ -886,7 +886,7 @@ def test_active_blocking_validation_finding_cannot_be_acknowledged_or_used_to_by
             json={"actor": "mason", "note": "Do not hide active blockers."},
         )
 
-        engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+        engine = create_sqlite_engine(tmp_path / "database" / "family_finance_os.sqlite3")
         Session = sessionmaker(bind=engine)
         with Session() as session:
             finding = session.get(ValidationFinding, finding_id)
@@ -1047,7 +1047,7 @@ def test_stored_row_count_mismatch_creates_blocking_finding(tmp_path):
 
     with TestClient(app) as client:
         batch_id = client.post("/api/inbox/scan").json()["import_batches"][0]["id"]
-        engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+        engine = create_sqlite_engine(tmp_path / "database" / "family_finance_os.sqlite3")
         Session = sessionmaker(bind=engine)
         with Session() as session:
             source_file = session.scalar(select(SourceFile).where(SourceFile.import_batch_id == batch_id))
@@ -1115,7 +1115,7 @@ def test_missing_required_source_findings_resolve_duplicate_open_warnings(tmp_pa
     with TestClient(app) as client:
         enable_required_sources(client, "alliant_checking", "chase_prime_visa")
         accept_latest_batch(client)
-        engine = create_sqlite_engine(tmp_path / "database" / "dillon_finances.sqlite3")
+        engine = create_sqlite_engine(tmp_path / "database" / "family_finance_os.sqlite3")
         Session = sessionmaker(bind=engine)
         with Session() as session:
             for _ in range(2):
