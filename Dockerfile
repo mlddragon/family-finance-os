@@ -1,4 +1,4 @@
-FROM node:22-slim AS web-build
+FROM node:26-slim AS web-build
 ENV NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_LOGLEVEL=error \
@@ -9,7 +9,7 @@ RUN npm ci
 COPY apps/web/ ./
 RUN npm run build
 
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
