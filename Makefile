@@ -2,7 +2,10 @@ PERSONAL_DATA_ROOT ?= $(HOME)/FamilyFinanceOS_Data
 QA_DATA_ROOT ?= $(HOME)/FamilyFinanceOS_QA_Data
 QA_SCENARIO ?= baseline
 
-.PHONY: personal-up personal-down qa-up qa-down qa-seed qa-reset
+.PHONY: personal-up personal-down qa-up qa-down qa-seed qa-reset qa-update qa-deploy
+
+qa-update qa-deploy:
+	./scripts/qa_deploy.sh
 
 personal-up:
 	mkdir -p "$(PERSONAL_DATA_ROOT)"

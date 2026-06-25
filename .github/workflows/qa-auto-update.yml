@@ -1,0 +1,30 @@
+name: QA auto-update
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - docker-compose.yml
+      - pyproject.toml
+      - apps/web/package.json
+      - apps/web/package-lock.json
+      - .github/dependabot.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-auto-update
+  cancel-in-progress: true
+
+jobs:
+  qa-update:
+    if: github.repository == 'mlddragon/family-finance-os'
+    runs-on: [self-hosted, macOS, ffos-qa]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+
+      - name: Rebuild local QA Docker instance
+        run: ./scripts/qa_deploy.sh
