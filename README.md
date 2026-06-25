@@ -24,6 +24,7 @@ Family Finance OS is licensed under `MPL-2.0`. See [LICENSE](LICENSE). Copyright
 - AI-agent repository instructions live in [AGENTS.md](AGENTS.md) and [cursor.md](cursor.md).
 - Codex security analyst guidance lives in [docs/security/codex-analyst.md](docs/security/codex-analyst.md).
 - Codex subscription setup lives in [docs/runbooks/codex-subscription-setup.md](docs/runbooks/codex-subscription-setup.md).
+- QA self-hosted auto-update setup lives in [docs/runbooks/qa-self-hosted-runner.md](docs/runbooks/qa-self-hosted-runner.md).
 - Public release runbook lives in [docs/runbooks/public-release-v0.4.0.md](docs/runbooks/public-release-v0.4.0.md).
 - Prior prototype archive notes live in [docs/archive/family_finance_planner.md](docs/archive/family_finance_planner.md).
 - Release history lives in [CHANGELOG.md](CHANGELOG.md).
