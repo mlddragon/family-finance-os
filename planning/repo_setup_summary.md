@@ -56,4 +56,14 @@ The first clarifying-question interview has been completed and captured in `plan
 
 ## Implementation status
 
-App implementation has not started.
+Updated 2026-06-25 for the v1 RC foundation phase.
+
+- **Repository:** Public [`mlddragon/family-finance-os`](https://github.com/mlddragon/family-finance-os); pyproject version `0.4.0`; tags `v0.1.0` through `v0.4.0` exist.
+- **Implemented milestones:** v0.1.0 (local Docker MVP), v0.2.0 (open-source readiness), v0.3.0 (QA/demo and actor context), v0.4.0 (rehome, `FFOS_*` env vars, public release prep).
+- **App stack:** FastAPI backend, React/Vite frontend, SQLite under external `DATA_ROOT`, Docker Compose local-first runtime.
+- **Personal runtime:** Compose project `ffos-personal` at `http://127.0.0.1:28080` (legacy `dillon-personal` deprecated).
+- **QA runtime:** Compose project `ffos-qa` at `http://127.0.0.1:28081` with five seed scenarios: `baseline`, `stale-source`, `blocked-import`, `review-backlog`, `monthly-close-ready`.
+- **Actor/persona context:** Implemented for audit context; permission enforcement not yet implemented.
+- **Validation until v1.0.0 RC:** Synthetic QA and CI only; owner real-data smoke deferred. See `docs/qa_validation_strategy.md`.
+- **QA auto-update:** Self-hosted runner workflow merged in PR #85 rebuilds QA on dependency merges to `main`.
+- **Open v1 RC work:** Permission matrix enforcement, elevated/approval modes, non-mutating permission preview (issue #55, approved 2026-06-25), and owner real-data smoke at v1.0.0 RC.

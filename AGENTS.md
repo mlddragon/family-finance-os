@@ -31,6 +31,7 @@ Primary engineers must not weaken security boundaries, skip required CI checks, 
 - Do not push directly to `main`.
 - Include a human QA script in PR notes for app behavior, UI, API, Docker, import, review, report, or data-integrity changes.
 - Stop for owner review on impactful product/architecture decisions, data-integrity/security/privacy decisions, and cost-bearing decisions.
+- For owner decision reviews, use the recommendation-first flow in `.cursor/skills/decision-card-review/SKILL.md` and record approved outcomes in planning docs or issue decision records.
 
 ## Engineering Guardrails
 

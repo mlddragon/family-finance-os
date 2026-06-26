@@ -1,6 +1,8 @@
 # Owner Smoke Checklist v1
 
-This checklist is for an owner-approved local real-data smoke run after the synthetic v1 path passes. Do not run this with real exports until explicitly approved.
+**Deferred until v1.0.0 RC.** Until then, validate with synthetic QA only — see [docs/qa_validation_strategy.md](qa_validation_strategy.md).
+
+This checklist is for an owner-approved local real-data smoke run after v1.0.0 RC scope is complete and synthetic validation passes. Do not run this with real exports until explicitly approved at the RC gate.
 
 ## Evidence Boundary
 
