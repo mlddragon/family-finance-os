@@ -97,6 +97,24 @@ const actorsPayload = {
   system_personas: [{ system_persona_key: "system:importer", display_name: "System: Importer" }],
 };
 
+const inactiveElevatedModeStatus = {
+  active: false,
+  purpose_codes: {
+    system_administration: [
+      "user_group_permission_management",
+      "source_or_system_settings",
+      "maintenance_health_review",
+      "runtime_troubleshooting",
+    ],
+    financial_governance: [
+      "approval_rule_change",
+      "governance_setting_change",
+      "threshold_risk_rule_review",
+      "monthly_close_governance_review",
+    ],
+  },
+};
+
 async function waitForMutatingControls(page: import("@playwright/test").Page) {
   await expect(page.getByRole("button", { name: "Validate batch" })).toBeEnabled({ timeout: 10_000 });
 }
@@ -127,6 +145,116 @@ async function mockApi(
           action_effect: personaKey === "finance_manager" ? "allow" : "deny",
           scope_access: personaKey === "finance_manager" ? "own" : "none",
           denied_reason: personaKey === "finance_manager" ? null : "default_matrix_denied",
+        },
+      });
+      return;
+    }
+
+    if (path === "/api/elevated-mode/status") {
+      await route.fulfill({ json: inactiveElevatedModeStatus });
+      return;
+    }
+
+    if (path === "/api/elevated-mode/enter" && request.method() === "POST") {
+      const body = request.postDataJSON() as { context: string; purpose_code: string; note: string; actor: string };
+      await route.fulfill({
+        json: {
+          active: true,
+          session_id: "elevated-session-1",
+          context: body.context,
+          purpose_code: body.purpose_code,
+          note: body.note,
+          actor: body.actor,
+          entered_at: "2026-06-18T00:00:00Z",
+          last_activity_at: "2026-06-18T00:00:00Z",
+          expires_at: "2026-06-18T00:15:00Z",
+          purpose_codes: inactiveElevatedModeStatus.purpose_codes,
+        },
+      });
+      return;
+    }
+
+    if (path === "/api/elevated-mode/exit" && request.method() === "POST") {
+      await route.fulfill({ json: { active: false } });
+      return;
+    }
+
+    if (path === "/api/elevated-mode/touch" && request.method() === "POST") {
+      await route.fulfill({
+        json: {
+          active: true,
+          session_id: "elevated-session-1",
+          context: "system_administration",
+          purpose_code: "source_or_system_settings",
+          note: "Touch test",
+          actor: "owner",
+          entered_at: "2026-06-18T00:00:00Z",
+          last_activity_at: "2026-06-18T00:05:00Z",
+          expires_at: "2026-06-18T00:20:00Z",
+          purpose_codes: inactiveElevatedModeStatus.purpose_codes,
+        },
+      });
+      return;
+    }
+
+    if (path === "/api/suggestions") {
+      await route.fulfill({ json: { approval_mode_enabled: false, suggestions: [] } });
+      return;
+    }
+
+    if (path.startsWith("/api/suggestions/") && request.method() === "POST") {
+      await route.fulfill({
+        json: {
+          suggestion: {
+            id: "suggestion-1",
+            target_type: "canonical_transaction",
+            target_id: "tx-1",
+            action_key: "review.decide",
+            decision_type: "category_change",
+            field_name: "category",
+            previous_value: "groceries",
+            proposed_value: "family_project",
+            status: "active",
+            proposer_actor: "owner",
+            suggestion_source: "user",
+            notes: null,
+            decision_event_id: null,
+            approval_request_id: null,
+            created_at: "2026-06-18T00:00:00Z",
+            updated_at: "2026-06-18T00:00:00Z",
+          },
+        },
+      });
+      return;
+    }
+
+    if (path === "/api/approval-requests") {
+      await route.fulfill({ json: { approval_mode_enabled: false, approval_requests: [] } });
+      return;
+    }
+
+    if (path.startsWith("/api/approval-requests/") && request.method() === "POST") {
+      await route.fulfill({
+        json: {
+          approval_request: {
+            id: "approval-1",
+            target_type: "canonical_transaction",
+            target_id: "tx-1",
+            action_key: "review.decide",
+            decision_type: "category_change",
+            field_name: "category",
+            previous_value: "groceries",
+            proposed_value: "family_project",
+            status: "approved",
+            proposer_actor: "contributor",
+            policy_trigger: "high_value",
+            expires_at: "2026-07-02T00:00:00Z",
+            source_suggestion_id: "suggestion-1",
+            notes: null,
+            applied_decision_event_id: "event-3",
+            created_at: "2026-06-18T00:00:00Z",
+            updated_at: "2026-06-18T00:01:00Z",
+          },
         },
       });
       return;

@@ -3,19 +3,51 @@ import type {
   ArtifactActionResponse,
   ActorContext,
   ActorsPayload,
+  ApprovalRequest,
+  ApprovalRequestsPayload,
   Category,
   DecisionEventResponse,
   EffectivePermission,
+  ElevatedContext,
+  ElevatedModeStatus,
   InboxScan,
   ImportBatch,
   OperatorSummary,
   PermissionPreviewRequest,
   PermissionPreviewResponse,
   SettingsPayload,
+  Suggestion,
+  SuggestionsPayload,
   Transaction,
   TransactionDetail,
   ValidationFinding,
 } from "./types";
+
+const ELEVATED_SESSION_STORAGE_KEY = "family-finance-os.elevatedSessionId";
+
+let elevatedSessionId: string | null = null;
+
+export function getElevatedSessionId(): string | null {
+  return elevatedSessionId;
+}
+
+export function setElevatedSessionId(sessionId: string | null) {
+  elevatedSessionId = sessionId;
+  if (typeof window !== "undefined" && window.sessionStorage) {
+    if (sessionId) {
+      window.sessionStorage.setItem(ELEVATED_SESSION_STORAGE_KEY, sessionId);
+    } else {
+      window.sessionStorage.removeItem(ELEVATED_SESSION_STORAGE_KEY);
+    }
+  }
+}
+
+export function readStoredElevatedSessionId(): string | null {
+  if (typeof window === "undefined" || !window.sessionStorage) {
+    return null;
+  }
+  return window.sessionStorage.getItem(ELEVATED_SESSION_STORAGE_KEY);
+}
 
 export class ApiError extends Error {
   status: number;
@@ -33,8 +65,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function withElevatedSessionHeaders(init?: RequestInit): RequestInit {
+  if (!elevatedSessionId) {
+    return init ?? {};
+  }
+  const headers = new Headers(init?.headers);
+  headers.set("X-Elevated-Session-Id", elevatedSessionId);
+  return { ...init, headers };
+}
+
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
+  const response = await fetch(path, withElevatedSessionHeaders(init));
   if (!response.ok) {
     let message = `Request failed: ${path}`;
     let code: string | undefined;
@@ -354,4 +395,226 @@ export function createAdvisorExport(payload: { actor: string; actorContext?: Act
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ actor: payload.actor, actor_context: payload.actorContext }),
   });
+}
+
+export function fetchElevatedModeStatus() {
+  return apiJson<ElevatedModeStatus>("/api/elevated-mode/status");
+}
+
+export function enterElevatedMode(payload: {
+  context: ElevatedContext;
+  purposeCode: string;
+  note: string;
+  actor: string;
+  actorContext?: ActorContext;
+  hasUnsavedEdits?: boolean;
+}) {
+  const params = new URLSearchParams();
+  if (payload.hasUnsavedEdits) {
+    params.set("has_unsaved_edits", "true");
+  }
+  const query = params.toString();
+  return apiJson<ElevatedModeStatus>(`/api/elevated-mode/enter${query ? `?${query}` : ""}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      context: payload.context,
+      purpose_code: payload.purposeCode,
+      note: payload.note.trim(),
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+    }),
+  });
+}
+
+export function exitElevatedMode(payload: { actor: string; actorContext?: ActorContext }) {
+  return apiJson<{ active: false }>("/api/elevated-mode/exit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+    }),
+  });
+}
+
+export function touchElevatedMode(payload: { actor: string; actorContext?: ActorContext }) {
+  return apiJson<ElevatedModeStatus>("/api/elevated-mode/touch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+    }),
+  });
+}
+
+export function fetchSuggestions(payload?: { status?: string; targetId?: string }) {
+  const params = new URLSearchParams();
+  if (payload?.status) {
+    params.set("status", payload.status);
+  }
+  if (payload?.targetId) {
+    params.set("target_id", payload.targetId);
+  }
+  const query = params.toString();
+  return apiJson<SuggestionsPayload>(`/api/suggestions${query ? `?${query}` : ""}`);
+}
+
+export function createSuggestion(payload: {
+  targetType: string;
+  targetId: string;
+  actionKey: string;
+  decisionType: string;
+  fieldName: string;
+  proposedValue: string;
+  actor: string;
+  actorContext?: ActorContext;
+  notes?: string;
+}) {
+  return apiJson<{ suggestion: Suggestion }>("/api/suggestions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target_type: payload.targetType,
+      target_id: payload.targetId,
+      action_key: payload.actionKey,
+      decision_type: payload.decisionType,
+      field_name: payload.fieldName,
+      proposed_value: payload.proposedValue,
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+      suggestion_source: "user",
+      notes: payload.notes?.trim() || null,
+    }),
+  });
+}
+
+export function dismissSuggestion(payload: {
+  suggestionId: string;
+  actor: string;
+  actorContext?: ActorContext;
+  notes?: string;
+}) {
+  return apiJson<{ suggestion: Suggestion }>(`/api/suggestions/${payload.suggestionId}/dismiss`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+      notes: payload.notes?.trim() || null,
+      explicit_user_action: true,
+    }),
+  });
+}
+
+export function acceptSuggestion(payload: {
+  suggestionId: string;
+  actor: string;
+  actorContext?: ActorContext;
+  notes?: string;
+}) {
+  return apiJson<{ suggestion: Suggestion; event?: unknown }>(`/api/suggestions/${payload.suggestionId}/accept`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+      notes: payload.notes?.trim() || null,
+      explicit_user_action: true,
+    }),
+  });
+}
+
+export function convertSuggestionToApproval(payload: {
+  suggestionId: string;
+  actor: string;
+  actorContext?: ActorContext;
+  notes?: string;
+}) {
+  return apiJson<{ suggestion: Suggestion; approval_request: ApprovalRequest }>(
+    `/api/suggestions/${payload.suggestionId}/convert-to-approval`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        actor: payload.actor,
+        actor_context: payload.actorContext,
+        notes: payload.notes?.trim() || null,
+        explicit_user_action: true,
+      }),
+    },
+  );
+}
+
+export function fetchApprovalRequests(payload?: { status?: string; targetId?: string }) {
+  const params = new URLSearchParams();
+  if (payload?.status) {
+    params.set("status", payload.status);
+  }
+  if (payload?.targetId) {
+    params.set("target_id", payload.targetId);
+  }
+  const query = params.toString();
+  return apiJson<ApprovalRequestsPayload>(`/api/approval-requests${query ? `?${query}` : ""}`);
+}
+
+export function approveApprovalRequest(payload: {
+  approvalRequestId: string;
+  actor: string;
+  actorContext?: ActorContext;
+  notes?: string;
+}) {
+  return apiJson<{ approval_request: ApprovalRequest }>(
+    `/api/approval-requests/${payload.approvalRequestId}/approve`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        actor: payload.actor,
+        actor_context: payload.actorContext,
+        notes: payload.notes?.trim() || null,
+      }),
+    },
+  );
+}
+
+export function rejectApprovalRequest(payload: {
+  approvalRequestId: string;
+  actor: string;
+  actorContext?: ActorContext;
+  notes?: string;
+}) {
+  return apiJson<{ approval_request: ApprovalRequest }>(
+    `/api/approval-requests/${payload.approvalRequestId}/reject`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        actor: payload.actor,
+        actor_context: payload.actorContext,
+        notes: payload.notes?.trim() || null,
+      }),
+    },
+  );
+}
+
+export function cancelApprovalRequest(payload: {
+  approvalRequestId: string;
+  actor: string;
+  actorContext?: ActorContext;
+  notes?: string;
+}) {
+  return apiJson<{ approval_request: ApprovalRequest }>(
+    `/api/approval-requests/${payload.approvalRequestId}/cancel`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        actor: payload.actor,
+        actor_context: payload.actorContext,
+        notes: payload.notes?.trim() || null,
+      }),
+    },
+  );
 }
