@@ -113,6 +113,7 @@ const inactiveElevatedModeStatus = {
       "monthly_close_governance_review",
     ],
   },
+  purpose_requires_note: ["approval_rule_change"],
 };
 
 async function waitForMutatingControls(page: import("@playwright/test").Page) {

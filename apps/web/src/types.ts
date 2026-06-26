@@ -295,6 +295,7 @@ export type ElevatedContext = "system_administration" | "financial_governance";
 export type ElevatedModeStatus = {
   active: boolean;
   purpose_codes?: Record<ElevatedContext, string[]>;
+  purpose_requires_note?: string[];
   session_id?: string;
   context?: ElevatedContext;
   purpose_code?: string;

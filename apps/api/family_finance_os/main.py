@@ -45,6 +45,7 @@ from family_finance_os.elevated_mode import (
     ElevatedModeTouchRequest,
     current_elevated_session_id,
     elevated_mode_http_error,
+    elevated_mode_metadata_payload,
     get_elevated_mode_registry,
     reset_elevated_mode_registry,
     reset_request_elevated_session_id,
@@ -110,6 +111,7 @@ from family_finance_os.settings_service import (
 
 APP_NAME = "Family Finance OS"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+UI_SHELL_CACHE_HEADERS = {"Cache-Control": "no-cache, must-revalidate"}
 
 
 class AcceptImportBatchRequest(BaseModel):
@@ -353,7 +355,7 @@ def create_app(
                 )
             except ElevatedModeError as exc:
                 raise elevated_mode_error_http(exc) from exc
-            return serialize_active_session(active)
+            return {**serialize_active_session(active), **elevated_mode_metadata_payload()}
 
     @app.post("/api/elevated-mode/exit")
     def post_elevated_mode_exit(
@@ -997,7 +999,7 @@ def create_app(
             requested = (STATIC_DIR / full_path).resolve()
             if full_path and requested.is_relative_to(static_root) and requested.is_file():
                 return FileResponse(requested)
-            return FileResponse(STATIC_DIR / "index.html")
+            return FileResponse(STATIC_DIR / "index.html", headers=UI_SHELL_CACHE_HEADERS)
 
     return app
 

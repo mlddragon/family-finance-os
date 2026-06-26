@@ -192,11 +192,6 @@ function settingBoolean(settings: SettingsPayload | undefined, domain: string, s
   return fallback;
 }
 
-const ELEVATED_CONTEXT_LABELS: Record<ElevatedContext, string> = {
-  system_administration: "System Administration",
-  financial_governance: "Financial Governance",
-};
-
 const ELEVATED_PURPOSE_LABELS: Record<string, string> = {
   user_group_permission_management: "User, group, or permission management",
   source_or_system_settings: "Source or system settings",
@@ -207,6 +202,31 @@ const ELEVATED_PURPOSE_LABELS: Record<string, string> = {
   threshold_risk_rule_review: "Threshold or risk-rule review",
   monthly_close_governance_review: "Monthly-close governance review",
 };
+
+type ControlPlaneMode = "operator" | ElevatedContext;
+
+const CONTROL_PLANE_MODE_LABELS: Record<ControlPlaneMode, string> = {
+  operator: "Operator Mode",
+  system_administration: "Administrator Mode",
+  financial_governance: "Financial Governor Mode",
+};
+
+const FALLBACK_PURPOSE_CODES_REQUIRING_NOTE = new Set(["approval_rule_change"]);
+
+function purposeRequiresNote(purposeCode: string, status?: ElevatedModeStatus): boolean {
+  const configured = status?.purpose_requires_note;
+  if (configured && configured.length > 0) {
+    return configured.includes(purposeCode);
+  }
+  return FALLBACK_PURPOSE_CODES_REQUIRING_NOTE.has(purposeCode);
+}
+
+function controlPlaneModeFromStatus(active: boolean, context?: ElevatedContext): ControlPlaneMode {
+  if (active && context) {
+    return context;
+  }
+  return "operator";
+}
 
 function elevatedPurposeLabel(code: string) {
   return ELEVATED_PURPOSE_LABELS[code] ?? formatStatus(code);
@@ -349,11 +369,16 @@ function useElevatedMode(actor: string, actorContext: ActorContext) {
 
   const enterMutation = useMutation({
     mutationFn: enterElevatedMode,
-    onSuccess: (body) => {
+    onSuccess: (body, _variables, _context) => {
       if (body.session_id) {
         setElevatedSessionId(body.session_id);
       }
-      queryClient.setQueryData(["elevated-mode-status"], body);
+      const prior = queryClient.getQueryData<ElevatedModeStatus>(["elevated-mode-status"]);
+      queryClient.setQueryData(["elevated-mode-status"], {
+        ...body,
+        purpose_codes: body.purpose_codes ?? prior?.purpose_codes,
+        purpose_requires_note: body.purpose_requires_note ?? prior?.purpose_requires_note,
+      });
     },
   });
 
@@ -361,7 +386,11 @@ function useElevatedMode(actor: string, actorContext: ActorContext) {
     mutationFn: exitElevatedMode,
     onSuccess: () => {
       setElevatedSessionId(null);
-      queryClient.setQueryData(["elevated-mode-status"], { active: false, purpose_codes: statusQuery.data?.purpose_codes });
+      queryClient.setQueryData(["elevated-mode-status"], {
+        active: false,
+        purpose_codes: statusQuery.data?.purpose_codes,
+        purpose_requires_note: statusQuery.data?.purpose_requires_note,
+      });
       void queryClient.invalidateQueries({ queryKey: ["elevated-mode-status"] });
     },
   });
@@ -459,23 +488,18 @@ function OperatorApp() {
           setActivePersonaKey(value);
           writeLocalStorage(ACTIVE_PERSONA_STORAGE_KEY, value);
         }}
-      />
-
-      {summary.runtime.qa_controls_enabled ? (
-        <PermissionPreviewPanel actors={actors} />
-      ) : null}
-
-      <ElevatedModePanel
-        status={elevatedMode.status}
-        active={elevatedModeActive}
-        countdown={elevatedMode.countdown}
-        operatorActor={operatorActor}
-        operatorActorContext={operatorActorContext}
-        enterMutation={elevatedMode.enterMutation}
-        exitMutation={elevatedMode.exitMutation}
-        isLoading={elevatedMode.isLoading}
-        isError={elevatedMode.isError}
-        error={elevatedMode.error}
+        elevation={{
+          status: elevatedMode.status,
+          active: elevatedModeActive,
+          countdown: elevatedMode.countdown,
+          operatorActor,
+          operatorActorContext,
+          enterMutation: elevatedMode.enterMutation,
+          exitMutation: elevatedMode.exitMutation,
+          isLoading: elevatedMode.isLoading,
+          isError: elevatedMode.isError,
+          error: elevatedMode.error,
+        }}
       />
 
       <div className="workspace">
@@ -561,6 +585,8 @@ function OperatorApp() {
               canSaveSettings={permissionAllows(permissions.settings)}
               approvalModeEnabled={settingBoolean(settings, "approval", "approval.approval_mode_enabled")}
               canManageApprovals={permissionAllows(permissions.review)}
+              qaControlsEnabled={summary.runtime.qa_controls_enabled}
+              actors={actors}
             />
           ) : null}
         </main>
@@ -577,6 +603,7 @@ function Header({
   activePersonaKey,
   onActorChange,
   onPersonaChange,
+  elevation,
 }: {
   summary: OperatorSummary;
   appDisplayName: string;
@@ -585,6 +612,18 @@ function Header({
   activePersonaKey: string;
   onActorChange: (value: string) => void;
   onPersonaChange: (value: string) => void;
+  elevation: {
+    status?: ElevatedModeStatus;
+    active: boolean;
+    countdown: string;
+    operatorActor: string;
+    operatorActorContext: ActorContext;
+    enterMutation: ReturnType<typeof useMutation<ElevatedModeStatus, Error, Parameters<typeof enterElevatedMode>[0]>>;
+    exitMutation: ReturnType<typeof useMutation<{ active: false }, Error, Parameters<typeof exitElevatedMode>[0]>>;
+    isLoading: boolean;
+    isError: boolean;
+    error: unknown;
+  };
 }) {
   const { t } = useTranslation();
   return (
@@ -594,6 +633,7 @@ function Header({
         <h1>{appDisplayName}</h1>
       </div>
       <div className="actor-controls" aria-label="Active local actor">
+        <ElevationControls {...elevation} />
         <label>
           Actor
           <select value={activeActorKey} onChange={(event) => onActorChange(event.target.value)}>
@@ -618,6 +658,12 @@ function Header({
         </label>
       </div>
       <div className="status-strip" aria-label="Runtime status">
+        {elevation.active ? (
+          <span className="warn">
+            {CONTROL_PLANE_MODE_LABELS[controlPlaneModeFromStatus(true, elevation.status?.context)]} ·{" "}
+            {elevation.countdown}
+          </span>
+        ) : null}
         <span className={summary.runtime.app_env === "qa" ? "danger" : "ok"}>{summary.runtime.app_env_label}</span>
         <span>{summary.runtime.dataset_kind}</span>
         <span className={summary.runtime.local_only ? "ok" : "danger"}>{t("runtime.localBrowserMode")}</span>
@@ -631,82 +677,7 @@ function Header({
   );
 }
 
-function PermissionPreviewPanel({ actors }: { actors?: ActorsPayload }) {
-  const personas = actors?.selectable_personas ?? [
-    { persona_key: "finance_manager", persona_label: "Finance Manager", group_keys: ["finance_manager"] },
-  ];
-  const [previewPersonaKey, setPreviewPersonaKey] = useState(personas[0]?.persona_key ?? "finance_manager");
-  const previewQuery = useQuery({
-    queryKey: ["permissions-preview", previewPersonaKey],
-    queryFn: async () => {
-      const entries = await Promise.all(
-        UI_PERMISSION_CHECKS.map(async (check) => {
-          const result = await previewPermission({
-            persona_key: previewPersonaKey,
-            action_key: check.action_key,
-            data_scope_key: check.data_scope_key,
-          });
-          return [check.id, result] as const;
-        }),
-      );
-      return Object.fromEntries(entries) as Record<string, EffectivePermission>;
-    },
-  });
-  const previewResults = previewQuery.data;
-
-  return (
-    <section className="permission-preview-panel" aria-label="Permission preview">
-      <div className="permission-preview-header">
-        <div>
-          <p className="product-label">QA permission matrix</p>
-          <h2>Permission preview</h2>
-        </div>
-        <label>
-          Preview persona
-          <select value={previewPersonaKey} onChange={(event) => setPreviewPersonaKey(event.target.value)}>
-            {personas.map((persona) => (
-              <option key={persona.persona_key} value={persona.persona_key}>
-                {persona.persona_label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {previewQuery.isLoading ? <p className="empty-state">Loading permission preview…</p> : null}
-      {previewQuery.isError ? (
-        <p className="form-status danger-text">{formatApiError(previewQuery.error, "Permission preview unavailable")}</p>
-      ) : null}
-      {previewResults ? (
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Action</th>
-                <th>Effect</th>
-                <th>Scope access</th>
-              </tr>
-            </thead>
-            <tbody>
-              {UI_PERMISSION_CHECKS.map((check) => {
-                const result = previewResults[check.id];
-                const tone = result.allowed ? "ok-text" : result.suggestion_allowed ? "warn-text" : "danger-text";
-                return (
-                  <tr key={check.id}>
-                    <td>{check.label}</td>
-                    <td className={tone}>{permissionSummaryLabel(result)}</td>
-                    <td>{result.scope_access ? formatStatus(result.scope_access) : "None"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function ElevatedModePanel({
+function ElevationControls({
   status,
   active,
   countdown,
@@ -729,144 +700,146 @@ function ElevatedModePanel({
   isError: boolean;
   error: unknown;
 }) {
-  const [context, setContext] = useState<ElevatedContext>("system_administration");
+  const displayMode = controlPlaneModeFromStatus(active, status?.context);
+  const [selectValue, setSelectValue] = useState<ControlPlaneMode>(displayMode);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [pendingContext, setPendingContext] = useState<ElevatedContext | null>(null);
   const [purposeCode, setPurposeCode] = useState("");
   const [note, setNote] = useState("");
   const [formStatus, setFormStatus] = useState<string | null>(null);
-
-  const purposeCodes = status?.purpose_codes?.[context] ?? [];
-  const availableContexts = (Object.keys(status?.purpose_codes ?? ELEVATED_CONTEXT_LABELS) as ElevatedContext[]).filter(
-    (key) => (status?.purpose_codes?.[key]?.length ?? 0) > 0 || !status?.purpose_codes,
-  );
+  const noteRequired = purposeCode ? purposeRequiresNote(purposeCode, status) : false;
+  const purposeCodes = pendingContext ? (status?.purpose_codes?.[pendingContext] ?? []) : [];
+  const confirmDisabled =
+    !pendingContext ||
+    !purposeCode.trim() ||
+    (noteRequired && !note.trim()) ||
+    enterMutation.isPending ||
+    exitMutation.isPending;
 
   useEffect(() => {
-    if (!purposeCode || !purposeCodes.includes(purposeCode)) {
-      setPurposeCode(purposeCodes[0] ?? "");
-    }
-  }, [context, purposeCode, purposeCodes]);
+    setSelectValue(displayMode);
+  }, [displayMode]);
 
-  function submitEnter(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    if (!lightboxOpen) {
+      return;
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeLightbox();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [lightboxOpen, displayMode]);
+
+  function openLightbox(context: ElevatedContext) {
+    setPendingContext(context);
+    setPurposeCode("");
+    setNote("");
+    setFormStatus(null);
+    setLightboxOpen(true);
+  }
+
+  function closeLightbox() {
+    setLightboxOpen(false);
+    setPendingContext(null);
+    setPurposeCode("");
+    setNote("");
+    setSelectValue(displayMode);
+  }
+
+  function handleModeChange(nextMode: ControlPlaneMode) {
+    setSelectValue(nextMode);
+    if (nextMode === displayMode && nextMode !== "operator" && active) {
+      openLightbox(nextMode);
+      return;
+    }
+    if (nextMode === displayMode) {
+      return;
+    }
+    if (nextMode === "operator") {
+      if (!active) {
+        return;
+      }
+      setFormStatus(null);
+      exitMutation.mutate(
+        { actor: operatorActor, actorContext: operatorActorContext },
+        {
+          onError: (exitError) => {
+            setFormStatus(formatApiError(exitError, "Elevated mode exit blocked"));
+            setSelectValue(displayMode);
+          },
+        },
+      );
+      return;
+    }
+    openLightbox(nextMode);
+  }
+
+  async function confirmElevatedEntry(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!purposeCode.trim() || !note.trim()) {
+    if (!pendingContext || confirmDisabled) {
       return;
     }
     setFormStatus(null);
-    enterMutation.mutate(
-      {
-        context,
+    try {
+      if (active) {
+        await exitMutation.mutateAsync({ actor: operatorActor, actorContext: operatorActorContext });
+      }
+      await enterMutation.mutateAsync({
+        context: pendingContext,
         purposeCode,
         note,
         actor: operatorActor,
         actorContext: operatorActorContext,
-      },
-      {
-        onSuccess: () => {
-          setFormStatus("Elevated mode entered");
-          setNote("");
-        },
-        onError: (enterError) => setFormStatus(formatApiError(enterError, "Elevated mode entry blocked")),
-      },
-    );
-  }
-
-  function submitExit() {
-    setFormStatus(null);
-    exitMutation.mutate(
-      { actor: operatorActor, actorContext: operatorActorContext },
-      {
-        onSuccess: () => setFormStatus("Elevated mode exited"),
-        onError: (exitError) => setFormStatus(formatApiError(exitError, "Elevated mode exit blocked")),
-      },
-    );
+      });
+      setLightboxOpen(false);
+      setPendingContext(null);
+      setPurposeCode("");
+      setNote("");
+    } catch (enterError) {
+      setFormStatus(formatApiError(enterError, "Elevated mode entry blocked"));
+      setSelectValue(displayMode);
+    }
   }
 
   return (
-    <section className="elevated-mode-panel" aria-label="Elevated mode">
-      <div className="elevated-mode-header">
-        <div>
-          <p className="product-label">Control-plane elevation</p>
-          <h2>Elevated mode</h2>
-        </div>
-        {active ? (
-          <div className="elevated-mode-active-meta">
-            <span className="status-badge ok">Active</span>
-            <span className="elevated-countdown" aria-live="polite">
-              Expires in {countdown}
-            </span>
-          </div>
-        ) : (
-          <span className="status-badge warn">Inactive</span>
-        )}
-      </div>
-
-      {isLoading ? <p className="empty-state">Loading elevated mode status…</p> : null}
-      {isError ? (
-        <p className="form-status danger-text">{formatApiError(error, "Elevated mode status unavailable")}</p>
+    <>
+      <label className="elevation-mode-control">
+        Control plane
+        <select
+          value={selectValue}
+          onChange={(event) => handleModeChange(event.target.value as ControlPlaneMode)}
+          aria-label="Control plane mode"
+        >
+          {(Object.keys(CONTROL_PLANE_MODE_LABELS) as ControlPlaneMode[]).map((mode) => (
+            <option key={mode} value={mode}>
+              {CONTROL_PLANE_MODE_LABELS[mode]}
+            </option>
+          ))}
+        </select>
+      </label>
+      {active && status?.context ? (
+        <button
+          type="button"
+          className="link-button elevation-reenter"
+          onClick={() => openLightbox(status.context!)}
+        >
+          Re-enter
+        </button>
       ) : null}
-
-      {active && status ? (
-        <div className="elevated-mode-active">
-          <dl className="detail-list compact">
-            <div>
-              <dt>Context</dt>
-              <dd>{ELEVATED_CONTEXT_LABELS[status.context ?? "system_administration"]}</dd>
-            </div>
-            <div>
-              <dt>Purpose</dt>
-              <dd>{elevatedPurposeLabel(status.purpose_code ?? "")}</dd>
-            </div>
-            <div>
-              <dt>Note</dt>
-              <dd>{status.note}</dd>
-            </div>
-            <div>
-              <dt>Actor</dt>
-              <dd>{status.actor_context?.display_name ?? status.actor}</dd>
-            </div>
-          </dl>
-          <p className="form-status warn-text">
-            Routine financial mutations are read-only while elevated mode is active.
-          </p>
-          <button type="button" onClick={submitExit} disabled={exitMutation.isPending}>
-            Exit elevated mode
-          </button>
-        </div>
-      ) : (
-        <form className="elevated-mode-form" onSubmit={submitEnter}>
-          <label>
-            Elevated context
-            <select value={context} onChange={(event) => setContext(event.target.value as ElevatedContext)}>
-              {(availableContexts.length ? availableContexts : (Object.keys(ELEVATED_CONTEXT_LABELS) as ElevatedContext[])).map(
-                (item) => (
-                  <option key={item} value={item}>
-                    {ELEVATED_CONTEXT_LABELS[item]}
-                  </option>
-                ),
-              )}
-            </select>
-          </label>
-          <label>
-            Purpose
-            <select value={purposeCode} onChange={(event) => setPurposeCode(event.target.value)}>
-              {purposeCodes.map((code) => (
-                <option key={code} value={code}>
-                  {elevatedPurposeLabel(code)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Required note
-            <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} required />
-          </label>
-          <button type="submit" disabled={!purposeCode.trim() || !note.trim() || enterMutation.isPending}>
-            Enter elevated mode
-          </button>
-        </form>
-      )}
-
-      {formStatus ? (
-        <p
+      {active ? (
+        <span className="elevation-countdown-inline" aria-live="polite">
+          {countdown}
+        </span>
+      ) : null}
+      {isError ? (
+        <span className="form-status danger-text">{formatApiError(error, "Elevated mode unavailable")}</span>
+      ) : null}
+      {isLoading ? <span className="muted-text">Loading elevation…</span> : null}
+      {formStatus && !lightboxOpen ? (
+        <span
           className={
             formStatus.includes("blocked") || formStatus.includes("unavailable")
               ? "form-status danger-text"
@@ -874,9 +847,162 @@ function ElevatedModePanel({
           }
         >
           {formStatus}
-        </p>
+        </span>
       ) : null}
-    </section>
+
+      {lightboxOpen && pendingContext ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeLightbox();
+            }
+          }}
+        >
+          <section
+            className="modal-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="elevation-lightbox-title"
+          >
+            <h3 id="elevation-lightbox-title">Enter {CONTROL_PLANE_MODE_LABELS[pendingContext]}</h3>
+            <p className="modal-copy">
+              Select a purpose for this elevated session. Routine financial mutations stay read-only while elevated.
+            </p>
+            <form className="modal-form" onSubmit={confirmElevatedEntry}>
+              <label>
+                Purpose
+                <select
+                  value={purposeCode}
+                  onChange={(event) => setPurposeCode(event.target.value)}
+                  required
+                >
+                  <option value="">Select purpose…</option>
+                  {purposeCodes.map((code) => (
+                    <option key={code} value={code}>
+                      {elevatedPurposeLabel(code)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {noteRequired ? "Required note" : "Note (optional)"}
+                <textarea
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                  rows={3}
+                  required={noteRequired}
+                />
+              </label>
+              {formStatus ? (
+                <p
+                  className={
+                    formStatus.includes("blocked") || formStatus.includes("unavailable")
+                      ? "form-status danger-text"
+                      : "form-status ok-text"
+                  }
+                >
+                  {formStatus}
+                </p>
+              ) : null}
+              <div className="button-row">
+                <button type="button" onClick={closeLightbox} disabled={enterMutation.isPending || exitMutation.isPending}>
+                  Decline
+                </button>
+                <button type="submit" disabled={confirmDisabled}>
+                  Confirm
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function PermissionPreviewPanel({ actors }: { actors?: ActorsPayload }) {
+  const [expanded, setExpanded] = useState(false);
+  const personas = actors?.selectable_personas ?? [
+    { persona_key: "finance_manager", persona_label: "Finance Manager", group_keys: ["finance_manager"] },
+  ];
+  const [previewPersonaKey, setPreviewPersonaKey] = useState(personas[0]?.persona_key ?? "finance_manager");
+  const previewQuery = useQuery({
+    queryKey: ["permissions-preview", previewPersonaKey],
+    enabled: expanded,
+    queryFn: async () => {
+      const entries = await Promise.all(
+        UI_PERMISSION_CHECKS.map(async (check) => {
+          const result = await previewPermission({
+            persona_key: previewPersonaKey,
+            action_key: check.action_key,
+            data_scope_key: check.data_scope_key,
+          });
+          return [check.id, result] as const;
+        }),
+      );
+      return Object.fromEntries(entries) as Record<string, EffectivePermission>;
+    },
+  });
+  const previewResults = previewQuery.data;
+
+  return (
+    <details
+      className="collapsible-section permission-preview-collapsible"
+      onToggle={(event) => setExpanded((event.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary>
+        <span className="product-label">QA permission matrix</span>
+        <span className="collapsible-title">Permission preview</span>
+      </summary>
+      {expanded ? (
+        <div className="permission-preview-panel" aria-label="Permission preview">
+          <div className="permission-preview-header">
+            <label>
+              Preview persona
+              <select value={previewPersonaKey} onChange={(event) => setPreviewPersonaKey(event.target.value)}>
+                {personas.map((persona) => (
+                  <option key={persona.persona_key} value={persona.persona_key}>
+                    {persona.persona_label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {previewQuery.isLoading ? <p className="empty-state">Loading permission preview…</p> : null}
+          {previewQuery.isError ? (
+            <p className="form-status danger-text">{formatApiError(previewQuery.error, "Permission preview unavailable")}</p>
+          ) : null}
+          {previewResults ? (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Action</th>
+                    <th>Effect</th>
+                    <th>Scope access</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {UI_PERMISSION_CHECKS.map((check) => {
+                    const result = previewResults[check.id];
+                    const tone = result.allowed ? "ok-text" : result.suggestion_allowed ? "warn-text" : "danger-text";
+                    return (
+                      <tr key={check.id}>
+                        <td>{check.label}</td>
+                        <td className={tone}>{permissionSummaryLabel(result)}</td>
+                        <td>{result.scope_access ? formatStatus(result.scope_access) : "None"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </details>
   );
 }
 
@@ -2135,6 +2261,8 @@ function SettingsScreen({
   canSaveSettings,
   approvalModeEnabled,
   canManageApprovals,
+  qaControlsEnabled,
+  actors,
 }: {
   settings?: SettingsPayload;
   runtime: RuntimeStatus;
@@ -2144,6 +2272,8 @@ function SettingsScreen({
   canSaveSettings: boolean;
   approvalModeEnabled: boolean;
   canManageApprovals: boolean;
+  qaControlsEnabled?: boolean;
+  actors?: ActorsPayload;
 }) {
   const queryClient = useQueryClient();
   const activeProfiles = settings?.source_profiles ?? profiles;
@@ -2313,6 +2443,8 @@ function SettingsScreen({
           </div>
         </dl>
       </section>
+
+      {qaControlsEnabled ? <PermissionPreviewPanel actors={actors} /> : null}
 
       <div className="two-column">
         <section className="work-panel">
