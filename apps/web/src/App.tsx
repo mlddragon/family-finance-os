@@ -166,14 +166,14 @@ const ACTIVE_ACTOR_STORAGE_KEY = "family-finance-os.activeActorKey";
 const ACTIVE_PERSONA_STORAGE_KEY = "family-finance-os.activePersonaKey";
 
 function readLocalStorage(key: string, fallback: string) {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || !window.localStorage) {
     return fallback;
   }
   return window.localStorage.getItem(key) || fallback;
 }
 
 function writeLocalStorage(key: string, value: string) {
-  if (typeof window !== "undefined") {
+  if (typeof window !== "undefined" && window.localStorage) {
     window.localStorage.setItem(key, value);
   }
 }

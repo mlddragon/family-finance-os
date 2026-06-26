@@ -7,7 +7,7 @@ import { enUS } from "./locales/en-US";
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  window.localStorage.clear();
+  window.localStorage?.clear();
 });
 
 test("en-US locale covers primary UI surfaces", () => {
