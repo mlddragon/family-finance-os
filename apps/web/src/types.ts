@@ -262,6 +262,34 @@ export type Artifact = {
   created_at?: string;
 };
 
+export type EffectivePermission = {
+  allowed: boolean;
+  suggestion_allowed: boolean;
+  action_key: string;
+  data_scope_key: string;
+  action_effect: string | null;
+  scope_access: string | null;
+  denied_reason: string | null;
+};
+
+export type PermissionPreviewRequest = {
+  persona_key: string;
+  action_key: string;
+  data_scope_key: string;
+  scope_selector?: string | null;
+};
+
+export type PermissionPreviewResponse = EffectivePermission & {
+  persona_key: string;
+};
+
+export type UIPermissionCheck = {
+  id: string;
+  label: string;
+  action_key: string;
+  data_scope_key: string;
+};
+
 export type ArtifactActionResponse = {
   job?: {
     id: string;
