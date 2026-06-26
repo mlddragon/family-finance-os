@@ -404,7 +404,7 @@ export function fetchElevatedModeStatus() {
 export function enterElevatedMode(payload: {
   context: ElevatedContext;
   purposeCode: string;
-  note: string;
+  note?: string;
   actor: string;
   actorContext?: ActorContext;
   hasUnsavedEdits?: boolean;
@@ -420,7 +420,7 @@ export function enterElevatedMode(payload: {
     body: JSON.stringify({
       context: payload.context,
       purpose_code: payload.purposeCode,
-      note: payload.note.trim(),
+      note: (payload.note ?? "").trim(),
       actor: payload.actor,
       actor_context: payload.actorContext,
     }),

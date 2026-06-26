@@ -305,3 +305,53 @@ def test_import_blocked_in_system_admin_elevated_mode(tmp_path):
 
     assert blocked.status_code == 403
     assert blocked.json()["detail"]["code"] == "permission_denied"
+
+
+def test_elevated_mode_allows_optional_note_for_most_purposes(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    session_id = "session-optional-note"
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/elevated-mode/enter",
+            headers={SESSION_HEADER: session_id},
+            json={
+                "context": "system_administration",
+                "purpose_code": "maintenance_health_review",
+                "note": "",
+                "actor": "owner",
+                "actor_context": administrator_context(),
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["note"] == ""
+
+
+def test_elevated_mode_requires_note_for_approval_rule_change(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    session_id = "session-required-note"
+
+    with TestClient(app) as client:
+        blocked = client.post(
+            "/api/elevated-mode/enter",
+            headers={SESSION_HEADER: session_id},
+            json={
+                "context": "financial_governance",
+                "purpose_code": "approval_rule_change",
+                "note": "",
+                "actor": "owner",
+                "actor_context": finance_manager_context(),
+            },
+        )
+        assert blocked.status_code == 422
+        assert blocked.json()["detail"]["code"] == "elevated_mode_note_required"
+
+
+def test_elevated_mode_status_includes_purpose_requires_note(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        status = client.get("/api/elevated-mode/status")
+        assert status.status_code == 200
+        payload = status.json()
+        assert payload["purpose_requires_note"] == ["approval_rule_change"]

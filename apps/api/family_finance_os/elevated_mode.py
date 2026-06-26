@@ -59,6 +59,8 @@ FINANCIAL_GOVERNANCE_PURPOSE_CODES = frozenset(
     }
 )
 
+PURPOSE_CODES_REQUIRING_NOTE = frozenset({"approval_rule_change"})
+
 PURPOSE_CODES_BY_CONTEXT: dict[ElevatedContext, frozenset[str]] = {
     ElevatedContext.SYSTEM_ADMINISTRATION: SYSTEM_ADMINISTRATION_PURPOSE_CODES,
     ElevatedContext.FINANCIAL_GOVERNANCE: FINANCIAL_GOVERNANCE_PURPOSE_CODES,
@@ -104,7 +106,7 @@ class ElevatedModeError(Exception):
 class ElevatedModeEnterRequest(BaseModel):
     context: ElevatedContext
     purpose_code: str = Field(min_length=1)
-    note: str = Field(min_length=1)
+    note: str = ""
     actor: str = Field(min_length=1)
     actor_context: Optional[ActorContext] = None
 
@@ -139,6 +141,13 @@ def purpose_codes_payload() -> dict[str, list[str]]:
     return {
         ElevatedContext.SYSTEM_ADMINISTRATION.value: sorted(SYSTEM_ADMINISTRATION_PURPOSE_CODES),
         ElevatedContext.FINANCIAL_GOVERNANCE.value: sorted(FINANCIAL_GOVERNANCE_PURPOSE_CODES),
+    }
+
+
+def elevated_mode_metadata_payload() -> dict[str, Any]:
+    return {
+        "purpose_codes": purpose_codes_payload(),
+        "purpose_requires_note": sorted(PURPOSE_CODES_REQUIRING_NOTE),
     }
 
 
@@ -182,7 +191,7 @@ def serialize_active_session(session: ActiveElevatedSession) -> dict[str, Any]:
 
 
 def inactive_status_payload() -> dict[str, Any]:
-    return {"active": False, "purpose_codes": purpose_codes_payload()}
+    return {"active": False, **elevated_mode_metadata_payload()}
 
 
 class ElevatedModeRegistry:
@@ -309,6 +318,14 @@ class ElevatedModeRegistry:
                 status_code=422,
             )
 
+        resolved_note = payload.note.strip()
+        if payload.purpose_code in PURPOSE_CODES_REQUIRING_NOTE and not resolved_note:
+            raise ElevatedModeError(
+                "elevated_mode_note_required",
+                f"Purpose {payload.purpose_code!r} requires a note.",
+                status_code=422,
+            )
+
         self._require_enter_permissions(db_session, resolved_context, payload.context)
 
         resolved_session_id = session_id or str(uuid4())
@@ -326,7 +343,7 @@ class ElevatedModeRegistry:
             session_id=resolved_session_id,
             context=payload.context,
             purpose_code=payload.purpose_code,
-            note=payload.note,
+            note=resolved_note,
             actor=payload.actor,
             actor_context=resolved_context,
             correlation_id=correlation_id,
@@ -339,7 +356,7 @@ class ElevatedModeRegistry:
             event_type=ElevatedModeEventType.ENTERED,
             elevated_context=payload.context,
             purpose_code=payload.purpose_code,
-            note=payload.note,
+            note=resolved_note,
             session_id=resolved_session_id,
             correlation_id=correlation_id,
             actor_context=resolved_context,
@@ -415,7 +432,7 @@ class ElevatedModeRegistry:
             return inactive_status_payload()
         return {
             **serialize_active_session(active),
-            "purpose_codes": purpose_codes_payload(),
+            **elevated_mode_metadata_payload(),
         }
 
 

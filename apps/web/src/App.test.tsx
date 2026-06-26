@@ -278,6 +278,7 @@ const inactiveElevatedModeStatus = {
       "monthly_close_governance_review",
     ],
   },
+  purpose_requires_note: ["approval_rule_change"],
 };
 
 const emptySuggestionsPayload = {
@@ -1333,4 +1334,51 @@ test("settings screen defaults to editable friendly settings with defaults and a
   fireEvent.click(screen.getByLabelText("Show setting key column"));
   expect(activeSettingsTable.getByRole("columnheader", { name: "Setting key" })).toBeInTheDocument();
   expect(activeSettingsTable.getByText("runtime.local_only")).toBeInTheDocument();
+});
+
+test("hides QA permission matrix outside settings on personal runtime", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  expect(await screen.findByRole("heading", { name: "Family Finance OS" })).toBeInTheDocument();
+  expect(screen.queryByText("Permission preview")).not.toBeInTheDocument();
+});
+
+test("shows collapsible QA permission matrix inside settings for QA runtime", async () => {
+  installApiMock({ runtime: qaRuntime });
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+  expect(await screen.findByText("Permission preview")).toBeInTheDocument();
+  const matrix = screen.getByText("Permission preview").closest("details");
+  expect(matrix).not.toHaveAttribute("open");
+  expect(screen.queryByLabelText("Preview persona")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByText("Permission preview"));
+  expect(await screen.findByLabelText("Preview persona")).toBeInTheDocument();
+});
+
+test("control plane dropdown opens elevation lightbox requiring purpose selection", async () => {
+  const fetchMock = installApiMock({ runtime: qaRuntime });
+
+  render(<App />);
+
+  const controlPlane = await screen.findByLabelText("Control plane mode");
+  fireEvent.change(controlPlane, { target: { value: "system_administration" } });
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  expect(screen.getByLabelText("Purpose")).toHaveValue("");
+  expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
+
+  fireEvent.change(screen.getByLabelText("Purpose"), { target: { value: "maintenance_health_review" } });
+  expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/elevated-mode/enter",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
 });
