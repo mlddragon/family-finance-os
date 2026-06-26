@@ -25,19 +25,19 @@ No implementation PR for a track merges until:
 
 ## Document index
 
-| Doc | Track | Status |
-| --- | --- | --- |
-| `v1_1_00_overview.md` | Program | Draft |
-| `v1_1_a1_schema.md` | A1 | Draft |
-| `v1_1_a2_spendable.md` | A2 | Draft |
-| `v1_1_a3_auth.md` | A3 | Draft |
-| `v1_1_b1_funds.md` | B1 | Draft |
-| `v1_1_b2_splits.md` | B2 | Draft |
-| `v1_1_b3_net_worth.md` | B3 | Draft |
-| `v1_1_b4_analyst_export.md` | B4 | Draft |
-| `v1_1_b5_monthly_close.md` | B5 | Draft |
-| `v1_1_c1_dashboard.md` | C1 | Draft |
-| `v1_1_d1_receipts.md` | D1 | Draft |
-| `v1_1_e1_scraper_framework.md` | E1–E4 | Draft |
+| Doc | Track | Phase | Status |
+| --- | --- | --- | --- |
+| `v1_1_00_overview.md` | Program | Cross-cutting | Draft |
+| `v1_1_a1_schema.md` | A1 | Phase 1 | Draft |
+| `v1_1_a2_spendable.md` | A2 | Phase 1 | Draft |
+| `v1_1_a3_auth.md` | A3 | Phase 1 | Draft |
+| `v1_1_b1_funds.md` | B1 | Phase 2 | Draft written |
+| `v1_1_b2_splits.md` | B2 | Phase 2 | Draft written |
+| `v1_1_b3_net_worth.md` | B3 | Phase 2 | Draft written |
+| `v1_1_b4_analyst_export.md` | B4 | Phase 2 | Draft written |
+| `v1_1_b5_monthly_close.md` | B5 | Phase 2 | Draft written |
+| `v1_1_c1_dashboard.md` | C1 | Phase 3 | Draft written |
+| `v1_1_d1_receipts.md` | D1 | Phase 4 | Draft written |
+| `v1_1_e1_scraper_framework.md` | E1-E4 | Phase 5, last | Draft written |
 
 Reviews live under `planning/engineering/reviews/`.
