@@ -1,6 +1,11 @@
 # v0.4.0 Permission Matrix And Data Scopes
 
-This is a planning-only document for GitHub issue #51. It does not implement authentication, full RBAC, database schema, permission enforcement, UI/API behavior, migrations, elevated mode, approval mode, or impersonation.
+This document defines the v0.4.0 permission matrix and data-scope model for GitHub issue #51.
+
+## Implementation Status
+
+- **B.1 (started):** Default group matrix, `PermissionEvaluator`, append-only `permission_state_events` table, `/api/permissions/effective`, QA/dev-only `/api/permissions/preview`, and API enforcement on key mutating endpoints.
+- Authentication, full RBAC, UI hiding/disabled states, elevated mode, approval mode, and impersonation remain deferred.
 
 ## Sources
 

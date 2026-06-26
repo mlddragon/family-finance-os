@@ -24,12 +24,14 @@ import {
   fetchArtifacts,
   fetchActors,
   fetchCategories,
+  fetchEffectivePermission,
   fetchSettings,
   fetchTransactionDetail,
   fetchTransactions,
   fetchValidationFindings,
   finalizeMonthlyClose,
   formatApiError,
+  previewPermission,
   resolveValidationFinding,
   runReports,
   saveCategoryDecision,
@@ -41,11 +43,20 @@ import {
   voidImportBatch,
 } from "./api";
 import "./i18n";
+import {
+  defaultUIPermissionMap,
+  permissionAllows,
+  permissionSuggests,
+  permissionSummaryLabel,
+  UI_PERMISSION_CHECKS,
+  type UIPermissionMap,
+} from "./permissions";
 import type {
   Artifact,
   ActorContext,
   ActorsPayload,
   Category,
+  EffectivePermission,
   InboxScan,
   ImportBatch,
   OperatorSummary,
@@ -155,14 +166,14 @@ const ACTIVE_ACTOR_STORAGE_KEY = "family-finance-os.activeActorKey";
 const ACTIVE_PERSONA_STORAGE_KEY = "family-finance-os.activePersonaKey";
 
 function readLocalStorage(key: string, fallback: string) {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || !window.localStorage) {
     return fallback;
   }
   return window.localStorage.getItem(key) || fallback;
 }
 
 function writeLocalStorage(key: string, value: string) {
-  if (typeof window !== "undefined") {
+  if (typeof window !== "undefined" && window.localStorage) {
     window.localStorage.setItem(key, value);
   }
 }
@@ -196,6 +207,28 @@ function createQueryClient() {
         retry: false,
       },
     },
+  });
+}
+
+async function fetchUIPermissions(actor: string, actorContext: ActorContext): Promise<UIPermissionMap> {
+  const entries = await Promise.all(
+    UI_PERMISSION_CHECKS.map(async (check) => {
+      const permission = await fetchEffectivePermission({
+        actionKey: check.action_key,
+        dataScopeKey: check.data_scope_key,
+        actor,
+        actorContext,
+      });
+      return [check.id, permission] as const;
+    }),
+  );
+  return Object.fromEntries(entries);
+}
+
+function useUIPermissions(actor: string, actorContext: ActorContext) {
+  return useQuery({
+    queryKey: ["permissions-effective", actor, actorContext.persona_key, actorContext.group_keys.join(",")],
+    queryFn: () => fetchUIPermissions(actor, actorContext),
   });
 }
 
@@ -248,6 +281,8 @@ function OperatorApp() {
   const appDisplayName = settingValue(settings, "branding", "branding.app_display_name", summary.runtime.app || t("app.fallbackName"));
   const operatorActorContext = actorContextFromSelection(actors, activeActorKey, activePersonaKey);
   const operatorActor = operatorActorContext.actor_key;
+  const permissionsQuery = useUIPermissions(operatorActor, operatorActorContext);
+  const permissions = permissionsQuery.data ?? defaultUIPermissionMap();
   const categories = categoriesQuery.data?.categories ?? [];
   const sourceProfileKey = summary.sources.profiles.map((profile) => profile.source_key).join("|") || "no-source-profiles";
   const selectedTransaction =
@@ -278,6 +313,10 @@ function OperatorApp() {
         }}
       />
 
+      {summary.runtime.qa_controls_enabled ? (
+        <PermissionPreviewPanel actors={actors} />
+      ) : null}
+
       <div className="workspace">
         <nav className="sidebar" aria-label="Primary">
           {screens.map((screen) => (
@@ -304,6 +343,7 @@ function OperatorApp() {
               inbox={inbox}
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
+              canRunImports={permissionAllows(permissions.imports)}
             />
           ) : null}
           {activeScreen === "validation" ? (
@@ -321,6 +361,8 @@ function OperatorApp() {
               categories={categories}
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
+              canSaveReview={permissionAllows(permissions.review)}
+              reviewSuggestionAllowed={permissionSuggests(permissions.review)}
               onSelectTransaction={setSelectedTransactionId}
             />
           ) : null}
@@ -338,6 +380,9 @@ function OperatorApp() {
               artifacts={artifactsQuery.data?.artifacts ?? []}
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
+              canRunReports={permissionAllows(permissions.reports)}
+              canRunMonthlyClose={permissionAllows(permissions.monthlyClose)}
+              canCreateExports={permissionAllows(permissions.exports)}
             />
           ) : null}
           {activeScreen === "settings" ? (
@@ -347,6 +392,7 @@ function OperatorApp() {
               profiles={summary.sources.profiles}
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
+              canSaveSettings={permissionAllows(permissions.settings)}
             />
           ) : null}
         </main>
@@ -417,6 +463,81 @@ function Header({
   );
 }
 
+function PermissionPreviewPanel({ actors }: { actors?: ActorsPayload }) {
+  const personas = actors?.selectable_personas ?? [
+    { persona_key: "finance_manager", persona_label: "Finance Manager", group_keys: ["finance_manager"] },
+  ];
+  const [previewPersonaKey, setPreviewPersonaKey] = useState(personas[0]?.persona_key ?? "finance_manager");
+  const previewQuery = useQuery({
+    queryKey: ["permissions-preview", previewPersonaKey],
+    queryFn: async () => {
+      const entries = await Promise.all(
+        UI_PERMISSION_CHECKS.map(async (check) => {
+          const result = await previewPermission({
+            persona_key: previewPersonaKey,
+            action_key: check.action_key,
+            data_scope_key: check.data_scope_key,
+          });
+          return [check.id, result] as const;
+        }),
+      );
+      return Object.fromEntries(entries) as Record<string, EffectivePermission>;
+    },
+  });
+  const previewResults = previewQuery.data;
+
+  return (
+    <section className="permission-preview-panel" aria-label="Permission preview">
+      <div className="permission-preview-header">
+        <div>
+          <p className="product-label">QA permission matrix</p>
+          <h2>Permission preview</h2>
+        </div>
+        <label>
+          Preview persona
+          <select value={previewPersonaKey} onChange={(event) => setPreviewPersonaKey(event.target.value)}>
+            {personas.map((persona) => (
+              <option key={persona.persona_key} value={persona.persona_key}>
+                {persona.persona_label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {previewQuery.isLoading ? <p className="empty-state">Loading permission preview…</p> : null}
+      {previewQuery.isError ? (
+        <p className="form-status danger-text">{formatApiError(previewQuery.error, "Permission preview unavailable")}</p>
+      ) : null}
+      {previewResults ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Action</th>
+                <th>Effect</th>
+                <th>Scope access</th>
+              </tr>
+            </thead>
+            <tbody>
+              {UI_PERMISSION_CHECKS.map((check) => {
+                const result = previewResults[check.id];
+                const tone = result.allowed ? "ok-text" : result.suggestion_allowed ? "warn-text" : "danger-text";
+                return (
+                  <tr key={check.id}>
+                    <td>{check.label}</td>
+                    <td className={tone}>{permissionSummaryLabel(result)}</td>
+                    <td>{result.scope_access ? formatStatus(result.scope_access) : "None"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function HomeScreen({ summary }: { summary: OperatorSummary }) {
   return (
     <section className="screen" aria-labelledby="home-heading">
@@ -465,11 +586,13 @@ function SourcesScreen({
   inbox,
   operatorActor,
   operatorActorContext,
+  canRunImports,
 }: {
   profiles: SourceProfile[];
   inbox: ImportBatch[];
   operatorActor: string;
   operatorActorContext: ActorContext;
+  canRunImports: boolean;
 }) {
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -641,6 +764,9 @@ function SourcesScreen({
       <section className="two-column">
         <div className="work-panel">
           <h3>Import batches</h3>
+          {!canRunImports ? (
+            <p className="form-status warn-text">Current persona cannot run import mutations.</p>
+          ) : null}
           {batchActionStatus ? <p className="form-status">{batchActionStatus}</p> : null}
           <DataTable
             data={inbox}
@@ -663,7 +789,7 @@ function SourcesScreen({
                       <button
                         type="button"
                         className="link-button"
-                        disabled={batchActionPending}
+                        disabled={batchActionPending || !canRunImports}
                         onClick={() => validateMutation.mutate(row.original.id)}
                       >
                         Validate batch
@@ -671,7 +797,7 @@ function SourcesScreen({
                       <button
                         type="button"
                         className="link-button"
-                        disabled={batchActionPending || row.original.validation_status === "pending"}
+                        disabled={batchActionPending || !canRunImports || row.original.validation_status === "pending"}
                         onClick={() => acceptMutation.mutate(row.original.id)}
                       >
                         Accept batch
@@ -679,7 +805,7 @@ function SourcesScreen({
                       <button
                         type="button"
                         className="link-button danger-link"
-                        disabled={batchActionPending}
+                        disabled={batchActionPending || !canRunImports}
                         onClick={() => openVoidDialog(row.original)}
                       >
                         Void upload
@@ -717,7 +843,7 @@ function SourcesScreen({
               Source file
               <input type="file" accept=".csv" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
             </label>
-            <button type="submit" disabled={!selectedFile || !uploadSourceKey || uploadMutation.isPending}>
+            <button type="submit" disabled={!selectedFile || !uploadSourceKey || uploadMutation.isPending || !canRunImports}>
               Upload to inbox
             </button>
             {uploadMutation.isError ? <p className="form-status danger-text">{formatApiError(uploadMutation.error, "Upload blocked")}</p> : null}
@@ -949,6 +1075,8 @@ function ReviewScreen({
   categories,
   operatorActor,
   operatorActorContext,
+  canSaveReview,
+  reviewSuggestionAllowed,
   onSelectTransaction,
 }: {
   transactions: Transaction[];
@@ -957,6 +1085,8 @@ function ReviewScreen({
   categories: Category[];
   operatorActor: string;
   operatorActorContext: ActorContext;
+  canSaveReview: boolean;
+  reviewSuggestionAllowed: boolean;
   onSelectTransaction: (id: string) => void;
 }) {
   const queryClient = useQueryClient();
@@ -1113,6 +1243,7 @@ function ReviewScreen({
     !selectedTransaction ||
     selectedTransactionBlocked ||
     decisionMutation.isPending ||
+    !canSaveReview ||
     (!otherCategorySelected && !approvedCategoryKey) ||
     (otherCategorySelected && !otherCategory.trim()) ||
     (otherCategoryRequiresNote && !notes.trim()) ||
@@ -1268,6 +1399,12 @@ function ReviewScreen({
             </p>
           ) : null}
 
+          {reviewSuggestionAllowed && !canSaveReview ? (
+            <p className="form-status warn-text">
+              Contributor persona can suggest review changes, but direct save is disabled for this persona.
+            </p>
+          ) : null}
+
           <button type="submit" disabled={saveDecisionDisabled}>
             {selectedTransactionBlocked ? t("review.resolveValidationFirst") : t("review.saveDecision")}
           </button>
@@ -1353,11 +1490,17 @@ function ReportsScreen({
   artifacts,
   operatorActor,
   operatorActorContext,
+  canRunReports,
+  canRunMonthlyClose,
+  canCreateExports,
 }: {
   summary: OperatorSummary;
   artifacts: Artifact[];
   operatorActor: string;
   operatorActorContext: ActorContext;
+  canRunReports: boolean;
+  canRunMonthlyClose: boolean;
+  canCreateExports: boolean;
 }) {
   const queryClient = useQueryClient();
   const [actionStatus, setActionStatus] = useState<string | null>(null);
@@ -1443,28 +1586,28 @@ function ReportsScreen({
           <button
             type="button"
             onClick={() => runReportsMutation.mutate({ actor: operatorActor, actorContext: operatorActorContext })}
-            disabled={actionPending}
+            disabled={actionPending || !canRunReports}
           >
             Run reports
           </button>
           <button
             type="button"
             onClick={() => draftCloseMutation.mutate({ actor: operatorActor, actorContext: operatorActorContext })}
-            disabled={actionPending}
+            disabled={actionPending || !canRunMonthlyClose}
           >
             Draft close
           </button>
           <button
             type="button"
             onClick={() => finalCloseMutation.mutate({ actor: operatorActor, actorContext: operatorActorContext })}
-            disabled={actionPending}
+            disabled={actionPending || !canRunMonthlyClose}
           >
             Final close
           </button>
           <button
             type="button"
             onClick={() => advisorExportMutation.mutate({ actor: operatorActor, actorContext: operatorActorContext })}
-            disabled={actionPending}
+            disabled={actionPending || !canCreateExports}
           >
             Advisor export
           </button>
@@ -1499,12 +1642,14 @@ function SettingsScreen({
   profiles,
   operatorActor,
   operatorActorContext,
+  canSaveSettings,
 }: {
   settings?: SettingsPayload;
   runtime: RuntimeStatus;
   profiles: SourceProfile[];
   operatorActor: string;
   operatorActorContext: ActorContext;
+  canSaveSettings: boolean;
 }) {
   const queryClient = useQueryClient();
   const activeProfiles = settings?.source_profiles ?? profiles;
@@ -1717,7 +1862,12 @@ function SettingsScreen({
               </label>
               <button
                 type="submit"
-                disabled={!selectedSetting || (selectedSetting.note_required && !settingNote.trim()) || settingMutation.isPending}
+                disabled={
+                  !selectedSetting ||
+                  (selectedSetting.note_required && !settingNote.trim()) ||
+                  settingMutation.isPending ||
+                  !canSaveSettings
+                }
               >
                 Save setting
               </button>
@@ -1804,7 +1954,7 @@ function SettingsScreen({
               </label>
               <button
                 type="submit"
-                disabled={!selectedSourceKey || !confirmationNote.trim() || confirmationMutation.isPending}
+                disabled={!selectedSourceKey || !confirmationNote.trim() || confirmationMutation.isPending || !canSaveSettings}
               >
                 Confirm source sample
               </button>

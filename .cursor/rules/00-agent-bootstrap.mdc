@@ -10,3 +10,4 @@ alwaysApply: true
 - Do not commit raw financial data, credentials, or local runtime artifacts.
 - Use branches and pull requests; do not push directly to `main`.
 - Include a human QA script in PR notes for app, UI, API, or Docker behavior changes.
+- For owner product/architecture/privacy decisions, use [.cursor/skills/decision-card-review/SKILL.md](../../.cursor/skills/decision-card-review/SKILL.md) and persist approved outcomes in planning docs.

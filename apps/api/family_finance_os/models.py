@@ -335,6 +335,22 @@ class MonthlyClose(TimestampedModel):
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
 
+class PermissionStateEvent(TimestampedModel):
+    __tablename__ = "permission_state_events"
+
+    recorded_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    actor_context_json: Mapped[Optional[str]] = mapped_column(Text)
+    target_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    operation: Mapped[str] = mapped_column(String(40), nullable=False)
+    effect: Mapped[Optional[str]] = mapped_column(String(20))
+    action_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    data_scope_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    scope_selector: Mapped[Optional[str]] = mapped_column(String(200))
+    reason_note: Mapped[str] = mapped_column(Text, nullable=False)
+    supersedes_event_id: Mapped[Optional[str]] = mapped_column(String(36))
+
+
 @event.listens_for(Session, "before_flush")
 def prevent_imported_row_mutation(session: Session, _flush_context, _instances) -> None:
     for obj in session.dirty:

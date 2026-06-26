@@ -1,15 +1,19 @@
 # Semi-Persistent QA Environment
 
-This document captures the approved planning direction for a semi-persistent QA and demo environment for Dillon Finances. It is a planning artifact only. It does not create app code, Docker configuration, scripts, seed data, database schema, generated reports, runtime data roots, credentials, or financial data artifacts.
+This document captures the approved planning direction for a semi-persistent QA and demo environment for Family Finance OS. It is a planning artifact only. It does not create app code, Docker configuration, scripts, seed data, database schema, generated reports, runtime data roots, credentials, or financial data artifacts.
 
 ## Status
 
+Updated 2026-06-25.
+
 - Approved owner direction was captured in chat on 2026-06-21.
 - v0.3.0 implements the first foundation: personal/QA runtime identity, side-by-side Docker commands, script-level QA reset/seed, one `baseline` scenario, QA UI markers, and synthetic artifact markers.
-- Additional named scenarios remain deferred.
+- v0.4.0 expands QA with five named seed scenarios: `baseline`, `stale-source`, `blocked-import`, `review-backlog`, and `monthly-close-ready`.
+- Compose projects use `ffos-personal` and `ffos-qa`; legacy `dillon-personal` / `dillon-qa` names are deprecated.
+- Self-hosted QA auto-update workflow (PR #85) rebuilds `ffos-qa` when dependency files merge to `main`.
 - No QA data root is committed by this document.
 - No personal data root should be changed by this document.
-- This document should guide the later implementation plan and pull request scope.
+- Pre-v1.0.0 RC validation is synthetic-only; see `docs/qa_validation_strategy.md`.
 
 ## Recommendation
 
@@ -30,19 +34,21 @@ The default local environments are:
 
 ```text
 Personal instance
-  Compose project: dillon-personal
+  Compose project: ffos-personal
   Host URL: http://127.0.0.1:28080
   Data root: owner real-data DATA_ROOT outside git
   Dataset kind: personal
   Dev mode controls: disabled
 
 QA instance
-  Compose project: dillon-qa
+  Compose project: ffos-qa
   Host URL: http://127.0.0.1:28081
   Data root: synthetic QA DATA_ROOT outside git
   Dataset kind: synthetic
   Dev mode controls: enabled only when APP_ENV=qa and DEV_MODE=true
 ```
+
+Legacy Compose project names `dillon-personal` and `dillon-qa` are deprecated; use `ffos-personal` and `ffos-qa`.
 
 Both environments should use the same Dockerfile and app image build path. They should differ by Compose project name, host port, mounted data root, and runtime identity settings.
 
@@ -89,15 +95,17 @@ Not allowed in git:
 
 ## Named QA Scenarios
 
-QA data should grow through named scenarios rather than arbitrary manual uploads. Named scenarios make demos repeatable and keep semi-persistent state understandable.
+QA data grows through named scenarios rather than arbitrary manual uploads. Named scenarios make demos repeatable and keep semi-persistent state understandable.
 
-Initial scenario names should include:
+All five initial scenarios are implemented (v0.4.0):
 
 - `baseline`: the smallest useful closed-loop dataset.
 - `stale-source`: data that demonstrates stale or missing source warnings.
 - `blocked-import`: a source file with blocking validation findings.
 - `review-backlog`: unreviewed transactions and review-needed work.
 - `monthly-close-ready`: a dataset ready for draft/final monthly close flows.
+
+Seed with `make qa-seed QA_SCENARIO=<name>`. See README and `docs/qa_validation_strategy.md` for expected outcomes.
 
 Scenario runs should write a manifest under QA `DATA_ROOT` describing:
 
@@ -160,8 +168,8 @@ Code updates should remain image-based for personal and QA.
 
 Approved default:
 
-- Rebuild personal from the repo, then recreate the `dillon-personal` container.
-- Rebuild QA from the repo, then recreate the `dillon-qa` container.
+- Rebuild personal from the repo, then recreate the `ffos-personal` container.
+- Rebuild QA from the repo, then recreate the `ffos-qa` container.
 - External data roots survive rebuilds.
 - Local hot reload can be added later as a separate developer-only workflow.
 
