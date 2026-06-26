@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
+from starlette.requests import Request
 
 from family_finance_os import __version__
 from family_finance_os.actors import ActorContext, actors_payload, derive_actor_context
@@ -26,6 +27,19 @@ from family_finance_os.decision_events import (
     DecisionEventError,
     DecisionEventRequest,
     create_decision_event,
+)
+from family_finance_os.elevated_mode import (
+    ElevatedModeEnterRequest,
+    ElevatedModeError,
+    ElevatedModeExitRequest,
+    ElevatedModeTouchRequest,
+    current_elevated_session_id,
+    elevated_mode_http_error,
+    get_elevated_mode_registry,
+    reset_elevated_mode_registry,
+    reset_request_elevated_session_id,
+    serialize_active_session,
+    set_request_elevated_session_id,
 )
 from family_finance_os.import_validation import (
     ImportValidationError,
@@ -147,10 +161,19 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        reset_elevated_mode_registry()
         initialize_runtime_state()
         yield
 
     app = FastAPI(title=APP_NAME, version=__version__, lifespan=lifespan)
+
+    @app.middleware("http")
+    async def elevated_session_middleware(request: Request, call_next):
+        token = set_request_elevated_session_id(request.headers.get("X-Elevated-Session-Id"))
+        try:
+            return await call_next(request)
+        finally:
+            reset_request_elevated_session_id(token)
 
     def status_payload() -> Dict[str, Any]:
         active_data_root = get_data_root()
@@ -204,12 +227,18 @@ def create_app(
         *,
         actor_context: Optional[ActorContext] = None,
     ) -> None:
+        registry = get_elevated_mode_registry()
+        elevated_session = registry.get_active(
+            session,
+            session_id=current_elevated_session_id(),
+        )
         try:
             PermissionEvaluator(session).require(
                 actor,
                 action_key,
                 data_scope_key,
                 actor_context=actor_context,
+                elevated_session=elevated_session,
             )
         except PermissionDeniedError as exc:
             raise permission_http_error(exc) from exc
@@ -273,6 +302,78 @@ def create_app(
                 "persona_key": payload.persona_key,
                 **effective_permission_payload(evaluation),
             }
+
+    def elevated_mode_error_http(exc: ElevatedModeError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail=elevated_mode_http_error(exc))
+
+    @app.get("/api/elevated-mode/status")
+    def get_elevated_mode_status(
+        x_elevated_session_id: Optional[str] = Header(default=None, alias="X-Elevated-Session-Id"),
+    ) -> Dict[str, Any]:
+        registry = get_elevated_mode_registry()
+        with create_session() as session:
+            return registry.status(session, x_elevated_session_id)
+
+    @app.post("/api/elevated-mode/enter")
+    def post_elevated_mode_enter(
+        payload: ElevatedModeEnterRequest,
+        has_unsaved_edits: bool = Query(default=False),
+        x_elevated_session_id: Optional[str] = Header(default=None, alias="X-Elevated-Session-Id"),
+    ) -> Dict[str, Any]:
+        registry = get_elevated_mode_registry()
+        with create_session() as session:
+            try:
+                active = registry.enter(
+                    session,
+                    payload,
+                    session_id=x_elevated_session_id,
+                    has_unsaved_edits=has_unsaved_edits,
+                )
+            except ElevatedModeError as exc:
+                raise elevated_mode_error_http(exc) from exc
+            return serialize_active_session(active)
+
+    @app.post("/api/elevated-mode/exit")
+    def post_elevated_mode_exit(
+        payload: ElevatedModeExitRequest,
+        x_elevated_session_id: Optional[str] = Header(default=None, alias="X-Elevated-Session-Id"),
+    ) -> Dict[str, Any]:
+        if not x_elevated_session_id:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "elevated_session_id_required",
+                    "message": "X-Elevated-Session-Id header is required to exit elevated mode.",
+                },
+            )
+        registry = get_elevated_mode_registry()
+        with create_session() as session:
+            try:
+                registry.exit(session, x_elevated_session_id, payload)
+            except ElevatedModeError as exc:
+                raise elevated_mode_error_http(exc) from exc
+            return {"active": False}
+
+    @app.post("/api/elevated-mode/touch")
+    def post_elevated_mode_touch(
+        payload: ElevatedModeTouchRequest,
+        x_elevated_session_id: Optional[str] = Header(default=None, alias="X-Elevated-Session-Id"),
+    ) -> Dict[str, Any]:
+        if not x_elevated_session_id:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "elevated_session_id_required",
+                    "message": "X-Elevated-Session-Id header is required to touch elevated mode.",
+                },
+            )
+        registry = get_elevated_mode_registry()
+        with create_session() as session:
+            try:
+                active = registry.touch(session, x_elevated_session_id, payload)
+            except ElevatedModeError as exc:
+                raise elevated_mode_error_http(exc) from exc
+            return serialize_active_session(active)
 
     def import_validation_http_error(exc: ImportValidationError) -> HTTPException:
         return HTTPException(

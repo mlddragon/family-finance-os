@@ -2,7 +2,20 @@
 
 This document covers GitHub issue #53: shared elevated mode for system administration and financial governance.
 
-This is a planning-only artifact. It does not implement elevated-mode UI, API behavior, authentication, RBAC enforcement, schema changes, migrations, approval mode, or runtime behavior.
+## Implementation Status
+
+**B.2 backend (phase-b2-elevated-mode): implemented.**
+
+- Shared elevated-mode lifecycle with `system_administration` and `financial_governance` contexts.
+- Append-only `elevated_mode_events` audit table (entered, exited, expired).
+- In-memory active sessions keyed by `X-Elevated-Session-Id` with 15-minute inactivity expiry.
+- API: `GET/POST /api/elevated-mode/{status,enter,exit,touch}`.
+- Permission integration: routine financial mutations denied while elevated; context-specific elevated saves remain allowed.
+- UI, auth, and approval-rule mutation endpoints remain deferred.
+
+Original planning content below remains the product source of truth for naming, purpose codes, and scope boundaries.
+
+This document originally stated it does not implement elevated-mode UI, API behavior, authentication, RBAC enforcement, schema changes, migrations, approval mode, or runtime behavior. Backend API and schema portions are now implemented per B.2; UI and auth remain out of scope here.
 
 ## Recommendation
 

@@ -351,6 +351,20 @@ class PermissionStateEvent(TimestampedModel):
     supersedes_event_id: Mapped[Optional[str]] = mapped_column(String(36))
 
 
+class ElevatedModeEvent(TimestampedModel):
+    __tablename__ = "elevated_mode_events"
+
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    recorded_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    actor_context_json: Mapped[Optional[str]] = mapped_column(Text)
+    context: Mapped[str] = mapped_column(String(80), nullable=False)
+    purpose_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    session_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    correlation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    exit_reason: Mapped[Optional[str]] = mapped_column(String(120))
+
+
 @event.listens_for(Session, "before_flush")
 def prevent_imported_row_mutation(session: Session, _flush_context, _instances) -> None:
     for obj in session.dirty:

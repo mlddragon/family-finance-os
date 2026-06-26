@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session
 
 from family_finance_os.actors import ActorContext, derive_actor_context
 from family_finance_os.models import PermissionStateEvent
+
+if TYPE_CHECKING:
+    from family_finance_os.elevated_mode import ActiveElevatedSession
 
 
 class ActionKey(str, Enum):
@@ -584,6 +587,7 @@ class PermissionEvaluator:
         data_scope_key: str,
         *,
         scope_selector: Optional[str] = None,
+        elevated_session: Optional[Any] = None,
     ) -> PermissionEvaluation:
         parsed_action = _parse_action_key(action_key)
         parsed_scope = _parse_data_scope_key(data_scope_key)
@@ -651,7 +655,7 @@ class PermissionEvaluator:
             elif not scope_allowed:
                 denied_reason = "data_scope_not_allowed"
 
-        return PermissionEvaluation(
+        evaluation = PermissionEvaluation(
             allowed=allowed,
             suggestion_allowed=suggestion_allowed and not allowed,
             action_key=action_key,
@@ -661,6 +665,13 @@ class PermissionEvaluator:
             denied_reason=denied_reason,
         )
 
+        if elevated_session is not None and parsed_action is not None:
+            from family_finance_os.elevated_mode import apply_elevated_mode_restriction
+
+            return apply_elevated_mode_restriction(evaluation, parsed_action, elevated_session)
+
+        return evaluation
+
     def require(
         self,
         actor: str,
@@ -669,11 +680,18 @@ class PermissionEvaluator:
         *,
         actor_context: Optional[ActorContext] = None,
         scope_selector: Optional[str] = None,
+        elevated_session: Optional[Any] = None,
     ) -> PermissionEvaluation:
         resolved_context = derive_actor_context(actor, actor_context)
         action_value = action_key.value if isinstance(action_key, ActionKey) else action_key
         scope_value = data_scope_key.value if isinstance(data_scope_key, DataScopeKey) else data_scope_key
-        evaluation = self.evaluate(resolved_context, action_value, scope_value, scope_selector=scope_selector)
+        evaluation = self.evaluate(
+            resolved_context,
+            action_value,
+            scope_value,
+            scope_selector=scope_selector,
+            elevated_session=elevated_session,
+        )
         if not evaluation.allowed:
             raise PermissionDeniedError(
                 action_value,
