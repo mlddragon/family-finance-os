@@ -189,12 +189,77 @@ function errorResponse(status: number, code: string, message: string) {
 
 function pathFor(input: RequestInfo | URL) {
   if (typeof input === "string") {
-    return input;
+    return input.split("?")[0];
   }
   if (input instanceof URL) {
     return input.pathname;
   }
   return new URL(input.url).pathname;
+}
+
+function urlFor(input: RequestInfo | URL) {
+  if (typeof input === "string") {
+    return new URL(input, "http://localhost");
+  }
+  if (input instanceof URL) {
+    return input;
+  }
+  return new URL(input.url);
+}
+
+function actorContextFromHeaders(init?: RequestInit) {
+  const headers = init?.headers;
+  if (!headers) {
+    return null;
+  }
+  const raw =
+    headers instanceof Headers
+      ? headers.get("X-Actor-Context")
+      : (headers as Record<string, string>)["X-Actor-Context"] ??
+        (headers as Record<string, string>)["x-actor-context"];
+  if (!raw) {
+    return null;
+  }
+  return JSON.parse(raw) as { persona_key?: string };
+}
+
+function mockEffectivePermission(url: URL, init?: RequestInit) {
+  const actionKey = url.searchParams.get("action_key") ?? "";
+  const dataScopeKey = url.searchParams.get("data_scope_key") ?? "";
+  const personaKey = actorContextFromHeaders(init)?.persona_key ?? "finance_manager";
+
+  let allowed = personaKey === "finance_manager";
+  let suggestion_allowed = false;
+
+  if (personaKey === "administrator") {
+    allowed = actionKey === "runtime.settings.manage";
+  } else if (personaKey === "finance_contributor") {
+    allowed = false;
+    suggestion_allowed = actionKey === "review.decide";
+  }
+
+  return {
+    allowed,
+    suggestion_allowed,
+    action_key: actionKey,
+    data_scope_key: dataScopeKey,
+    action_effect: allowed ? "allow" : suggestion_allowed ? "suggest" : "deny",
+    scope_access: allowed ? "own" : suggestion_allowed ? "suggest" : "none",
+    denied_reason: allowed || suggestion_allowed ? null : "default_matrix_denied",
+  };
+}
+
+function mockPermissionPreview(body: { persona_key: string; action_key: string; data_scope_key: string }) {
+  const url = new URL(`http://localhost/api/permissions/effective?action_key=${body.action_key}&data_scope_key=${body.data_scope_key}`);
+  const evaluation = mockEffectivePermission(url, {
+    headers: {
+      "X-Actor-Context": JSON.stringify({ persona_key: body.persona_key }),
+    },
+  });
+  return {
+    persona_key: body.persona_key,
+    ...evaluation,
+  };
 }
 
 function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof personalRuntime } = {}) {
@@ -203,6 +268,13 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
   const runtime = options.runtime ?? personalRuntime;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = pathFor(input);
+    const url = urlFor(input);
+    if (path === "/api/permissions/effective") {
+      return response(mockEffectivePermission(url, init));
+    }
+    if (path === "/api/permissions/preview" && init?.method === "POST") {
+      return response(mockPermissionPreview(JSON.parse(String(init.body))));
+    }
     if (path === "/api/validation-findings/finding-warning/resolve" && init?.method === "POST") {
       validationFindingCleared = true;
       return response({
@@ -715,6 +787,8 @@ test("sources screen validates and accepts import batches from the browser", asy
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
 
+  const validateButton = await screen.findByRole("button", { name: "Validate batch" });
+  await waitFor(() => expect(validateButton).not.toBeDisabled());
   fireEvent.click(screen.getByRole("button", { name: "Validate batch" }));
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
@@ -724,6 +798,8 @@ test("sources screen validates and accepts import batches from the browser", asy
   });
   expect(await screen.findByText("Batch validation completed")).toBeInTheDocument();
 
+  const acceptButton = screen.getByRole("button", { name: "Accept batch" });
+  await waitFor(() => expect(acceptButton).not.toBeDisabled());
   fireEvent.click(screen.getByRole("button", { name: "Accept batch" }));
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
@@ -743,6 +819,8 @@ test("sources screen shows structured backend reasons when import acceptance is 
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
 
+  const validateButton = await screen.findByRole("button", { name: "Validate batch" });
+  await waitFor(() => expect(validateButton).not.toBeDisabled());
   fireEvent.click(screen.getByRole("button", { name: "Validate batch" }));
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
@@ -752,6 +830,8 @@ test("sources screen shows structured backend reasons when import acceptance is 
   });
   expect(await screen.findByText("Batch validation completed")).toBeInTheDocument();
 
+  const acceptButton = screen.getByRole("button", { name: "Accept batch" });
+  await waitFor(() => expect(acceptButton).not.toBeDisabled());
   fireEvent.click(screen.getByRole("button", { name: "Accept batch" }));
 
   expect(
@@ -770,6 +850,8 @@ test("sources screen voids an upload with confirmation and optional file destruc
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
 
+  const voidButton = screen.getByRole("button", { name: "Void upload" });
+  await waitFor(() => expect(voidButton).not.toBeDisabled());
   fireEvent.click(screen.getByRole("button", { name: "Void upload" }));
   const dialog = await screen.findByRole("dialog", { name: "Void upload" });
   const destroyCheckbox = screen.getByLabelText("Destroy stored files");
@@ -896,7 +978,7 @@ test("review controls are labelled, focusable, and save append-only decisions", 
   await waitFor(() => expect(saveButton).not.toBeDisabled());
   saveButton.focus();
   expect(saveButton).toHaveFocus();
-  fireEvent.click(saveButton);
+  fireEvent.click(screen.getByRole("button", { name: "Save decision" }));
 
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
@@ -929,6 +1011,8 @@ test("review save approves unchanged category as a reviewed decision", async () 
   const approvedCategory = screen.getByLabelText("Approved category");
   expect(approvedCategory).toHaveValue("groceries");
 
+  const saveReviewButton = screen.getByRole("button", { name: "Save decision" });
+  await waitFor(() => expect(saveReviewButton).not.toBeDisabled());
   fireEvent.click(screen.getByRole("button", { name: "Save decision" }));
 
   await waitFor(() => {
@@ -975,6 +1059,8 @@ test("reports screen runs artifacts and close/export actions", async () => {
   expect(await screen.findByRole("heading", { name: "Reports & Monthly Close" })).toBeInTheDocument();
   expect(await screen.findByText("Import And Validation Summary")).toBeInTheDocument();
 
+  const runReportsButton = screen.getByRole("button", { name: "Run reports" });
+  await waitFor(() => expect(runReportsButton).not.toBeDisabled());
   fireEvent.click(screen.getByRole("button", { name: "Run reports" }));
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
@@ -984,6 +1070,8 @@ test("reports screen runs artifacts and close/export actions", async () => {
   });
   expect(await screen.findByText("Reports completed")).toBeInTheDocument();
 
+  const draftCloseButton = screen.getByRole("button", { name: "Draft close" });
+  await waitFor(() => expect(draftCloseButton).not.toBeDisabled());
   fireEvent.click(screen.getByRole("button", { name: "Draft close" }));
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
@@ -993,6 +1081,8 @@ test("reports screen runs artifacts and close/export actions", async () => {
   });
   expect(await screen.findByText("Draft close created" )).toBeInTheDocument();
 
+  const advisorExportButton = screen.getByRole("button", { name: "Advisor export" });
+  await waitFor(() => expect(advisorExportButton).not.toBeDisabled());
   fireEvent.click(screen.getByRole("button", { name: "Advisor export" }));
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
@@ -1022,6 +1112,8 @@ test("settings screen saves source profile sample confirmation with owner note",
   fireEvent.change(screen.getByLabelText("Owner confirmation note"), {
     target: { value: "Header-only Chase Prime Visa sample approved." },
   });
+  const confirmSourceButton = screen.getByRole("button", { name: "Confirm source sample" });
+  await waitFor(() => expect(confirmSourceButton).not.toBeDisabled());
   fireEvent.click(screen.getByRole("button", { name: "Confirm source sample" }));
 
   await waitFor(() => {
@@ -1064,6 +1156,8 @@ test("settings screen edits editable database-backed settings with required note
   fireEvent.change(screen.getByLabelText("Change note"), {
     target: { value: "Temporarily make Chase Prime Visa optional for v1 smoke testing." },
   });
+  const saveSettingButton = screen.getByRole("button", { name: "Save setting" });
+  await waitFor(() => expect(saveSettingButton).not.toBeDisabled());
   fireEvent.click(screen.getByRole("button", { name: "Save setting" }));
 
   await waitFor(() => {

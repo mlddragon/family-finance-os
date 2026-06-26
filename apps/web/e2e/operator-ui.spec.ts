@@ -97,6 +97,10 @@ const actorsPayload = {
   system_personas: [{ system_persona_key: "system:importer", display_name: "System: Importer" }],
 };
 
+async function waitForMutatingControls(page: import("@playwright/test").Page) {
+  await expect(page.getByRole("button", { name: "Validate batch" })).toBeEnabled({ timeout: 10_000 });
+}
+
 async function mockApi(
   page: Page,
   onDecision?: (payload: unknown) => void,
@@ -106,6 +110,45 @@ async function mockApi(
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+
+    if (path === "/api/permissions/effective") {
+      const actionKey = new URL(request.url()).searchParams.get("action_key") ?? "";
+      const dataScopeKey = new URL(request.url()).searchParams.get("data_scope_key") ?? "";
+      const actorContextHeader = request.headers()["x-actor-context"];
+      const personaKey = actorContextHeader
+        ? (JSON.parse(actorContextHeader) as { persona_key?: string }).persona_key ?? "finance_manager"
+        : "finance_manager";
+      await route.fulfill({
+        json: {
+          allowed: personaKey === "finance_manager",
+          suggestion_allowed: false,
+          action_key: actionKey,
+          data_scope_key: dataScopeKey,
+          action_effect: personaKey === "finance_manager" ? "allow" : "deny",
+          scope_access: personaKey === "finance_manager" ? "own" : "none",
+          denied_reason: personaKey === "finance_manager" ? null : "default_matrix_denied",
+        },
+      });
+      return;
+    }
+
+    if (path === "/api/permissions/preview" && request.method() === "POST") {
+      const body = request.postDataJSON() as { persona_key: string; action_key: string; data_scope_key: string };
+      const allowed = body.persona_key === "finance_manager";
+      await route.fulfill({
+        json: {
+          persona_key: body.persona_key,
+          allowed,
+          suggestion_allowed: body.persona_key === "finance_contributor" && body.action_key === "review.decide",
+          action_key: body.action_key,
+          data_scope_key: body.data_scope_key,
+          action_effect: allowed ? "allow" : "deny",
+          scope_access: allowed ? "own" : "none",
+          denied_reason: allowed ? null : "default_matrix_denied",
+        },
+      });
+      return;
+    }
 
     if (path === "/api/settings" && request.method() === "PATCH") {
       const payload = request.postDataJSON();
@@ -379,6 +422,7 @@ test("saves a category decision through the browser flow", async ({ page }) => {
 
   await page.getByRole("link", { name: "Review" }).click();
   await expect(page.getByRole("cell", { name: "SYNTHETIC GROCERY" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save decision" })).toBeEnabled();
   await page.getByLabel("Approved category").selectOption("__other__");
   await page.getByLabel("Other category").fill("Family Project");
   await page.getByLabel("Notes").fill("Creating a new category from the browser review flow.");
@@ -407,6 +451,7 @@ test("validates and accepts an import batch through the browser flow", async ({ 
 
   await page.getByRole("link", { name: "Sources" }).click();
   await expect(page.getByText("SYNTHETIC_chase_summary.csv")).toBeVisible();
+  await waitForMutatingControls(page);
   await page.getByRole("button", { name: "Validate batch" }).click();
   await expect(page.getByText("Batch validation completed")).toBeVisible();
   await page.getByRole("button", { name: "Accept batch" }).click();
@@ -426,6 +471,7 @@ test("saves an editable setting through the browser flow", async ({ page }) => {
   await page.goto("/");
 
   await page.getByRole("link", { name: "Settings" }).click();
+  await expect(page.getByRole("button", { name: "Save setting" })).toBeEnabled();
   await page.getByLabel("Editable setting").selectOption("sources.chase_prime_visa.required");
   await page.getByLabel("Setting value").selectOption("false");
   await page.getByLabel("Change note").fill("Temporarily optional for v1 browser smoke testing.");

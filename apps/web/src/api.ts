@@ -5,9 +5,12 @@ import type {
   ActorsPayload,
   Category,
   DecisionEventResponse,
+  EffectivePermission,
   InboxScan,
   ImportBatch,
   OperatorSummary,
+  PermissionPreviewRequest,
+  PermissionPreviewResponse,
   SettingsPayload,
   Transaction,
   TransactionDetail,
@@ -64,6 +67,44 @@ export function formatApiError(error: unknown, fallback: string): string {
     return `${fallback}: ${error.message}`;
   }
   return fallback;
+}
+
+function actorContextHeader(actorContext?: ActorContext): HeadersInit | undefined {
+  if (!actorContext) {
+    return undefined;
+  }
+  return { "X-Actor-Context": JSON.stringify(actorContext) };
+}
+
+export function fetchEffectivePermission(payload: {
+  actionKey: string;
+  dataScopeKey: string;
+  actor?: string;
+  actorContext?: ActorContext;
+}) {
+  const params = new URLSearchParams({
+    action_key: payload.actionKey,
+    data_scope_key: payload.dataScopeKey,
+  });
+  if (payload.actor) {
+    params.set("actor", payload.actor);
+  }
+  return apiJson<EffectivePermission>(`/api/permissions/effective?${params.toString()}`, {
+    headers: actorContextHeader(payload.actorContext),
+  });
+}
+
+export function previewPermission(payload: PermissionPreviewRequest) {
+  return apiJson<PermissionPreviewResponse>("/api/permissions/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      persona_key: payload.persona_key,
+      action_key: payload.action_key,
+      data_scope_key: payload.data_scope_key,
+      scope_selector: payload.scope_selector ?? null,
+    }),
+  });
 }
 
 export function fetchOperatorSummary() {
