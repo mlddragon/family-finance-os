@@ -25,7 +25,17 @@ from family_finance_os.database import create_sqlite_engine, resolve_database_pa
 from family_finance_os.decision_events import (
     DecisionEventError,
     DecisionEventRequest,
-    create_decision_event,
+)
+from family_finance_os.approvals import (
+    ApprovalActionRequest,
+    ApprovalRequestCreate,
+    ApprovalServiceError,
+    approve_approval_request,
+    cancel_approval_request,
+    create_approval_request,
+    is_approval_mode_enabled,
+    list_approval_requests,
+    reject_approval_request,
 )
 from family_finance_os.import_validation import (
     ImportValidationError,
@@ -45,10 +55,22 @@ from family_finance_os.permissions import (
     ActionKey,
     DataScopeKey,
     PermissionDeniedError,
+    PermissionEvaluation,
     PermissionEvaluator,
     PermissionPreviewRequest,
     actor_context_for_persona,
     effective_permission_payload,
+)
+from family_finance_os.suggestions import (
+    SuggestionActionRequest,
+    SuggestionCreate,
+    SuggestionServiceError,
+    accept_suggestion,
+    convert_suggestion_to_approval,
+    create_suggestion,
+    dismiss_suggestion,
+    list_suggestions,
+    route_review_decide,
 )
 from family_finance_os.reporting import (
     AdvisorExportRequest,
@@ -422,6 +444,185 @@ def create_app(
     @app.post("/api/decision-events")
     def post_decision_event(payload: DecisionEventRequest) -> Dict[str, Any]:
         with create_session() as session:
+            try:
+                return route_review_decide(session, payload)
+            except PermissionDeniedError as exc:
+                raise permission_http_error(exc) from exc
+            except DecisionEventError as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={"code": exc.code, "message": exc.message},
+                ) from exc
+            except (ApprovalServiceError, SuggestionServiceError) as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={"code": exc.code, "message": exc.message},
+                ) from exc
+
+    def require_review_suggest_or_decide(
+        session,
+        actor: str,
+        actor_context: Optional[ActorContext],
+    ) -> PermissionEvaluation:
+        evaluator = PermissionEvaluator(session)
+        evaluation = evaluator.evaluate(
+            derive_actor_context(actor, actor_context),
+            ActionKey.REVIEW_DECIDE.value,
+            DataScopeKey.REVIEW_DECISIONS.value,
+        )
+        if evaluation.allowed or evaluation.suggestion_allowed:
+            return evaluation
+        raise PermissionDeniedError(
+            ActionKey.REVIEW_DECIDE.value,
+            DataScopeKey.REVIEW_DECISIONS.value,
+            suggestion_allowed=False,
+        )
+
+    @app.get("/api/suggestions")
+    def get_suggestions(
+        status: Optional[str] = Query(default=None),
+        target_id: Optional[str] = Query(default=None),
+        actor: Optional[str] = Query(default="owner"),
+        x_actor_context: Optional[str] = Header(default=None, alias="X-Actor-Context"),
+    ) -> Dict[str, Any]:
+        resolved_actor, resolved_context = resolve_actor_context(actor, x_actor_context)
+        with create_session() as session:
+            require_permission(
+                session,
+                resolved_actor,
+                ActionKey.TRANSACTIONS_VIEW,
+                DataScopeKey.CANONICAL_TRANSACTIONS,
+                actor_context=resolved_context,
+            )
+            return list_suggestions(session, status=status, target_id=target_id)
+
+    @app.post("/api/suggestions")
+    def post_suggestion(payload: SuggestionCreate) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                require_review_suggest_or_decide(session, payload.actor, payload.actor_context)
+                return create_suggestion(session, payload)
+            except PermissionDeniedError as exc:
+                raise permission_http_error(exc) from exc
+            except SuggestionServiceError as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={"code": exc.code, "message": exc.message},
+                ) from exc
+
+    @app.post("/api/suggestions/{suggestion_id}/dismiss")
+    def post_suggestion_dismiss(
+        suggestion_id: str,
+        payload: SuggestionActionRequest,
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                require_review_suggest_or_decide(session, payload.actor, payload.actor_context)
+                return dismiss_suggestion(session, suggestion_id, payload)
+            except PermissionDeniedError as exc:
+                raise permission_http_error(exc) from exc
+            except SuggestionServiceError as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={"code": exc.code, "message": exc.message},
+                ) from exc
+
+    @app.post("/api/suggestions/{suggestion_id}/accept")
+    def post_suggestion_accept(
+        suggestion_id: str,
+        payload: SuggestionActionRequest,
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return accept_suggestion(session, suggestion_id, payload)
+            except SuggestionServiceError as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={"code": exc.code, "message": exc.message},
+                ) from exc
+            except DecisionEventError as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={"code": exc.code, "message": exc.message},
+                ) from exc
+
+    @app.post("/api/suggestions/{suggestion_id}/convert-to-approval")
+    def post_suggestion_convert_to_approval(
+        suggestion_id: str,
+        payload: SuggestionActionRequest,
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            if not is_approval_mode_enabled(session):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "approval_mode_disabled",
+                        "message": "Approval management is unavailable while approval mode is disabled.",
+                    },
+                )
+            try:
+                require_review_suggest_or_decide(session, payload.actor, payload.actor_context)
+                return convert_suggestion_to_approval(session, suggestion_id, payload)
+            except PermissionDeniedError as exc:
+                raise permission_http_error(exc) from exc
+            except (SuggestionServiceError, ApprovalServiceError) as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={"code": exc.code, "message": exc.message},
+                ) from exc
+
+    @app.get("/api/approval-requests")
+    def get_approval_requests(
+        status: Optional[str] = Query(default=None),
+        target_id: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            if not is_approval_mode_enabled(session):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "approval_mode_disabled",
+                        "message": "Approval management is unavailable while approval mode is disabled.",
+                    },
+                )
+            return list_approval_requests(session, status=status, target_id=target_id)
+
+    @app.post("/api/approval-requests")
+    def post_approval_request(payload: ApprovalRequestCreate) -> Dict[str, Any]:
+        with create_session() as session:
+            if not is_approval_mode_enabled(session):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "approval_mode_disabled",
+                        "message": "Approval management is unavailable while approval mode is disabled.",
+                    },
+                )
+            try:
+                require_review_suggest_or_decide(session, payload.actor, payload.actor_context)
+                return create_approval_request(session, payload)
+            except PermissionDeniedError as exc:
+                raise permission_http_error(exc) from exc
+            except ApprovalServiceError as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={"code": exc.code, "message": exc.message},
+                ) from exc
+
+    @app.post("/api/approval-requests/{approval_request_id}/approve")
+    def post_approval_request_approve(
+        approval_request_id: str,
+        payload: ApprovalActionRequest,
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            if not is_approval_mode_enabled(session):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "approval_mode_disabled",
+                        "message": "Approval management is unavailable while approval mode is disabled.",
+                    },
+                )
             require_permission(
                 session,
                 payload.actor,
@@ -430,8 +631,64 @@ def create_app(
                 actor_context=payload.actor_context,
             )
             try:
-                return create_decision_event(session, payload)
+                return approve_approval_request(session, approval_request_id, payload)
+            except ApprovalServiceError as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={"code": exc.code, "message": exc.message},
+                ) from exc
             except DecisionEventError as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={"code": exc.code, "message": exc.message},
+                ) from exc
+
+    @app.post("/api/approval-requests/{approval_request_id}/reject")
+    def post_approval_request_reject(
+        approval_request_id: str,
+        payload: ApprovalActionRequest,
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            if not is_approval_mode_enabled(session):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "approval_mode_disabled",
+                        "message": "Approval management is unavailable while approval mode is disabled.",
+                    },
+                )
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return reject_approval_request(session, approval_request_id, payload)
+            except ApprovalServiceError as exc:
+                raise HTTPException(
+                    status_code=exc.status_code,
+                    detail={"code": exc.code, "message": exc.message},
+                ) from exc
+
+    @app.post("/api/approval-requests/{approval_request_id}/cancel")
+    def post_approval_request_cancel(
+        approval_request_id: str,
+        payload: ApprovalActionRequest,
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            if not is_approval_mode_enabled(session):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "approval_mode_disabled",
+                        "message": "Approval management is unavailable while approval mode is disabled.",
+                    },
+                )
+            try:
+                return cancel_approval_request(session, approval_request_id, payload)
+            except ApprovalServiceError as exc:
                 raise HTTPException(
                     status_code=exc.status_code,
                     detail={"code": exc.code, "message": exc.message},
@@ -453,12 +710,21 @@ def create_app(
         active_data_root = get_data_root()
         with create_session() as session:
             source_domains = {"sources", "source_profiles"}
+            approval_domains = {"approval"}
             if any(change.domain in source_domains for change in payload.changes):
                 require_permission(
                     session,
                     payload.actor,
                     ActionKey.IMPORTS_SETTINGS_CONFIGURE,
                     DataScopeKey.SOURCE_PROFILES_IMPORT_CONFIG,
+                    actor_context=payload.actor_context,
+                )
+            elif all(change.domain in approval_domains for change in payload.changes):
+                require_permission(
+                    session,
+                    payload.actor,
+                    ActionKey.APPROVAL_RULES_CONFIGURE,
+                    DataScopeKey.APPROVAL_RULE_CONFIGURATION,
                     actor_context=payload.actor_context,
                 )
             else:
