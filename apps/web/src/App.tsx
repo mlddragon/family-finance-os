@@ -16,8 +16,18 @@ import { useTranslation } from "react-i18next";
 
 import {
   acceptImportBatch,
+  acceptSuggestion,
+  approveApprovalRequest,
+  cancelApprovalRequest,
   confirmSourceProfileSample,
+  convertSuggestionToApproval,
   createCategory,
+  createSuggestion,
+  dismissSuggestion,
+  enterElevatedMode,
+  exitElevatedMode,
+  fetchApprovalRequests,
+  fetchElevatedModeStatus,
   fetchOperatorSummary,
   createAdvisorExport,
   draftMonthlyClose,
@@ -26,18 +36,23 @@ import {
   fetchCategories,
   fetchEffectivePermission,
   fetchSettings,
+  fetchSuggestions,
   fetchTransactionDetail,
   fetchTransactions,
   fetchValidationFindings,
   finalizeMonthlyClose,
   formatApiError,
   previewPermission,
+  readStoredElevatedSessionId,
+  rejectApprovalRequest,
   resolveValidationFinding,
   runReports,
   saveCategoryDecision,
   saveReviewStatusDecision,
   saveSettingChange,
   scanInbox,
+  setElevatedSessionId,
+  touchElevatedMode,
   uploadSourceFile,
   validateImportBatch,
   voidImportBatch,
@@ -55,13 +70,17 @@ import type {
   Artifact,
   ActorContext,
   ActorsPayload,
+  ApprovalRequest,
   Category,
   EffectivePermission,
+  ElevatedContext,
+  ElevatedModeStatus,
   InboxScan,
   ImportBatch,
   OperatorSummary,
   SettingsPayload,
   SourceProfile,
+  Suggestion,
   Transaction,
   TransactionDetail,
   ValidationFinding,
@@ -162,6 +181,51 @@ function settingValue(settings: SettingsPayload | undefined, domain: string, set
   return typeof setting?.value === "string" && setting.value.trim() ? setting.value : fallback;
 }
 
+function settingBoolean(settings: SettingsPayload | undefined, domain: string, settingKey: string, fallback = false) {
+  const setting = settings?.settings.find((item) => item.domain === domain && item.setting_key === settingKey);
+  if (typeof setting?.value === "boolean") {
+    return setting.value;
+  }
+  if (typeof setting?.value === "string") {
+    return setting.value.toLowerCase() === "true";
+  }
+  return fallback;
+}
+
+const ELEVATED_CONTEXT_LABELS: Record<ElevatedContext, string> = {
+  system_administration: "System Administration",
+  financial_governance: "Financial Governance",
+};
+
+const ELEVATED_PURPOSE_LABELS: Record<string, string> = {
+  user_group_permission_management: "User, group, or permission management",
+  source_or_system_settings: "Source or system settings",
+  maintenance_health_review: "Maintenance or health review",
+  runtime_troubleshooting: "Runtime troubleshooting",
+  approval_rule_change: "Approval-rule change",
+  governance_setting_change: "Governance setting change",
+  threshold_risk_rule_review: "Threshold or risk-rule review",
+  monthly_close_governance_review: "Monthly-close governance review",
+};
+
+function elevatedPurposeLabel(code: string) {
+  return ELEVATED_PURPOSE_LABELS[code] ?? formatStatus(code);
+}
+
+function formatCountdown(expiresAt: string | undefined, nowMs: number) {
+  if (!expiresAt) {
+    return "—";
+  }
+  const remainingMs = new Date(expiresAt).getTime() - nowMs;
+  if (remainingMs <= 0) {
+    return "Expired";
+  }
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
 const ACTIVE_ACTOR_STORAGE_KEY = "family-finance-os.activeActorKey";
 const ACTIVE_PERSONA_STORAGE_KEY = "family-finance-os.activePersonaKey";
 
@@ -232,6 +296,88 @@ function useUIPermissions(actor: string, actorContext: ActorContext) {
   });
 }
 
+function useElevatedMode(actor: string, actorContext: ActorContext) {
+  const queryClient = useQueryClient();
+  const [countdownNow, setCountdownNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const storedSessionId = readStoredElevatedSessionId();
+    if (storedSessionId) {
+      setElevatedSessionId(storedSessionId);
+    }
+  }, []);
+
+  const statusQuery = useQuery({
+    queryKey: ["elevated-mode-status"],
+    queryFn: fetchElevatedModeStatus,
+    refetchInterval: (query) => (query.state.data?.active ? 30_000 : false),
+  });
+
+  const activeStatus = statusQuery.data?.active ? statusQuery.data : null;
+
+  useEffect(() => {
+    if (activeStatus?.session_id) {
+      setElevatedSessionId(activeStatus.session_id);
+      return;
+    }
+    setElevatedSessionId(null);
+  }, [activeStatus?.session_id]);
+
+  useEffect(() => {
+    if (!activeStatus?.expires_at) {
+      return;
+    }
+    const timer = window.setInterval(() => setCountdownNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [activeStatus?.expires_at]);
+
+  useEffect(() => {
+    if (!activeStatus?.session_id) {
+      return;
+    }
+    const touchTimer = window.setInterval(() => {
+      void touchElevatedMode({ actor, actorContext })
+        .then((body) => {
+          queryClient.setQueryData(["elevated-mode-status"], body);
+        })
+        .catch(() => {
+          void queryClient.invalidateQueries({ queryKey: ["elevated-mode-status"] });
+        });
+    }, 5 * 60 * 1000);
+    return () => window.clearInterval(touchTimer);
+  }, [activeStatus?.session_id, actor, actorContext, queryClient]);
+
+  const enterMutation = useMutation({
+    mutationFn: enterElevatedMode,
+    onSuccess: (body) => {
+      if (body.session_id) {
+        setElevatedSessionId(body.session_id);
+      }
+      queryClient.setQueryData(["elevated-mode-status"], body);
+    },
+  });
+
+  const exitMutation = useMutation({
+    mutationFn: exitElevatedMode,
+    onSuccess: () => {
+      setElevatedSessionId(null);
+      queryClient.setQueryData(["elevated-mode-status"], { active: false, purpose_codes: statusQuery.data?.purpose_codes });
+      void queryClient.invalidateQueries({ queryKey: ["elevated-mode-status"] });
+    },
+  });
+
+  return {
+    status: statusQuery.data,
+    active: Boolean(activeStatus),
+    countdown: formatCountdown(activeStatus?.expires_at, countdownNow),
+    enterMutation,
+    exitMutation,
+    isLoading: statusQuery.isLoading,
+    isError: statusQuery.isError,
+    error: statusQuery.error,
+  };
+}
+
 export function App() {
   const [queryClient] = useState(createQueryClient);
 
@@ -283,6 +429,8 @@ function OperatorApp() {
   const operatorActor = operatorActorContext.actor_key;
   const permissionsQuery = useUIPermissions(operatorActor, operatorActorContext);
   const permissions = permissionsQuery.data ?? defaultUIPermissionMap();
+  const elevatedMode = useElevatedMode(operatorActor, operatorActorContext);
+  const elevatedModeActive = elevatedMode.active;
   const categories = categoriesQuery.data?.categories ?? [];
   const sourceProfileKey = summary.sources.profiles.map((profile) => profile.source_key).join("|") || "no-source-profiles";
   const selectedTransaction =
@@ -317,6 +465,19 @@ function OperatorApp() {
         <PermissionPreviewPanel actors={actors} />
       ) : null}
 
+      <ElevatedModePanel
+        status={elevatedMode.status}
+        active={elevatedModeActive}
+        countdown={elevatedMode.countdown}
+        operatorActor={operatorActor}
+        operatorActorContext={operatorActorContext}
+        enterMutation={elevatedMode.enterMutation}
+        exitMutation={elevatedMode.exitMutation}
+        isLoading={elevatedMode.isLoading}
+        isError={elevatedMode.isError}
+        error={elevatedMode.error}
+      />
+
       <div className="workspace">
         <nav className="sidebar" aria-label="Primary">
           {screens.map((screen) => (
@@ -343,7 +504,8 @@ function OperatorApp() {
               inbox={inbox}
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
-              canRunImports={permissionAllows(permissions.imports)}
+              canRunImports={permissionAllows(permissions.imports) && !elevatedModeActive}
+              elevatedModeActive={elevatedModeActive}
             />
           ) : null}
           {activeScreen === "validation" ? (
@@ -351,6 +513,7 @@ function OperatorApp() {
               findings={findings}
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
+              elevatedModeActive={elevatedModeActive}
             />
           ) : null}
           {activeScreen === "review" ? (
@@ -361,8 +524,10 @@ function OperatorApp() {
               categories={categories}
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
-              canSaveReview={permissionAllows(permissions.review)}
+              canSaveReview={permissionAllows(permissions.review) && !elevatedModeActive}
               reviewSuggestionAllowed={permissionSuggests(permissions.review)}
+              elevatedModeActive={elevatedModeActive}
+              approvalModeEnabled={settingBoolean(settings, "approval", "approval.approval_mode_enabled")}
               onSelectTransaction={setSelectedTransactionId}
             />
           ) : null}
@@ -380,9 +545,10 @@ function OperatorApp() {
               artifacts={artifactsQuery.data?.artifacts ?? []}
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
-              canRunReports={permissionAllows(permissions.reports)}
-              canRunMonthlyClose={permissionAllows(permissions.monthlyClose)}
-              canCreateExports={permissionAllows(permissions.exports)}
+              canRunReports={permissionAllows(permissions.reports) && !elevatedModeActive}
+              canRunMonthlyClose={permissionAllows(permissions.monthlyClose) && !elevatedModeActive}
+              canCreateExports={permissionAllows(permissions.exports) && !elevatedModeActive}
+              elevatedModeActive={elevatedModeActive}
             />
           ) : null}
           {activeScreen === "settings" ? (
@@ -393,6 +559,8 @@ function OperatorApp() {
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
               canSaveSettings={permissionAllows(permissions.settings)}
+              approvalModeEnabled={settingBoolean(settings, "approval", "approval.approval_mode_enabled")}
+              canManageApprovals={permissionAllows(permissions.review)}
             />
           ) : null}
         </main>
@@ -538,6 +706,180 @@ function PermissionPreviewPanel({ actors }: { actors?: ActorsPayload }) {
   );
 }
 
+function ElevatedModePanel({
+  status,
+  active,
+  countdown,
+  operatorActor,
+  operatorActorContext,
+  enterMutation,
+  exitMutation,
+  isLoading,
+  isError,
+  error,
+}: {
+  status?: ElevatedModeStatus;
+  active: boolean;
+  countdown: string;
+  operatorActor: string;
+  operatorActorContext: ActorContext;
+  enterMutation: ReturnType<typeof useMutation<ElevatedModeStatus, Error, Parameters<typeof enterElevatedMode>[0]>>;
+  exitMutation: ReturnType<typeof useMutation<{ active: false }, Error, Parameters<typeof exitElevatedMode>[0]>>;
+  isLoading: boolean;
+  isError: boolean;
+  error: unknown;
+}) {
+  const [context, setContext] = useState<ElevatedContext>("system_administration");
+  const [purposeCode, setPurposeCode] = useState("");
+  const [note, setNote] = useState("");
+  const [formStatus, setFormStatus] = useState<string | null>(null);
+
+  const purposeCodes = status?.purpose_codes?.[context] ?? [];
+  const availableContexts = (Object.keys(status?.purpose_codes ?? ELEVATED_CONTEXT_LABELS) as ElevatedContext[]).filter(
+    (key) => (status?.purpose_codes?.[key]?.length ?? 0) > 0 || !status?.purpose_codes,
+  );
+
+  useEffect(() => {
+    if (!purposeCode || !purposeCodes.includes(purposeCode)) {
+      setPurposeCode(purposeCodes[0] ?? "");
+    }
+  }, [context, purposeCode, purposeCodes]);
+
+  function submitEnter(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!purposeCode.trim() || !note.trim()) {
+      return;
+    }
+    setFormStatus(null);
+    enterMutation.mutate(
+      {
+        context,
+        purposeCode,
+        note,
+        actor: operatorActor,
+        actorContext: operatorActorContext,
+      },
+      {
+        onSuccess: () => {
+          setFormStatus("Elevated mode entered");
+          setNote("");
+        },
+        onError: (enterError) => setFormStatus(formatApiError(enterError, "Elevated mode entry blocked")),
+      },
+    );
+  }
+
+  function submitExit() {
+    setFormStatus(null);
+    exitMutation.mutate(
+      { actor: operatorActor, actorContext: operatorActorContext },
+      {
+        onSuccess: () => setFormStatus("Elevated mode exited"),
+        onError: (exitError) => setFormStatus(formatApiError(exitError, "Elevated mode exit blocked")),
+      },
+    );
+  }
+
+  return (
+    <section className="elevated-mode-panel" aria-label="Elevated mode">
+      <div className="elevated-mode-header">
+        <div>
+          <p className="product-label">Control-plane elevation</p>
+          <h2>Elevated mode</h2>
+        </div>
+        {active ? (
+          <div className="elevated-mode-active-meta">
+            <span className="status-badge ok">Active</span>
+            <span className="elevated-countdown" aria-live="polite">
+              Expires in {countdown}
+            </span>
+          </div>
+        ) : (
+          <span className="status-badge warn">Inactive</span>
+        )}
+      </div>
+
+      {isLoading ? <p className="empty-state">Loading elevated mode status…</p> : null}
+      {isError ? (
+        <p className="form-status danger-text">{formatApiError(error, "Elevated mode status unavailable")}</p>
+      ) : null}
+
+      {active && status ? (
+        <div className="elevated-mode-active">
+          <dl className="detail-list compact">
+            <div>
+              <dt>Context</dt>
+              <dd>{ELEVATED_CONTEXT_LABELS[status.context ?? "system_administration"]}</dd>
+            </div>
+            <div>
+              <dt>Purpose</dt>
+              <dd>{elevatedPurposeLabel(status.purpose_code ?? "")}</dd>
+            </div>
+            <div>
+              <dt>Note</dt>
+              <dd>{status.note}</dd>
+            </div>
+            <div>
+              <dt>Actor</dt>
+              <dd>{status.actor_context?.display_name ?? status.actor}</dd>
+            </div>
+          </dl>
+          <p className="form-status warn-text">
+            Routine financial mutations are read-only while elevated mode is active.
+          </p>
+          <button type="button" onClick={submitExit} disabled={exitMutation.isPending}>
+            Exit elevated mode
+          </button>
+        </div>
+      ) : (
+        <form className="elevated-mode-form" onSubmit={submitEnter}>
+          <label>
+            Elevated context
+            <select value={context} onChange={(event) => setContext(event.target.value as ElevatedContext)}>
+              {(availableContexts.length ? availableContexts : (Object.keys(ELEVATED_CONTEXT_LABELS) as ElevatedContext[])).map(
+                (item) => (
+                  <option key={item} value={item}>
+                    {ELEVATED_CONTEXT_LABELS[item]}
+                  </option>
+                ),
+              )}
+            </select>
+          </label>
+          <label>
+            Purpose
+            <select value={purposeCode} onChange={(event) => setPurposeCode(event.target.value)}>
+              {purposeCodes.map((code) => (
+                <option key={code} value={code}>
+                  {elevatedPurposeLabel(code)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Required note
+            <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} required />
+          </label>
+          <button type="submit" disabled={!purposeCode.trim() || !note.trim() || enterMutation.isPending}>
+            Enter elevated mode
+          </button>
+        </form>
+      )}
+
+      {formStatus ? (
+        <p
+          className={
+            formStatus.includes("blocked") || formStatus.includes("unavailable")
+              ? "form-status danger-text"
+              : "form-status ok-text"
+          }
+        >
+          {formStatus}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function HomeScreen({ summary }: { summary: OperatorSummary }) {
   return (
     <section className="screen" aria-labelledby="home-heading">
@@ -587,12 +929,14 @@ function SourcesScreen({
   operatorActor,
   operatorActorContext,
   canRunImports,
+  elevatedModeActive,
 }: {
   profiles: SourceProfile[];
   inbox: ImportBatch[];
   operatorActor: string;
   operatorActorContext: ActorContext;
   canRunImports: boolean;
+  elevatedModeActive: boolean;
 }) {
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -765,7 +1109,11 @@ function SourcesScreen({
         <div className="work-panel">
           <h3>Import batches</h3>
           {!canRunImports ? (
-            <p className="form-status warn-text">Current persona cannot run import mutations.</p>
+            <p className="form-status warn-text">
+              {elevatedModeActive
+                ? "Import mutations are disabled while elevated mode is active."
+                : "Current persona cannot run import mutations."}
+            </p>
           ) : null}
           {batchActionStatus ? <p className="form-status">{batchActionStatus}</p> : null}
           <DataTable
@@ -926,10 +1274,12 @@ function ValidationScreen({
   findings,
   operatorActor,
   operatorActorContext,
+  elevatedModeActive,
 }: {
   findings: ValidationFinding[];
   operatorActor: string;
   operatorActorContext: ActorContext;
+  elevatedModeActive: boolean;
 }) {
   const queryClient = useQueryClient();
   const [showCleared, setShowCleared] = useState(false);
@@ -1015,7 +1365,7 @@ function ValidationScreen({
               className="link-button"
               aria-label={`Clear ${finding.code} ${targetLabel}`}
               onClick={() => openClearDialog(finding)}
-              disabled={clearMutation.isPending}
+              disabled={clearMutation.isPending || elevatedModeActive}
             >
               Clear {finding.code}
             </button>
@@ -1023,7 +1373,7 @@ function ValidationScreen({
         },
       },
     ],
-    [clearMutation.isPending],
+    [clearMutation.isPending, elevatedModeActive],
   );
 
   return (
@@ -1038,6 +1388,9 @@ function ValidationScreen({
           <span>Show cleared</span>
         </label>
       </div>
+      {elevatedModeActive ? (
+        <p className="form-status warn-text">Validation clearing is disabled while elevated mode is active.</p>
+      ) : null}
       {clearStatus ? <p className={clearStatus === "Validation finding cleared" ? "form-status ok-text" : "form-status danger-text"}>{clearStatus}</p> : null}
       <DataTable data={visibleFindings} columns={columns} emptyLabel="No open validation findings" />
       {clearTarget ? (
@@ -1077,6 +1430,8 @@ function ReviewScreen({
   operatorActorContext,
   canSaveReview,
   reviewSuggestionAllowed,
+  elevatedModeActive,
+  approvalModeEnabled,
   onSelectTransaction,
 }: {
   transactions: Transaction[];
@@ -1087,6 +1442,8 @@ function ReviewScreen({
   operatorActorContext: ActorContext;
   canSaveReview: boolean;
   reviewSuggestionAllowed: boolean;
+  elevatedModeActive: boolean;
+  approvalModeEnabled: boolean;
   onSelectTransaction: (id: string) => void;
 }) {
   const queryClient = useQueryClient();
@@ -1098,7 +1455,13 @@ function ReviewScreen({
   const [otherCategory, setOtherCategory] = useState("");
   const [notes, setNotes] = useState("");
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [suggestionActionStatus, setSuggestionActionStatus] = useState<string | null>(null);
   const lastInitializedTransactionId = useRef<string | null>(null);
+  const suggestionsQuery = useQuery({
+    queryKey: ["suggestions", "active"],
+    queryFn: () => fetchSuggestions({ status: "active" }),
+  });
+  const pendingSuggestions = suggestionsQuery.data?.suggestions ?? [];
   const categoryOptions = useMemo(() => categories.filter((category) => category.active), [categories]);
   const fallbackCategoryLabels = useMemo(
     () =>
@@ -1239,6 +1602,70 @@ function ReviewScreen({
     onError: (error) => setSaveStatus(formatApiError(error, "Decision blocked")),
   });
 
+  const suggestionMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedTransaction) {
+        throw new Error("No selected transaction");
+      }
+      const categoryKey = otherCategorySelected
+        ? (await createCategory({
+            displayName: otherCategory,
+            note: notes || t("review.customCategoryNote"),
+            actor: operatorActor,
+          })).category.category_key
+        : approvedCategoryKey;
+      const decisionType = categoryChanged ? "category_change" : "review_status_change";
+      const fieldName = categoryChanged ? "category" : "review_status";
+      const proposedValue = categoryChanged ? categoryKey : "reviewed";
+      return createSuggestion({
+        targetType: "canonical_transaction",
+        targetId: selectedTransaction.id,
+        actionKey: "review.decide",
+        decisionType,
+        fieldName,
+        proposedValue,
+        actor: operatorActor,
+        actorContext: operatorActorContext,
+        notes,
+      });
+    },
+    onSuccess: () => {
+      setSaveStatus("Suggestion submitted");
+      void queryClient.invalidateQueries({ queryKey: ["suggestions"] });
+    },
+    onError: (error) => setSaveStatus(formatApiError(error, "Suggestion blocked")),
+  });
+
+  const acceptSuggestionMutation = useMutation({
+    mutationFn: acceptSuggestion,
+    onSuccess: () => {
+      setSuggestionActionStatus("Suggestion accepted");
+      void queryClient.invalidateQueries({ queryKey: ["suggestions"] });
+      void queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
+    },
+    onError: (error) => setSuggestionActionStatus(formatApiError(error, "Suggestion accept blocked")),
+  });
+
+  const dismissSuggestionMutation = useMutation({
+    mutationFn: dismissSuggestion,
+    onSuccess: () => {
+      setSuggestionActionStatus("Suggestion dismissed");
+      void queryClient.invalidateQueries({ queryKey: ["suggestions"] });
+    },
+    onError: (error) => setSuggestionActionStatus(formatApiError(error, "Suggestion dismiss blocked")),
+  });
+
+  const convertSuggestionMutation = useMutation({
+    mutationFn: convertSuggestionToApproval,
+    onSuccess: () => {
+      setSuggestionActionStatus("Suggestion converted to approval request");
+      void queryClient.invalidateQueries({ queryKey: ["suggestions"] });
+      void queryClient.invalidateQueries({ queryKey: ["approval-requests"] });
+    },
+    onError: (error) => setSuggestionActionStatus(formatApiError(error, "Suggestion conversion blocked")),
+  });
+
   const saveDecisionDisabled =
     !selectedTransaction ||
     selectedTransactionBlocked ||
@@ -1248,6 +1675,23 @@ function ReviewScreen({
     (otherCategorySelected && !otherCategory.trim()) ||
     (otherCategoryRequiresNote && !notes.trim()) ||
     (!categoryChanged && !reviewApprovalNeeded);
+
+  const submitSuggestionDisabled =
+    !selectedTransaction ||
+    selectedTransactionBlocked ||
+    suggestionMutation.isPending ||
+    !reviewSuggestionAllowed ||
+    canSaveReview ||
+    elevatedModeActive ||
+    (!otherCategorySelected && !approvedCategoryKey) ||
+    (otherCategorySelected && !otherCategory.trim()) ||
+    (otherCategoryRequiresNote && !notes.trim()) ||
+    (!categoryChanged && !reviewApprovalNeeded);
+
+  const suggestionActionPending =
+    acceptSuggestionMutation.isPending ||
+    dismissSuggestionMutation.isPending ||
+    convertSuggestionMutation.isPending;
 
   const columns = useMemo<ColumnDef<Transaction>[]>(
     () => [
@@ -1312,6 +1756,38 @@ function ReviewScreen({
           </select>
         </label>
       </div>
+
+      <SuggestionsQueuePanel
+        suggestions={pendingSuggestions}
+        transactions={transactions}
+        operatorActor={operatorActor}
+        operatorActorContext={operatorActorContext}
+        canManageSuggestions={canSaveReview}
+        approvalModeEnabled={approvalModeEnabled}
+        actionStatus={suggestionActionStatus}
+        actionPending={suggestionActionPending}
+        onAccept={(suggestionId) =>
+          acceptSuggestionMutation.mutate({
+            suggestionId,
+            actor: operatorActor,
+            actorContext: operatorActorContext,
+          })
+        }
+        onDismiss={(suggestionId) =>
+          dismissSuggestionMutation.mutate({
+            suggestionId,
+            actor: operatorActor,
+            actorContext: operatorActorContext,
+          })
+        }
+        onConvert={(suggestionId) =>
+          convertSuggestionMutation.mutate({
+            suggestionId,
+            actor: operatorActor,
+            actorContext: operatorActorContext,
+          })
+        }
+      />
 
       <div className="review-layout">
         <section className="work-panel" aria-label="Review queue">
@@ -1405,9 +1881,18 @@ function ReviewScreen({
             </p>
           ) : null}
 
+          {elevatedModeActive ? (
+            <p className="form-status warn-text">Review decisions are disabled while elevated mode is active.</p>
+          ) : null}
+
           <button type="submit" disabled={saveDecisionDisabled}>
             {selectedTransactionBlocked ? t("review.resolveValidationFirst") : t("review.saveDecision")}
           </button>
+          {reviewSuggestionAllowed && !canSaveReview ? (
+            <button type="button" disabled={submitSuggestionDisabled} onClick={() => suggestionMutation.mutate()}>
+              Submit suggestion
+            </button>
+          ) : null}
           {saveStatus ? <p className={saveStatus === t("review.decisionSaved") ? "form-status ok-text" : "form-status danger-text"}>{saveStatus}</p> : null}
         </form>
       </div>
@@ -1493,6 +1978,7 @@ function ReportsScreen({
   canRunReports,
   canRunMonthlyClose,
   canCreateExports,
+  elevatedModeActive,
 }: {
   summary: OperatorSummary;
   artifacts: Artifact[];
@@ -1501,6 +1987,7 @@ function ReportsScreen({
   canRunReports: boolean;
   canRunMonthlyClose: boolean;
   canCreateExports: boolean;
+  elevatedModeActive: boolean;
 }) {
   const queryClient = useQueryClient();
   const [actionStatus, setActionStatus] = useState<string | null>(null);
@@ -1582,6 +2069,9 @@ function ReportsScreen({
 
       <section className="work-panel">
         <h3>Report actions</h3>
+        {elevatedModeActive ? (
+          <p className="form-status warn-text">Report and close actions are disabled while elevated mode is active.</p>
+        ) : null}
         <div className="action-row">
           <button
             type="button"
@@ -1643,6 +2133,8 @@ function SettingsScreen({
   operatorActor,
   operatorActorContext,
   canSaveSettings,
+  approvalModeEnabled,
+  canManageApprovals,
 }: {
   settings?: SettingsPayload;
   runtime: RuntimeStatus;
@@ -1650,6 +2142,8 @@ function SettingsScreen({
   operatorActor: string;
   operatorActorContext: ActorContext;
   canSaveSettings: boolean;
+  approvalModeEnabled: boolean;
+  canManageApprovals: boolean;
 }) {
   const queryClient = useQueryClient();
   const activeProfiles = settings?.source_profiles ?? profiles;
@@ -1992,6 +2486,236 @@ function SettingsScreen({
           ]}
         />
       </section>
+
+      {approvalModeEnabled ? (
+        <ApprovalsQueuePanel
+          operatorActor={operatorActor}
+          operatorActorContext={operatorActorContext}
+          canManageApprovals={canManageApprovals}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function SuggestionsQueuePanel({
+  suggestions,
+  transactions,
+  operatorActor,
+  operatorActorContext,
+  canManageSuggestions,
+  approvalModeEnabled,
+  actionStatus,
+  actionPending,
+  onAccept,
+  onDismiss,
+  onConvert,
+}: {
+  suggestions: Suggestion[];
+  transactions: Transaction[];
+  operatorActor: string;
+  operatorActorContext: ActorContext;
+  canManageSuggestions: boolean;
+  approvalModeEnabled: boolean;
+  actionStatus: string | null;
+  actionPending: boolean;
+  onAccept: (suggestionId: string) => void;
+  onDismiss: (suggestionId: string) => void;
+  onConvert: (suggestionId: string) => void;
+}) {
+  const transactionById = useMemo(
+    () => Object.fromEntries(transactions.map((transaction) => [transaction.id, transaction])),
+    [transactions],
+  );
+
+  return (
+    <section className="work-panel" aria-label="Pending suggestions">
+      <h3>Pending suggestions</h3>
+      {actionStatus ? (
+        <p
+          className={
+            actionStatus.includes("blocked") ? "form-status danger-text" : "form-status ok-text"
+          }
+        >
+          {actionStatus}
+        </p>
+      ) : null}
+      <DataTable
+        data={suggestions}
+        emptyLabel="No pending suggestions"
+        columns={[
+          {
+            header: "Transaction",
+            cell: ({ row }) =>
+              transactionById[row.original.target_id]?.raw_description ?? row.original.target_id.slice(0, 8),
+          },
+          { header: "Field", accessorKey: "field_name" },
+          { header: "Proposed", accessorKey: "proposed_value" },
+          { header: "Proposer", accessorKey: "proposer_actor" },
+          { header: "Status", accessorKey: "status" },
+          {
+            header: "Actions",
+            cell: ({ row }) =>
+              canManageSuggestions ? (
+                <div className="table-actions">
+                  <button
+                    type="button"
+                    className="link-button"
+                    disabled={actionPending}
+                    onClick={() => onAccept(row.original.id)}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    className="link-button"
+                    disabled={actionPending}
+                    onClick={() => onDismiss(row.original.id)}
+                  >
+                    Dismiss
+                  </button>
+                  {approvalModeEnabled ? (
+                    <button
+                      type="button"
+                      className="link-button"
+                      disabled={actionPending}
+                      onClick={() => onConvert(row.original.id)}
+                    >
+                      Convert to approval
+                    </button>
+                  ) : null}
+                </div>
+              ) : (
+                <span className="muted-text">Awaiting review</span>
+              ),
+          },
+        ]}
+      />
+    </section>
+  );
+}
+
+function ApprovalsQueuePanel({
+  operatorActor,
+  operatorActorContext,
+  canManageApprovals,
+}: {
+  operatorActor: string;
+  operatorActorContext: ActorContext;
+  canManageApprovals: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [actionStatus, setActionStatus] = useState<string | null>(null);
+  const approvalsQuery = useQuery({
+    queryKey: ["approval-requests", "pending"],
+    queryFn: () => fetchApprovalRequests({ status: "pending" }),
+    enabled: canManageApprovals,
+  });
+  const pendingApprovals = approvalsQuery.data?.approval_requests ?? [];
+
+  const approveMutation = useMutation({
+    mutationFn: approveApprovalRequest,
+    onSuccess: () => {
+      setActionStatus("Approval request approved");
+      void queryClient.invalidateQueries({ queryKey: ["approval-requests"] });
+      void queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
+    },
+    onError: (error) => setActionStatus(formatApiError(error, "Approval blocked")),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: rejectApprovalRequest,
+    onSuccess: () => {
+      setActionStatus("Approval request rejected");
+      void queryClient.invalidateQueries({ queryKey: ["approval-requests"] });
+    },
+    onError: (error) => setActionStatus(formatApiError(error, "Rejection blocked")),
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: cancelApprovalRequest,
+    onSuccess: () => {
+      setActionStatus("Approval request cancelled");
+      void queryClient.invalidateQueries({ queryKey: ["approval-requests"] });
+    },
+    onError: (error) => setActionStatus(formatApiError(error, "Cancellation blocked")),
+  });
+
+  const actionPending = approveMutation.isPending || rejectMutation.isPending || cancelMutation.isPending;
+
+  return (
+    <section className="work-panel" aria-label="Approvals queue">
+      <h3>Approvals queue</h3>
+      {!canManageApprovals ? (
+        <p className="form-status warn-text">Current persona cannot manage approval requests.</p>
+      ) : null}
+      {actionStatus ? (
+        <p className={actionStatus.includes("blocked") ? "form-status danger-text" : "form-status ok-text"}>
+          {actionStatus}
+        </p>
+      ) : null}
+      <DataTable
+        data={pendingApprovals}
+        emptyLabel="No pending approval requests"
+        columns={[
+          { header: "Target", cell: ({ row }) => `${row.original.target_type}:${row.original.target_id.slice(0, 8)}` },
+          { header: "Field", accessorKey: "field_name" },
+          { header: "Proposed", accessorKey: "proposed_value" },
+          { header: "Trigger", accessorKey: "policy_trigger" },
+          { header: "Proposer", accessorKey: "proposer_actor" },
+          { header: "Expires", accessorKey: "expires_at" },
+          {
+            header: "Actions",
+            cell: ({ row }) => (
+              <div className="table-actions">
+                <button
+                  type="button"
+                  className="link-button"
+                  disabled={!canManageApprovals || actionPending || row.original.proposer_actor === operatorActor}
+                  onClick={() =>
+                    approveMutation.mutate({
+                      approvalRequestId: row.original.id,
+                      actor: operatorActor,
+                      actorContext: operatorActorContext,
+                    })
+                  }
+                >
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  className="link-button"
+                  disabled={!canManageApprovals || actionPending}
+                  onClick={() =>
+                    rejectMutation.mutate({
+                      approvalRequestId: row.original.id,
+                      actor: operatorActor,
+                      actorContext: operatorActorContext,
+                    })
+                  }
+                >
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  className="link-button"
+                  disabled={!canManageApprovals || actionPending || row.original.proposer_actor !== operatorActor}
+                  onClick={() =>
+                    cancelMutation.mutate({
+                      approvalRequestId: row.original.id,
+                      actor: operatorActor,
+                      actorContext: operatorActorContext,
+                    })
+                  }
+                >
+                  Cancel
+                </button>
+              </div>
+            ),
+          },
+        ]}
+      />
     </section>
   );
 }

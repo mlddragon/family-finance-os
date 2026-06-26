@@ -262,6 +262,34 @@ function mockPermissionPreview(body: { persona_key: string; action_key: string; 
   };
 }
 
+const inactiveElevatedModeStatus = {
+  active: false,
+  purpose_codes: {
+    system_administration: [
+      "user_group_permission_management",
+      "source_or_system_settings",
+      "maintenance_health_review",
+      "runtime_troubleshooting",
+    ],
+    financial_governance: [
+      "approval_rule_change",
+      "governance_setting_change",
+      "threshold_risk_rule_review",
+      "monthly_close_governance_review",
+    ],
+  },
+};
+
+const emptySuggestionsPayload = {
+  approval_mode_enabled: false,
+  suggestions: [],
+};
+
+const emptyApprovalRequestsPayload = {
+  approval_mode_enabled: false,
+  approval_requests: [],
+};
+
 function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof personalRuntime } = {}) {
   let importBatchVoided = false;
   let validationFindingCleared = false;
@@ -271,6 +299,94 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
     const url = urlFor(input);
     if (path === "/api/permissions/effective") {
       return response(mockEffectivePermission(url, init));
+    }
+    if (path === "/api/elevated-mode/status") {
+      return response(inactiveElevatedModeStatus);
+    }
+    if (path === "/api/elevated-mode/enter" && init?.method === "POST") {
+      const body = JSON.parse(String(init.body));
+      return response({
+        active: true,
+        session_id: "elevated-session-1",
+        context: body.context,
+        purpose_code: body.purpose_code,
+        note: body.note,
+        actor: body.actor,
+        actor_context: body.actor_context,
+        correlation_id: "corr-1",
+        entered_at: "2026-06-18T00:00:00Z",
+        last_activity_at: "2026-06-18T00:00:00Z",
+        expires_at: "2026-06-18T00:15:00Z",
+        purpose_codes: inactiveElevatedModeStatus.purpose_codes,
+      });
+    }
+    if (path === "/api/elevated-mode/exit" && init?.method === "POST") {
+      return response({ active: false });
+    }
+    if (path === "/api/elevated-mode/touch" && init?.method === "POST") {
+      return response({
+        active: true,
+        session_id: "elevated-session-1",
+        context: "system_administration",
+        purpose_code: "source_or_system_settings",
+        note: "Touch test",
+        actor: "owner",
+        entered_at: "2026-06-18T00:00:00Z",
+        last_activity_at: "2026-06-18T00:05:00Z",
+        expires_at: "2026-06-18T00:20:00Z",
+        purpose_codes: inactiveElevatedModeStatus.purpose_codes,
+      });
+    }
+    if (path === "/api/suggestions") {
+      return response(emptySuggestionsPayload);
+    }
+    if (path.startsWith("/api/suggestions/") && init?.method === "POST") {
+      return response({
+        suggestion: {
+          id: "suggestion-1",
+          target_type: "canonical_transaction",
+          target_id: "tx-1",
+          action_key: "review.decide",
+          decision_type: "category_change",
+          field_name: "category",
+          previous_value: "groceries",
+          proposed_value: "business",
+          status: "active",
+          proposer_actor: "owner",
+          suggestion_source: "user",
+          notes: null,
+          decision_event_id: null,
+          approval_request_id: null,
+          created_at: "2026-06-18T00:00:00Z",
+          updated_at: "2026-06-18T00:00:00Z",
+        },
+      });
+    }
+    if (path === "/api/approval-requests") {
+      return response(emptyApprovalRequestsPayload);
+    }
+    if (path.startsWith("/api/approval-requests/") && init?.method === "POST") {
+      return response({
+        approval_request: {
+          id: "approval-1",
+          target_type: "canonical_transaction",
+          target_id: "tx-1",
+          action_key: "review.decide",
+          decision_type: "category_change",
+          field_name: "category",
+          previous_value: "groceries",
+          proposed_value: "business",
+          status: "approved",
+          proposer_actor: "contributor",
+          policy_trigger: "high_value",
+          expires_at: "2026-07-02T00:00:00Z",
+          source_suggestion_id: "suggestion-1",
+          notes: null,
+          applied_decision_event_id: "event-3",
+          created_at: "2026-06-18T00:00:00Z",
+          updated_at: "2026-06-18T00:01:00Z",
+        },
+      });
     }
     if (path === "/api/permissions/preview" && init?.method === "POST") {
       return response(mockPermissionPreview(JSON.parse(String(init.body))));

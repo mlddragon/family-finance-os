@@ -50,6 +50,12 @@ EXPECTED_TABLES = {
     "report_runs",
     "artifacts",
     "monthly_closes",
+    "permission_state_events",
+    "elevated_mode_events",
+    "suggestions",
+    "suggestion_events",
+    "approval_requests",
+    "approval_request_events",
 }
 
 

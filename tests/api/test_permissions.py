@@ -160,11 +160,15 @@ def test_contributor_suggest_denied_for_review_decide(tmp_path):
                 "explicit_user_action": True,
             },
         )
+        detail = client.get(f"/api/transactions/{transaction['id']}").json()["transaction"]
 
-    assert response.status_code == 403
-    detail = response.json()["detail"]
-    assert detail["code"] == "permission_denied"
-    assert detail["suggestion_allowed"] is True
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "suggestion"
+    assert body["suggestion"]["status"] == "active"
+    assert body["suggestion"]["proposed_value"] == "business"
+    assert detail["category_current"] == "Groceries"
+    assert detail["decision_history_count"] == 0
 
 
 def test_effective_permission_endpoint_reports_matrix(tmp_path):

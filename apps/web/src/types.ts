@@ -290,6 +290,74 @@ export type UIPermissionCheck = {
   data_scope_key: string;
 };
 
+export type ElevatedContext = "system_administration" | "financial_governance";
+
+export type ElevatedModeStatus = {
+  active: boolean;
+  purpose_codes?: Record<ElevatedContext, string[]>;
+  session_id?: string;
+  context?: ElevatedContext;
+  purpose_code?: string;
+  note?: string;
+  actor?: string;
+  actor_context?: ActorContext;
+  correlation_id?: string;
+  entered_at?: string;
+  last_activity_at?: string;
+  expires_at?: string;
+};
+
+export type Suggestion = {
+  id: string;
+  target_type: string;
+  target_id: string;
+  action_key: string;
+  decision_type: string;
+  field_name: string;
+  previous_value: string | null;
+  proposed_value: string;
+  status: string;
+  proposer_actor: string;
+  proposer_actor_context?: ActorContext | null;
+  suggestion_source: string;
+  notes: string | null;
+  decision_event_id: string | null;
+  approval_request_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SuggestionsPayload = {
+  approval_mode_enabled: boolean;
+  suggestions: Suggestion[];
+};
+
+export type ApprovalRequest = {
+  id: string;
+  target_type: string;
+  target_id: string;
+  action_key: string;
+  decision_type: string;
+  field_name: string;
+  previous_value: string | null;
+  proposed_value: string;
+  status: string;
+  proposer_actor: string;
+  proposer_actor_context?: ActorContext | null;
+  policy_trigger: string;
+  expires_at: string;
+  source_suggestion_id: string | null;
+  notes: string | null;
+  applied_decision_event_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ApprovalRequestsPayload = {
+  approval_mode_enabled: boolean;
+  approval_requests: ApprovalRequest[];
+};
+
 export type ArtifactActionResponse = {
   job?: {
     id: string;
