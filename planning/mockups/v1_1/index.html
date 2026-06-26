@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Family Finance OS — v1.1 mockups (synthetic)</title>
+    <link rel="stylesheet" href="mockup.css" />
+  </head>
+  <body data-view="app">
+    <!-- ===================== APP FRAME ===================== -->
+    <div class="app-shell" id="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="product-label">Local household ledger · synthetic mockup</p>
+          <h1>Family Finance OS</h1>
+        </div>
+        <div class="status-strip" aria-label="Runtime status">
+          <span class="ok">Local only · 127.0.0.1</span>
+          <span>Last refresh 2d</span>
+          <span class="warn">Validation: 1 blocking</span>
+          <span class="warn">Confidence: Provisional</span>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <nav class="sidebar" aria-label="Primary" id="sidebar">
+          <a data-nav="home" aria-current="page">Home</a>
+          <a data-nav="funds">Funds<span class="nav-tag">new</span></a>
+          <a data-nav="dashboard">Dashboard<span class="nav-tag">new</span></a>
+          <a data-nav="sources">Sources</a>
+          <a data-nav="review">Review</a>
+          <a data-nav="transactions">Transactions</a>
+          <a data-nav="reports">Reports</a>
+          <a data-nav="settings">Settings</a>
+          <a data-nav="auth" class="auth-nav">Auth screens<span class="nav-tag">preview</span></a>
+        </nav>
+
+        <main class="content">
+          <!-- ===== Screen A: Home ===== -->
+          <section class="screen active" data-screen="home" aria-label="Home">
+            <div class="screen-heading split-heading">
+              <div>
+                <h2>Home</h2>
+                <p class="screen-sub">Ledger freshness: 3 of 4 sources current · Validation: 1 blocking, 4 warnings</p>
+              </div>
+              <div class="action-row">
+                <button type="button">Run inbox scan</button>
+                <button type="button">Import</button>
+              </div>
+            </div>
+
+            <div class="work-panel headline-panel">
+              <span class="headline-label" id="spendable-label">Spendable balance</span>
+              <div class="headline-amount" id="spendable-amount" aria-live="polite">$3,412.58</div>
+              <div class="breakdown">
+                <span>Verified liquid cash $6,180.00</span>
+                <span class="op">&minus;</span>
+                <span>Reserved goal balance $1,900.00</span>
+                <span class="op">&minus;</span>
+                <span>Manual obligations $867.42</span>
+                <span class="op" id="prov-op" hidden>&minus;</span>
+                <span id="prov-term" hidden>Provisional exposure $1,842.00</span>
+              </div>
+              <p class="headline-note" id="spendable-note">Excludes $1,842.00 provisional exposure (unreviewed outflows).</p>
+              <label class="toggle-row">
+                <input type="checkbox" id="provisional-toggle" />
+                Include provisional exposure ($1,842.00 unreviewed)
+              </label>
+            </div>
+
+            <div class="work-panel">
+              <h3>Card obligation (not yet netted)</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Card</th><th class="num">Owed</th><th>Note</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Chase Prime Visa</td><td class="num">$1,204.33</td><td>Pool remaining already reflects this</td></tr>
+                    <tr><td>Alliant Credit Card</td><td class="num">$318.90</td><td>Statement due Jul 02</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="next-action">
+              <span>Next action</span>
+              <strong>Import Chase Prime Visa export</strong>
+              <p>Latest Chase transaction is 19 days old, so verified liquid cash and card obligation may be understated.</p>
+            </div>
+
+            <div class="work-panel">
+              <div class="screen-heading split-heading" style="border:0;padding:0;">
+                <h3 style="margin:0;">Where your money is committed</h3>
+                <button type="button" data-nav="funds">Open Funds</button>
+              </div>
+              <div class="metric-grid">
+                <div class="metric"><span>Fund commitments this month</span><strong>$2,640.00</strong></div>
+                <div class="metric"><span>Pool remaining (all pools)</span><strong>$812.17</strong></div>
+                <div class="metric"><span>Reserved goal balance</span><strong>$1,900.00</strong></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ===== Screen B: Funds ===== -->
+          <section class="screen" data-screen="funds" aria-label="Funds">
+            <div class="screen-heading split-heading">
+              <div>
+                <h2>Funds</h2>
+                <p class="screen-sub">Fund pools, commitments, and pool remaining</p>
+              </div>
+              <div class="action-row">
+                <button type="button" id="overcommit-demo">Demo overcommit warning</button>
+                <button type="button" class="primary-button">Add pool</button>
+              </div>
+            </div>
+
+            <div class="warn-band" id="overcommit-band" role="status" hidden>
+              <strong>Warning: fund commitments exceed funding by $310.00</strong>
+              <p>Commitments $3,110.00 vs funded $2,800.00. Reduce a commitment or add funding. Nothing is blocked, but pool remaining assumes full funding.</p>
+            </div>
+
+            <div class="work-panel">
+              <h3>Commitment health</h3>
+              <div class="metric-grid">
+                <div class="metric"><span>Funded this month</span><strong>$2,800.00</strong></div>
+                <div class="metric"><span>Fund commitments</span><strong id="commit-total">$2,640.00</strong></div>
+                <div class="metric ok" id="commit-fit"><span>Uncommitted</span><strong>$160.00</strong><p>OK: commitments fit funding</p></div>
+              </div>
+            </div>
+
+            <div class="work-panel">
+              <h3>Pools</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Pool</th><th class="num">Commitment</th><th class="num">Spent</th><th class="num">Pool remaining</th><th>Status</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Groceries</td><td class="num">$700.00</td><td class="num">$512.40</td><td class="num">$187.60</td><td>On track</td></tr>
+                    <tr><td>Auto &amp; fuel</td><td class="num">$300.00</td><td class="num">$341.10</td><td class="num danger-text">&minus;$41.10</td><td><span class="status-badge danger">Over by $41.10</span></td></tr>
+                    <tr><td>Utilities</td><td class="num">$420.00</td><td class="num">$0.00</td><td class="num">$420.00</td><td>Not started</td></tr>
+                    <tr><td>Dining</td><td class="num">$200.00</td><td class="num">$206.75</td><td class="num danger-text">&minus;$6.75</td><td><span class="status-badge danger">Over by $6.75</span></td></tr>
+                    <tr><td>Buffer</td><td class="num">$120.00</td><td class="num">$0.00</td><td class="num">$120.00</td><td>On track</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="work-panel">
+              <div class="screen-heading split-heading" style="border:0;padding:0;">
+                <h3 style="margin:0;">Reserved goal balance</h3>
+                <button type="button">Manage goals</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Goal</th><th class="num">Target</th><th class="num">Reserved</th><th class="num">Remaining to target</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Emergency fund</td><td class="num">$6,000.00</td><td class="num">$1,500.00</td><td class="num">$4,500.00</td></tr>
+                    <tr><td>Vacation 2026</td><td class="num">$2,000.00</td><td class="num">$400.00</td><td class="num">$1,600.00</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <!-- ===== Screen C: Dashboard ===== -->
+          <section class="screen" data-screen="dashboard" aria-label="Dashboard">
+            <div class="screen-heading split-heading">
+              <div>
+                <h2>Dashboard</h2>
+                <p class="screen-sub">Freshness: 3/4 sources current · Confidence: Provisional · Reviewed: 82%</p>
+              </div>
+              <div class="status-strip"><span>Period: Last 6 months</span></div>
+            </div>
+
+            <div class="work-panel">
+              <p class="chart-caption">6-month cashflow (net = inflow &minus; outflow)</p>
+              <div class="bar-chart" role="img" aria-label="Net cashflow by month: Jan +$1,210, Feb +$840, Mar -$410, Apr +$1,360, May +$1,020, Jun +$600 provisional">
+                <div class="bar-row"><span class="bar-label">Jan</span><span class="bar-track"><span class="bar-fill inflow" style="width:89%"></span></span><span class="bar-value">+$1,210</span></div>
+                <div class="bar-row"><span class="bar-label">Feb</span><span class="bar-track"><span class="bar-fill inflow" style="width:62%"></span></span><span class="bar-value">+$840</span></div>
+                <div class="bar-row"><span class="bar-label">Mar</span><span class="bar-track"><span class="bar-fill outflow" style="width:30%"></span></span><span class="bar-value danger-text">&minus;$410</span></div>
+                <div class="bar-row"><span class="bar-label">Apr</span><span class="bar-track"><span class="bar-fill inflow" style="width:100%"></span></span><span class="bar-value">+$1,360</span></div>
+                <div class="bar-row"><span class="bar-label">May</span><span class="bar-track"><span class="bar-fill inflow" style="width:75%"></span></span><span class="bar-value">+$1,020</span></div>
+                <div class="bar-row"><span class="bar-label">Jun ~</span><span class="bar-track"><span class="bar-fill warn" style="width:44%"></span></span><span class="bar-value warn-text">+$600*</span></div>
+              </div>
+              <p class="chart-foot">* June provisional — Chase stale, June incomplete.</p>
+            </div>
+
+            <div class="two-column">
+              <div class="work-panel">
+                <p class="chart-caption">Category spend (this month)</p>
+                <div class="bar-chart">
+                  <div class="bar-row"><span class="bar-label">Housing</span><span class="bar-track"><span class="bar-fill" style="width:100%"></span></span><span class="bar-value">$1,650</span></div>
+                  <div class="bar-row"><span class="bar-label">Groceries</span><span class="bar-track"><span class="bar-fill" style="width:31%"></span></span><span class="bar-value">$512</span></div>
+                  <div class="bar-row"><span class="bar-label">Auto</span><span class="bar-track"><span class="bar-fill" style="width:21%"></span></span><span class="bar-value">$341</span></div>
+                  <div class="bar-row"><span class="bar-label">Dining</span><span class="bar-track"><span class="bar-fill" style="width:13%"></span></span><span class="bar-value">$207</span></div>
+                  <div class="bar-row"><span class="bar-label">Other</span><span class="bar-track"><span class="bar-fill" style="width:6%"></span></span><span class="bar-value">$96</span></div>
+                </div>
+              </div>
+              <div class="work-panel">
+                <p class="chart-caption">Pool target progress</p>
+                <div class="bar-chart">
+                  <div class="bar-row"><span class="bar-label">Emergency</span><span class="bar-track"><span class="bar-fill" style="width:75%"></span></span><span class="bar-value">75% · $4,500 left</span></div>
+                  <div class="bar-row"><span class="bar-label">Vacation</span><span class="bar-track"><span class="bar-fill" style="width:20%"></span></span><span class="bar-value">20% · $1,600 left</span></div>
+                  <div class="bar-row"><span class="bar-label">Auto pool</span><span class="bar-track"><span class="bar-fill danger" style="width:100%"></span></span><span class="bar-value danger-text">Over by $41</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="work-panel">
+              <h3>Net worth</h3>
+              <div class="metric-grid">
+                <div class="metric"><span>Actual net worth</span><strong>$184,250</strong><p>Actual balances only (default)</p></div>
+                <div class="metric warn"><span>With estimates</span><strong>$262,400</strong><p>Includes home/vehicle estimates</p></div>
+                <div class="metric"><span>Confidence</span><strong>Mixed</strong><p>Estimates never feed Spendable balance</p></div>
+              </div>
+              <label class="toggle-row" style="margin-top:12px;">
+                <input type="checkbox" id="networth-toggle" />
+                Include estimates (home, vehicle, other)
+              </label>
+              <div class="warn-band" id="networth-band" role="status" hidden style="margin-top:10px;">
+                Estimated values shown. Estimates require confidence, as-of date, and source notes, and never feed Spendable balance.
+              </div>
+            </div>
+          </section>
+
+          <!-- ===== Screen D: Split editor (contextual) ===== -->
+          <section class="screen" data-screen="split" aria-label="Split transaction">
+            <div class="screen-heading split-heading">
+              <div>
+                <h2>Split transaction</h2>
+                <p class="screen-sub">Contextual surface · launched from Transactions / Review</p>
+              </div>
+              <button type="button" data-nav="transactions">Close</button>
+            </div>
+
+            <div class="work-panel">
+              <h3>Imported fact (not editable)</h3>
+              <div class="detail-list">
+                <div><dt>Date</dt><dd>Jun 12</dd></div>
+                <div><dt>Source</dt><dd>Alliant CC</dd></div>
+                <div><dt>Merchant</dt><dd>REDACTED STORE</dd></div>
+                <div><dt>Amount</dt><dd>&minus;$189.45</dd></div>
+              </div>
+            </div>
+
+            <div class="work-panel">
+              <h3>Allocations</h3>
+              <div class="alloc-grid" id="split-rows" data-total="189.45">
+                <!-- rows injected by app.js -->
+              </div>
+              <div class="action-row" style="margin-top:10px;">
+                <button type="button" id="split-add" class="link-button">+ Add allocation line</button>
+              </div>
+            </div>
+
+            <div class="work-panel">
+              <div class="remainder-line">
+                <div><dt>Transaction amount</dt><dd class="num">&minus;$189.45</dd></div>
+                <div><dt>Allocated</dt><dd class="num" id="split-allocated">&minus;$189.45</dd></div>
+                <div><dt>Remainder</dt><dd class="num" id="split-remainder">$0.00</dd></div>
+                <div class="remainder-status" id="split-status" aria-live="polite">Balanced — ready to save</div>
+              </div>
+              <div class="audit-preview" style="margin-top:12px;">
+                <span>Audit preview</span>
+                <span>Creates 1 split decision event with <span id="split-line-count">3</span> lines</span>
+                <span>Imported row unchanged and remains linked</span>
+              </div>
+              <div class="button-row" style="margin-top:12px;">
+                <button type="button">Reset</button>
+                <button type="button" data-nav="transactions">Cancel</button>
+                <button type="button" class="primary-button" id="split-save">Save split</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- ===== Screen E: Receipt / line-item entry (contextual) ===== -->
+          <section class="screen" data-screen="receipt" aria-label="Receipt entry">
+            <div class="screen-heading split-heading">
+              <div>
+                <h2>Receipt entry</h2>
+                <p class="screen-sub">Manual line-item capture · no scrapers, no external calls</p>
+              </div>
+              <button type="button" data-nav="transactions">Close</button>
+            </div>
+
+            <div class="work-panel">
+              <div class="metric-grid">
+                <label class="field">Merchant<input type="text" value="REDACTED STORE" /></label>
+                <label class="field">Date<input type="text" value="2026-06-12" /></label>
+                <label class="field">Total<input type="text" id="receipt-total" value="$189.45" readonly /></label>
+              </div>
+              <p class="section-note" style="margin-top:10px;">Linked transaction: Jun 12 · Alliant CC · &minus;$189.45 &nbsp; <button type="button" class="auth-mini-link">Change</button> · <button type="button" class="auth-mini-link">Unlink</button></p>
+            </div>
+
+            <div class="work-panel">
+              <h3>Line items</h3>
+              <div class="alloc-grid" id="receipt-rows">
+                <!-- rows injected by app.js -->
+              </div>
+              <div class="action-row" style="margin-top:10px;">
+                <button type="button" id="receipt-add" class="link-button">+ Add line item</button>
+              </div>
+            </div>
+
+            <div class="work-panel">
+              <div class="remainder-line">
+                <div><dt>Items total</dt><dd class="num" id="receipt-items">$16.66</dd></div>
+                <div><dt>Receipt total</dt><dd class="num">$189.45</dd></div>
+                <div><dt id="receipt-unaccounted-label">Unaccounted</dt><dd class="num" id="receipt-unaccounted">$172.79</dd></div>
+                <div class="remainder-status" id="receipt-status" aria-live="polite">Optional — itemize as much as you want</div>
+              </div>
+              <div class="audit-preview" style="margin-top:12px;">
+                <span>Audit preview</span>
+                <span>Creates 1 receipt record linked to txn_redacted_044</span>
+              </div>
+              <div class="button-row" style="margin-top:12px;">
+                <button type="button" data-nav="transactions">Cancel</button>
+                <button type="button" data-nav="split">Save &amp; start split from items</button>
+                <button type="button" class="primary-button">Save receipt</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- ===== Screen G: Analyst export (contextual from Reports) ===== -->
+          <section class="screen" data-screen="export" aria-label="Analyst export">
+            <div class="screen-heading split-heading">
+              <div>
+                <h2>Reports / Analyst export</h2>
+                <p class="screen-sub">Period: June 2026 · Confidence: Provisional · Local only · nothing is sent</p>
+              </div>
+              <button type="button" class="primary-button">Build export pack</button>
+            </div>
+
+            <div class="work-panel">
+              <h3>Export pack contents</h3>
+              <div class="checklist">
+                <label><input type="checkbox" checked /> Reviewed transaction summary (categorized, aggregated)</label>
+                <label><input type="checkbox" checked /> Category spending totals</label>
+                <label><input type="checkbox" checked /> Fund pool commitments and pool remaining</label>
+                <label><input type="checkbox" checked /> Cashflow summary (6 months)</label>
+                <label><input type="checkbox" /> Raw transaction rows <span class="note">off — contains line-level detail</span></label>
+                <label class="disabled"><input type="checkbox" disabled /> Account numbers / balances <span class="note">never included</span></label>
+                <label><input type="checkbox" checked /> Validation / confidence notes</label>
+              </div>
+            </div>
+
+            <div class="work-panel">
+              <h3>Privacy boundary</h3>
+              <p class="section-note">This pack is generated locally and saved to a file you choose. Family Finance OS does not call any AI or external service. You decide where it goes.</p>
+            </div>
+
+            <div class="work-panel">
+              <h3>Prompt picker (copy to use in your own tool)</h3>
+              <div class="prompt-picker" id="prompt-picker" role="radiogroup" aria-label="Analyst prompt template">
+                <label class="prompt-option" data-prompt="monthly">
+                  <input type="radio" name="prompt" value="monthly" />
+                  <span><span class="prompt-title">Monthly spending review</span><p class="prompt-desc">Summarize categories and notable changes month over month.</p></span>
+                </label>
+                <label class="prompt-option selected" data-prompt="cashflow">
+                  <input type="radio" name="prompt" value="cashflow" checked />
+                  <span><span class="prompt-title">Cashflow &amp; savings-rate analysis</span><p class="prompt-desc">Net cashflow trend and savings rate over the period.</p></span>
+                </label>
+                <label class="prompt-option" data-prompt="goal">
+                  <input type="radio" name="prompt" value="goal" />
+                  <span><span class="prompt-title">Goal progress check-in</span><p class="prompt-desc">Progress toward reserved goal targets.</p></span>
+                </label>
+                <label class="prompt-option" data-prompt="custom">
+                  <input type="radio" name="prompt" value="custom" />
+                  <span><span class="prompt-title">Custom (write your own)</span><p class="prompt-desc">Start from a blank prompt.</p></span>
+                </label>
+              </div>
+
+              <div class="prompt-preview" style="margin-top:12px;">
+                <span class="muted-text">Selected prompt preview</span>
+                <blockquote id="prompt-text">Using the attached export pack, summarize net cashflow and savings rate for the period. Note any months marked provisional and do not infer beyond the provided data.</blockquote>
+                <div class="action-row">
+                  <button type="button" id="copy-prompt" class="link-button">Copy prompt</button>
+                  <span class="copy-toast" id="copy-toast" aria-live="polite">Prompt copied</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="button-row">
+              <button type="button">Preview pack</button>
+              <button type="button" class="primary-button">Export pack (.json + .md)</button>
+            </div>
+          </section>
+
+          <!-- ===== Stub screens (unchanged from v1) ===== -->
+          <section class="screen" data-screen="sources" aria-label="Sources">
+            <div class="screen-heading"><h2>Sources</h2><p class="screen-sub">Import inbox and source freshness</p></div>
+            <div class="stub-panel">Unchanged from v1. See <code>planning/ui_mockups_v1.md</code> — Screen 2: Sources / Import Inbox.</div>
+          </section>
+
+          <section class="screen" data-screen="review" aria-label="Review">
+            <div class="screen-heading split-heading">
+              <div><h2>Review</h2><p class="screen-sub">Validation issues and classification queue</p></div>
+              <div class="action-row">
+                <button type="button" data-nav="split">Open split editor</button>
+                <button type="button" data-nav="receipt">Open receipt entry</button>
+              </div>
+            </div>
+            <div class="stub-panel">Unchanged from v1. Split editing and receipt entry are contextual surfaces launched from here (buttons above).</div>
+          </section>
+
+          <section class="screen" data-screen="transactions" aria-label="Transactions">
+            <div class="screen-heading split-heading">
+              <div><h2>Transactions</h2><p class="screen-sub">Reviewed/current ledger view</p></div>
+              <div class="action-row">
+                <button type="button" data-nav="split">Split selected transaction</button>
+                <button type="button" data-nav="receipt">Add receipt</button>
+              </div>
+            </div>
+            <div class="stub-panel">Unchanged from v1 explorer. New in v1.1: contextual <strong>Split</strong> and <strong>Receipt</strong> actions (buttons above) open the editors.</div>
+          </section>
+
+          <section class="screen" data-screen="reports" aria-label="Reports">
+            <div class="screen-heading split-heading">
+              <div><h2>Reports</h2><p class="screen-sub">Monthly close and analyst export</p></div>
+              <button type="button" data-nav="export">Open analyst export</button>
+            </div>
+            <div class="stub-panel">Monthly close unchanged from v1. New in v1.1: <strong>Analyst export</strong> (button above).</div>
+          </section>
+
+          <section class="screen" data-screen="settings" aria-label="Settings">
+            <div class="screen-heading"><h2>Settings</h2><p class="screen-sub">Database-backed configuration</p></div>
+            <div class="stub-panel">Unchanged from v1. v1.1 adds auth/recovery and fund-pool settings tabs (see Auth screens preview).</div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <!-- ===================== AUTH STAGE (outside app frame) ===================== -->
+    <div class="auth-stage" id="auth-stage" hidden>
+      <div class="auth-mode-tabs" role="group" aria-label="Auth variant">
+        <button type="button" data-authmode="personal" aria-pressed="true">Personal</button>
+        <button type="button" data-authmode="qa" aria-pressed="false">QA dev bypass</button>
+        <button type="button" data-nav="home">Back to app</button>
+      </div>
+
+      <div class="auth-stack">
+        <div class="qa-banner" id="auth-qa-banner" hidden>QA synthetic demo — not real financial data</div>
+
+        <!-- F1: Login -->
+        <div class="auth-card" data-auth="login">
+          <div class="auth-brand">
+            <h2 id="auth-brand-name">Family Finance OS</h2>
+            <p>Local sign in</p>
+          </div>
+          <label class="field" style="text-transform:none;">Passphrase
+            <input type="password" value="synthetic-passphrase" />
+          </label>
+          <button type="button" class="auth-mini-link" id="toggle-passphrase" style="justify-self:start;">Show passphrase</button>
+          <label class="field" style="text-transform:none;" id="totp-field">Authenticator code (6 digits)
+            <input type="text" class="code-input" inputmode="numeric" maxlength="6" placeholder="------" />
+          </label>
+          <label class="field" style="text-transform:none;display:none;" id="recovery-field">Recovery code
+            <input type="text" class="code-input" placeholder="REDACTED-XXXX" />
+          </label>
+          <button type="button" class="primary-button">Sign in</button>
+          <div class="qa-bypass" id="qa-bypass" hidden>
+            <p class="auth-foot">— or —</p>
+            <button type="button" class="danger-button" style="width:100%;">Dev bypass (QA only) · synthetic owner</button>
+          </div>
+          <p class="auth-foot">Lost your device? <button type="button" class="auth-mini-link" id="recovery-link">Use a recovery code</button></p>
+          <p class="auth-foot">Local only · 127.0.0.1 · No data leaves device</p>
+        </div>
+
+        <!-- F2/F3: First-boot enrollment wizard -->
+        <div class="auth-card" data-auth="enroll">
+          <div class="auth-brand">
+            <h2>First-boot setup — Owner enrollment</h2>
+            <p id="wizard-step-label">Step 1 of 3: Set a passphrase</p>
+          </div>
+          <div class="wizard-steps" id="wizard-steps">
+            <span class="step done" data-step="1">Passphrase</span>
+            <span class="step" data-step="2">Authenticator</span>
+            <span class="step" data-step="3">Recovery codes</span>
+          </div>
+
+          <!-- Step 1 -->
+          <div data-wizard-panel="1">
+            <label class="field" style="text-transform:none;">Passphrase
+              <input type="password" placeholder="Enter passphrase" />
+            </label>
+            <label class="field" style="text-transform:none;margin-top:10px;">Confirm passphrase
+              <input type="password" placeholder="Re-enter passphrase" />
+            </label>
+            <p class="section-note" style="margin-top:8px;">Strength: <strong class="ok-text">Strong</strong></p>
+          </div>
+
+          <!-- Step 2 -->
+          <div data-wizard-panel="2" hidden>
+            <p class="section-note">Scan this QR code in your authenticator app.</p>
+            <div class="qr-row" style="margin-top:10px;">
+              <div class="qr-placeholder" role="img" aria-label="Synthetic QR code placeholder"></div>
+              <div>
+                <p class="section-note">Manual key</p>
+                <code>REDACTED-SECRET-KEY</code>
+              </div>
+            </div>
+            <label class="field" style="text-transform:none;margin-top:12px;">Enter the 6-digit code to confirm
+              <input type="text" class="code-input" inputmode="numeric" maxlength="6" placeholder="------" />
+            </label>
+          </div>
+
+          <!-- Step 3 -->
+          <div data-wizard-panel="3" hidden>
+            <p class="section-note">Save these 10 one-time recovery codes. They are shown once and let you sign in if you lose your authenticator.</p>
+            <div class="recovery-codes" style="margin-top:10px;">
+              <span>1) REDACTED-AAAA</span><span>6) REDACTED-FFFF</span>
+              <span>2) REDACTED-BBBB</span><span>7) REDACTED-GGGG</span>
+              <span>3) REDACTED-CCCC</span><span>8) REDACTED-HHHH</span>
+              <span>4) REDACTED-DDDD</span><span>9) REDACTED-IIII</span>
+              <span>5) REDACTED-EEEE</span><span>10) REDACTED-JJJJ</span>
+            </div>
+            <div class="action-row" style="margin-top:10px;">
+              <button type="button" class="link-button">Copy codes</button>
+              <button type="button" class="link-button">Download .txt</button>
+            </div>
+            <label class="checkbox-line" style="margin-top:12px;">
+              <input type="checkbox" id="recovery-ack" />
+              I have saved these codes somewhere safe.
+            </label>
+          </div>
+
+          <div class="button-row">
+            <button type="button" id="wizard-back" disabled>Back</button>
+            <button type="button" class="primary-button" id="wizard-next">Confirm &amp; continue</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
