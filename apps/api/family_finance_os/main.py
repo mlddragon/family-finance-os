@@ -3,7 +3,7 @@ from pathlib import Path
 import os
 from typing import Any, AsyncIterator, Dict, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -11,7 +11,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from family_finance_os import __version__
-from family_finance_os.actors import ActorContext, actors_payload
+from family_finance_os.actors import ActorContext, actors_payload, derive_actor_context
 from family_finance_os.category_service import (
     CategoryCreateRequest,
     CategoryError,
@@ -41,6 +41,15 @@ from family_finance_os.import_validation import (
 )
 from family_finance_os.ledger_normalization import get_transaction, list_transactions
 from family_finance_os.operator_summary import operator_summary_payload
+from family_finance_os.permissions import (
+    ActionKey,
+    DataScopeKey,
+    PermissionDeniedError,
+    PermissionEvaluator,
+    PermissionPreviewRequest,
+    actor_context_for_persona,
+    effective_permission_payload,
+)
 from family_finance_os.reporting import (
     AdvisorExportRequest,
     MonthlyCloseRequest,
@@ -69,6 +78,8 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 class AcceptImportBatchRequest(BaseModel):
     acknowledge_warnings: bool = False
+    actor: str = Field(default="owner", min_length=1)
+    actor_context: Optional[ActorContext] = None
 
 
 class VoidImportBatchRequest(BaseModel):
@@ -175,6 +186,94 @@ def create_app(
     def get_actors() -> Dict[str, Any]:
         return actors_payload()
 
+    def permission_http_error(exc: PermissionDeniedError) -> HTTPException:
+        return HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "code": exc.code,
+                "message": exc.message,
+                "suggestion_allowed": exc.suggestion_allowed,
+            },
+        )
+
+    def require_permission(
+        session,
+        actor: str,
+        action_key: ActionKey,
+        data_scope_key: DataScopeKey,
+        *,
+        actor_context: Optional[ActorContext] = None,
+    ) -> None:
+        try:
+            PermissionEvaluator(session).require(
+                actor,
+                action_key,
+                data_scope_key,
+                actor_context=actor_context,
+            )
+        except PermissionDeniedError as exc:
+            raise permission_http_error(exc) from exc
+
+    def resolve_actor_context(
+        actor: Optional[str],
+        actor_context_header: Optional[str],
+        actor_context: Optional[ActorContext] = None,
+    ) -> tuple[str, Optional[ActorContext]]:
+        resolved_actor = actor or "owner"
+        if actor_context is not None:
+            return resolved_actor, actor_context
+        if actor_context_header:
+            return resolved_actor, ActorContext.model_validate_json(actor_context_header)
+        return resolved_actor, None
+
+    @app.get("/api/permissions/effective")
+    def get_effective_permission(
+        action_key: str = Query(..., min_length=1),
+        data_scope_key: str = Query(..., min_length=1),
+        actor: Optional[str] = Query(default=None),
+        x_actor_context: Optional[str] = Header(default=None, alias="X-Actor-Context"),
+    ) -> Dict[str, Any]:
+        resolved_actor, resolved_context = resolve_actor_context(actor, x_actor_context)
+        with create_session() as session:
+            evaluator = PermissionEvaluator(session)
+            evaluation = evaluator.evaluate(
+                derive_actor_context(resolved_actor, resolved_context),
+                action_key,
+                data_scope_key,
+            )
+            return effective_permission_payload(evaluation)
+
+    @app.post("/api/permissions/preview")
+    def preview_permission(payload: PermissionPreviewRequest) -> Dict[str, Any]:
+        if not (runtime_identity.qa_controls_enabled or runtime_identity.dev_mode):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "permission_preview_unavailable",
+                    "message": "Permission preview is available only in QA or dev mode.",
+                },
+            )
+        try:
+            preview_context = actor_context_for_persona(payload.persona_key)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "unknown_persona_key", "message": str(exc)},
+            ) from exc
+
+        with create_session() as session:
+            evaluator = PermissionEvaluator(session)
+            evaluation = evaluator.evaluate(
+                preview_context,
+                payload.action_key,
+                payload.data_scope_key,
+                scope_selector=payload.scope_selector,
+            )
+            return {
+                "persona_key": payload.persona_key,
+                **effective_permission_payload(evaluation),
+            }
+
     def import_validation_http_error(exc: ImportValidationError) -> HTTPException:
         return HTTPException(
             status_code=exc.status_code,
@@ -205,11 +304,23 @@ def create_app(
     async def upload_source_file(
         file: UploadFile = File(...),
         source_key: Optional[str] = Form(default=None),
+        actor: Optional[str] = Form(default="owner"),
+        actor_context_json: Optional[str] = Form(default=None),
     ) -> Dict[str, Any]:
         active_data_root = get_data_root()
         filename = file.filename or "uploaded-file"
         content = await file.read()
+        actor_context = (
+            ActorContext.model_validate_json(actor_context_json) if actor_context_json else None
+        )
         with create_session() as session:
+            require_permission(
+                session,
+                actor or "owner",
+                ActionKey.IMPORTS_RUN,
+                DataScopeKey.IMPORTED_SOURCE_RECORDS,
+                actor_context=actor_context,
+            )
             try:
                 batch = save_upload(session, active_data_root, filename, content, source_key_hint=source_key)
                 return {"import_batch": serialize_import_batch(batch)}
@@ -232,6 +343,13 @@ def create_app(
         active_data_root = get_data_root()
         request_payload = payload or AcceptImportBatchRequest()
         with create_session() as session:
+            require_permission(
+                session,
+                request_payload.actor,
+                ActionKey.IMPORTS_RUN,
+                DataScopeKey.IMPORTED_SOURCE_RECORDS,
+                actor_context=request_payload.actor_context,
+            )
             try:
                 return accept_import_batch(
                     session,
@@ -246,6 +364,13 @@ def create_app(
     def void_batch(batch_id: str, payload: VoidImportBatchRequest) -> Dict[str, Any]:
         active_data_root = get_data_root()
         with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.IMPORTS_RUN,
+                DataScopeKey.IMPORTED_SOURCE_RECORDS,
+                actor_context=payload.actor_context,
+            )
             try:
                 return void_import_batch(
                     session,
@@ -297,6 +422,13 @@ def create_app(
     @app.post("/api/decision-events")
     def post_decision_event(payload: DecisionEventRequest) -> Dict[str, Any]:
         with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
             try:
                 return create_decision_event(session, payload)
             except DecisionEventError as exc:
@@ -320,6 +452,23 @@ def create_app(
     def patch_settings(payload: SettingsPatchRequest) -> Dict[str, Any]:
         active_data_root = get_data_root()
         with create_session() as session:
+            source_domains = {"sources", "source_profiles"}
+            if any(change.domain in source_domains for change in payload.changes):
+                require_permission(
+                    session,
+                    payload.actor,
+                    ActionKey.IMPORTS_SETTINGS_CONFIGURE,
+                    DataScopeKey.SOURCE_PROFILES_IMPORT_CONFIG,
+                    actor_context=payload.actor_context,
+                )
+            else:
+                require_permission(
+                    session,
+                    payload.actor,
+                    ActionKey.RUNTIME_SETTINGS_MANAGE,
+                    DataScopeKey.RUNTIME_SETTINGS,
+                    actor_context=payload.actor_context,
+                )
             try:
                 events = apply_settings_patch(session, payload)
                 refresh_source_coverage_findings(session)
@@ -376,6 +525,13 @@ def create_app(
     def post_reports_run(payload: ReportRunRequest) -> Dict[str, Any]:
         active_data_root = get_data_root()
         with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REPORTS_GENERATE,
+                DataScopeKey.REPORTS_DASHBOARDS,
+                actor_context=payload.actor_context,
+            )
             try:
                 return run_reports(
                     session,
@@ -390,6 +546,13 @@ def create_app(
     def post_monthly_close_draft(payload: MonthlyCloseRequest) -> Dict[str, Any]:
         active_data_root = get_data_root()
         with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.MONTHLY_CLOSE_RUN,
+                DataScopeKey.MONTHLY_CLOSE,
+                actor_context=payload.actor_context,
+            )
             try:
                 return create_monthly_close(
                     session,
@@ -405,6 +568,13 @@ def create_app(
     def post_monthly_close_finalize(payload: MonthlyCloseRequest) -> Dict[str, Any]:
         active_data_root = get_data_root()
         with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.MONTHLY_CLOSE_RUN,
+                DataScopeKey.MONTHLY_CLOSE,
+                actor_context=payload.actor_context,
+            )
             try:
                 return create_monthly_close(
                     session,
@@ -420,6 +590,13 @@ def create_app(
     def post_advisor_export(payload: AdvisorExportRequest) -> Dict[str, Any]:
         active_data_root = get_data_root()
         with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.EXPORTS_CREATE,
+                DataScopeKey.ADVISOR_EXPORT_ARTIFACTS,
+                actor_context=payload.actor_context,
+            )
             try:
                 return create_advisor_export(
                     session,
