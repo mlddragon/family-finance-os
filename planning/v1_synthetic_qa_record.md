@@ -37,7 +37,7 @@ Each scenario: `make qa-reset CONFIRM="RESET QA DATA"` then `make qa-seed QA_SCE
 ## Owner sign-off
 
 - [ ] Owner completed governance QA script on `:28081` (personas, elevation, suggestions optional path)
-- [ ] Owner confirms **ready for `v1.0.0-rc.1` tag**
+- [ ] Owner confirms **ready for `v1.0.0-rc.1` tag** — tag cut 2026-06-26 as [v1.0.0-rc.1](https://github.com/mlddragon/family-finance-os/releases/tag/v1.0.0-rc.1) after PR [#97](https://github.com/mlddragon/family-finance-os/pull/97)
 
 ## Stop conditions
 
