@@ -157,6 +157,22 @@ def default_settings() -> list[dict[str, Any]]:
             "editable": False,
             "note_required": True,
         },
+        {
+            "domain": "approval",
+            "setting_key": "approval.approval_mode_enabled",
+            "friendly_name": "Approval mode enabled",
+            "value": False,
+            "editable": True,
+            "note_required": True,
+        },
+        {
+            "domain": "approval",
+            "setting_key": "approval.high_value_threshold",
+            "friendly_name": "High-value approval threshold",
+            "value": 500,
+            "editable": True,
+            "note_required": True,
+        },
     ]
 
     for profile in iter_source_profiles():
@@ -283,6 +299,20 @@ def _validate_change(change: SettingChange, existing: Setting) -> None:
             raise SettingsValidationError(
                 "invalid_report_title_template",
                 "Report title templates must include {month} and be 200 characters or fewer.",
+            )
+
+    if change.domain == "approval" and change.setting_key == "approval.approval_mode_enabled":
+        if not isinstance(change.value, bool):
+            raise SettingsValidationError(
+                "invalid_approval_mode_setting",
+                "Approval mode enabled must be a boolean value.",
+            )
+
+    if change.domain == "approval" and change.setting_key == "approval.high_value_threshold":
+        if not isinstance(change.value, (int, float)) or change.value <= 0:
+            raise SettingsValidationError(
+                "invalid_high_value_threshold",
+                "High-value approval threshold must be a positive number.",
             )
 
     if change.domain == "sources" and change.setting_key.endswith(".profile_confirmation_status"):

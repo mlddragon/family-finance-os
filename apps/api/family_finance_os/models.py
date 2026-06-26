@@ -365,6 +365,75 @@ class ElevatedModeEvent(TimestampedModel):
     exit_reason: Mapped[Optional[str]] = mapped_column(String(120))
 
 
+class Suggestion(TimestampedModel):
+    __tablename__ = "suggestions"
+
+    target_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    action_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    decision_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    previous_value: Mapped[Optional[str]] = mapped_column(Text)
+    proposed_value: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    proposer_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    proposer_actor_context_json: Mapped[Optional[str]] = mapped_column(Text)
+    suggestion_source: Mapped[str] = mapped_column(String(80), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    decision_event_id: Mapped[Optional[str]] = mapped_column(String(36))
+    approval_request_id: Mapped[Optional[str]] = mapped_column(String(36))
+
+    events: Mapped[list["SuggestionEvent"]] = relationship(back_populates="suggestion")
+
+
+class SuggestionEvent(TimestampedModel):
+    __tablename__ = "suggestion_events"
+
+    suggestion_id: Mapped[str] = mapped_column(ForeignKey("suggestions.id"), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    actor_context_json: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text)
+
+    suggestion: Mapped[Suggestion] = relationship(back_populates="events")
+
+
+class ApprovalRequest(TimestampedModel):
+    __tablename__ = "approval_requests"
+
+    target_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    target_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    action_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    decision_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    field_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    previous_value: Mapped[Optional[str]] = mapped_column(Text)
+    proposed_value: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    proposer_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    proposer_actor_context_json: Mapped[Optional[str]] = mapped_column(Text)
+    policy_trigger: Mapped[str] = mapped_column(String(120), nullable=False)
+    expires_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_suggestion_id: Mapped[Optional[str]] = mapped_column(ForeignKey("suggestions.id"))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    applied_decision_event_id: Mapped[Optional[str]] = mapped_column(String(36))
+
+    events: Mapped[list["ApprovalRequestEvent"]] = relationship(back_populates="approval_request")
+
+
+class ApprovalRequestEvent(TimestampedModel):
+    __tablename__ = "approval_request_events"
+
+    approval_request_id: Mapped[str] = mapped_column(ForeignKey("approval_requests.id"), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    actor_context_json: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text)
+
+    approval_request: Mapped[ApprovalRequest] = relationship(back_populates="events")
+
+
 @event.listens_for(Session, "before_flush")
 def prevent_imported_row_mutation(session: Session, _flush_context, _instances) -> None:
     for obj in session.dirty:

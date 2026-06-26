@@ -52,6 +52,10 @@ EXPECTED_TABLES = {
     "monthly_closes",
     "permission_state_events",
     "elevated_mode_events",
+    "suggestions",
+    "suggestion_events",
+    "approval_requests",
+    "approval_request_events",
 }
 
 
