@@ -4,10 +4,15 @@ This document captures owner decisions from the interactive planning interview a
 
 ## Status
 
-- App implementation has not started.
-- Architecture has not been finalized.
-- Database, UI framework, import automation, and AI integration patterns still require explicit owner approval before implementation.
-- These decisions should guide the next architecture-options conversation.
+Updated 2026-06-25. The decision content below remains the owner-approved planning record; this section tracks current implementation alignment only.
+
+- v0.1.0 through v0.4.0 are implemented on the public `family-finance-os` repository (pyproject `0.4.0`).
+- Approved architecture direction is landed: local Docker Compose, browser UI, SQLite operational state, external `DATA_ROOT`, synthetic CI, personal/QA side-by-side runtimes.
+- Personal instance: `ffos-personal` at `127.0.0.1:28080`. QA synthetic instance: `ffos-qa` at `127.0.0.1:28081` (legacy `dillon-*` Compose names deprecated).
+- Lightweight local actor/persona context is implemented; full permission enforcement, elevated mode, approval mode, and auth remain future v1 RC scope.
+- Issue #55 view-as direction approved 2026-06-25: non-mutating permission preview in B.1; true impersonation deferred. See `planning/issue_55_view_as_decision_record.md`.
+- Owner real-data smoke is deferred until v1.0.0 RC; use synthetic QA validation only until then. See `docs/qa_validation_strategy.md`.
+- Remaining owner approvals still gate cost-bearing tooling, cloud dependencies, AI data-access changes, credential automation, and major architecture shifts beyond the landed v1 foundation.
 
 ## Runtime And Deployment
 

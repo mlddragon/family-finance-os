@@ -1703,11 +1703,17 @@ Version `0.1.0` established the local Docker MVP with synthetic data, SQLite ope
 
 Version `0.2.0` established open-source readiness foundations: MPL-2.0 licensing, generic default branding, i18n scaffolding with maintained `en-US`, database-backed install settings, source templates separated from required sources, and a stable category catalog.
 
-## 21.2 Finish current verification and owner smoke tracking
+## 21.2 QA and verification until v1.0.0 RC
 
-The current build has already received owner smoke testing for the implemented v1 behaviors. Remaining verification work should focus on confirming repository hygiene, CI/test health, and local Docker readiness without committing real financial data, generated reports, database files, or credentials.
+Versions `0.1.0` through `0.4.0` are released. The closed-loop MVP runs on synthetic data in CI and in the semi-persistent QA environment at `127.0.0.1:28081`.
 
-Owner real-data smoke testing remains a manual checkpoint. Evidence captured in the repository must be sanitized counts, source names, and pass/fail notes only.
+Until **v1.0.0 RC**, validation must use **synthetic QA data only**:
+
+- Run automated CI and the five QA seed scenarios (`baseline`, `stale-source`, `blocked-import`, `review-backlog`, `monthly-close-ready`).
+- Use `docs/qa_validation_strategy.md` as the validation source of truth.
+- Update synthetic fixtures and scenario definitions when behavior changes require new coverage.
+
+**Owner real-data smoke is deferred until v1.0.0 RC.** Do not treat personal real-data import or close flows as a pre-RC release gate. When RC is approved, use `docs/owner_smoke_checklist_v1.md` with sanitized evidence only (counts, statuses, validation codes, pass/fail notes — no raw transaction rows in git or GitHub).
 
 ## 21.3 Version 0.3.0 reviewability, QA, and audit foundation
 

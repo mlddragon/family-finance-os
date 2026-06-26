@@ -2,15 +2,17 @@
 
 All notable changes to Family Finance OS will be tracked here.
 
-## 0.4.0 - Planned
+## 0.4.0 - 2026-06-23
 
 - Rehome GitHub repository to `mlddragon/family-finance-os`.
 - Rename Python package to `family_finance_os` and default SQLite file to `family_finance_os.sqlite3` with legacy `dillon_finances.sqlite3` fallback.
 - Replace runtime env vars with `FFOS_*` while keeping one-release Compose fallbacks for `DILLON_FINANCES_*`.
+- Rename Compose projects to `ffos-personal` and `ffos-qa` (legacy `dillon-*` deprecated).
+- Add five named QA seed scenarios beyond `baseline`.
 - Add dedicated Security CI workflow, agent entrypoints, and Codex security-analyst role guidance.
 - Archive prior prototype repository `Family_Finance_planner` as private research reference.
 
-## 0.3.0 - Planned
+## 0.3.0 - 2026-06-21
 
 - Add root AI-agent guidance through `AGENTS.md`, `CODEX.md`, and `CHATGPT.md`.
 - Improve Settings usability by hiding read-only settings by default.
