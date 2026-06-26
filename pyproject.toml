@@ -1,6 +1,6 @@
 [project]
 name = "family-finance-os"
-version = "0.4.0"
+version = "0.5.0"
 description = "Local-first family financial operating system"
 license = { text = "MPL-2.0" }
 authors = [{ name = "Mason Dillon" }]

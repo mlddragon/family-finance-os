@@ -4,14 +4,15 @@ This document captures owner decisions from the interactive planning interview a
 
 ## Status
 
-Updated 2026-06-25. The decision content below remains the owner-approved planning record; this section tracks current implementation alignment only.
+Updated 2026-06-26. The decision content below remains the owner-approved planning record; this section tracks current implementation alignment only.
 
-- v0.1.0 through v0.4.0 are implemented on the public `family-finance-os` repository (pyproject `0.4.0`).
+- v0.1.0 through v0.5.0 are implemented on the public `family-finance-os` repository (pyproject `0.5.0` after RC prep).
 - Approved architecture direction is landed: local Docker Compose, browser UI, SQLite operational state, external `DATA_ROOT`, synthetic CI, personal/QA side-by-side runtimes.
 - Personal instance: `ffos-personal` at `127.0.0.1:28080`. QA synthetic instance: `ffos-qa` at `127.0.0.1:28081` (legacy `dillon-*` Compose names deprecated).
-- Lightweight local actor/persona context is implemented; full permission enforcement, elevated mode, approval mode, and auth remain future v1 RC scope.
+- Permission enforcement (B.1), elevated mode (B.2), suggestions/approvals (B.3), and QA permission preview in Settings are implemented on synthetic QA. Authentication and true impersonation remain deferred.
 - Issue #55 view-as direction approved 2026-06-25: non-mutating permission preview in B.1; true impersonation deferred. See `planning/issue_55_view_as_decision_record.md`.
-- Owner real-data smoke is deferred until v1.0.0 RC; use synthetic QA validation only until then. See `docs/qa_validation_strategy.md`.
+- Owner real-data smoke is deferred until after `v1.0.0-rc.N` and explicit owner approval; use synthetic QA validation until then. See `docs/qa_validation_strategy.md`.
+- Amazon vendor enrichment is explicitly **post-v1.0.0 stable** (v1.1 direction per `planning/first_closed_loop_slice_v1.md`).
 - Remaining owner approvals still gate cost-bearing tooling, cloud dependencies, AI data-access changes, credential automation, and major architecture shifts beyond the landed v1 foundation.
 
 ## Runtime And Deployment

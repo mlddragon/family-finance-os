@@ -62,11 +62,46 @@ Update synthetic fixtures and scenario definitions in git when product behavior 
 
 PRs that change app, UI, API, Docker, import, review, report, or data-integrity behavior must include a human QA script with scope, preconditions, steps, expected results, stop conditions, and known gaps.
 
-## Deferred Until v1.0.0 RC
+## Governance validation (0.5.0)
+
+Run on semi-persistent QA (`http://127.0.0.1:28081`) before RC tag. Aligns with [planning/v040_orchestration_master_qa_plan.md](../planning/v040_orchestration_master_qa_plan.md) §3.
+
+**Preconditions:** `make qa-up`; QA synthetic banner visible; seed `review-backlog` for suggestion steps.
+
+### Permission matrix by persona
+
+1. **Finance Manager** — import upload, review save, reports, monthly close enabled.
+2. **Finance Contributor** — review save disabled; suggestion affordances visible where implemented.
+3. **Administrator** — routine financial mutations disabled; settings edits per matrix.
+4. **Settings → Permission preview** (expand collapsible section) — change preview persona; confirm matrix matches mutating vs read-only expectations.
+
+### Control-plane elevation
+
+1. Header **Control plane** dropdown — select **Administrator Mode** or **Financial Governor Mode**.
+2. Lightbox requires **purpose** selection; Confirm disabled until chosen.
+3. For **Approval-rule change** purpose, note is required; other purposes allow empty note.
+4. While elevated, import/review/report mutations disabled; status strip shows mode and countdown.
+5. Switch elevated context — lightbox re-prompts (no silent switch).
+6. **Operator Mode** exits elevation without lightbox.
+
+### Suggestions and approvals
+
+1. On `review-backlog`, as **Finance Contributor**, create a suggestion on a transaction.
+2. As **Finance Manager**, accept and dismiss suggestions from the queue.
+3. **Optional second pass:** enable `approval.approval_mode_enabled` in QA Settings only; convert suggestion to approval; approve or deny from approvals queue.
+
+**Stop if:** personal `:28080` data affected; elevated mode allows financial mutations; preview panel allows writes; real financial data appears in notes or screenshots.
+
+## Deferred until after v1.0.0-rc.N
 
 - Owner real-data smoke using [docs/owner_smoke_checklist_v1.md](owner_smoke_checklist_v1.md)
-- Personal-data validation as a release acceptance criterion
-- Permission enforcement and view-as preview implementation (see `planning/issue_55_view_as_decision_record.md`)
+- Personal-data validation as a release acceptance criterion for **stable** v1.0.0
+- True impersonation / auth ([#55](https://github.com/mlddragon/family-finance-os/issues/55) — preview only today)
+
+## Implemented on main (no longer deferred)
+
+- Permission enforcement and non-mutating permission preview — B.1 ([#87](https://github.com/mlddragon/family-finance-os/pull/87), [#89](https://github.com/mlddragon/family-finance-os/pull/89), [#96](https://github.com/mlddragon/family-finance-os/pull/96))
+- Elevated mode and suggestions/approvals — B.2/B.3 ([#94](https://github.com/mlddragon/family-finance-os/pull/94), [#96](https://github.com/mlddragon/family-finance-os/pull/96))
 
 ## Evidence Boundaries
 

@@ -1,6 +1,6 @@
 # v1 Completion Audit
 
-Status: synthetic v1 MVP foundation complete through v0.4.0; owner real-data smoke deferred to v1.0.0 RC. Pre-RC validation uses synthetic QA only (`docs/qa_validation_strategy.md`).
+Status: synthetic v1 MVP foundation complete through v0.5.0 governance; owner real-data smoke deferred until after `v1.0.0-rc.N` and explicit owner approval. Pre-RC validation uses synthetic QA only (`docs/qa_validation_strategy.md`).
 
 This document maps the approved v1 implementation plan to current evidence. It does not add app code, schema, fixtures, generated reports, raw data, credentials, API keys, or runtime databases.
 
@@ -34,8 +34,11 @@ The product remains local-first for v1:
 | Hardening and synthetic E2E | Complete for synthetic v1 | `tests/api/test_v1_hardening_e2e.py`, `scripts/run_docker_e2e.py`, PRs #23 through #42 |
 | Owner real-data smoke | Deferred to v1.0.0 RC | `docs/owner_smoke_checklist_v1.md`, `docs/qa_validation_strategy.md` |
 | QA named scenarios (5) | Complete | `make qa-seed QA_SCENARIO=...`, README scenario table |
-| Actor/persona context | Complete (no enforcement yet) | Actor context APIs/UI; permission enforcement deferred |
+| Actor/persona context + permission enforcement (B.1) | Complete on synthetic | `permissions.py`, UI gating, Settings permission preview (QA) |
+| Elevated mode (B.2) | Complete on synthetic | `elevated_mode.py`, Control plane UI, API tests |
+| Suggestions and approvals (B.3) | Complete on synthetic | `suggestions.py`, `approvals.py`; approval mode off by default |
 | Self-hosted QA auto-update | Complete | PR #85, `.github/workflows/qa-auto-update.yml` |
+| Amazon vendor enrichment | **Post-v1.0.0** | Deferred per `planning/first_closed_loop_slice_v1.md` and owner decision |
 
 ## Acceptance Criteria Audit
 
@@ -90,20 +93,26 @@ Known v1 boundaries:
 - No bank aggregator or credential storage in v1.
 - No real-data fixtures in git.
 
-## Pending Before v1.0.0 RC Owner Acceptance
+## Pending Before v1.0.0 RC Tag
 
-Required before declaring owner-accepted v1.0.0 RC:
+Required before tagging `v1.0.0-rc.N`:
 
-1. Complete v1 RC foundation work on `phase/v1-rc-foundation` (permission enforcement, approved preview model, remaining planning gates).
-2. Run the full verification set with synthetic QA scenarios at `127.0.0.1:28081` per `docs/qa_validation_strategy.md`.
-3. Merge v1 RC foundation into the release line and tag `v1.0.0-rc` when scope is complete.
-4. Owner explicitly approves a local real-data smoke run (deferred until this RC gate).
-5. Perform the owner smoke using `docs/owner_smoke_checklist_v1.md` against personal `ffos-personal` at `127.0.0.1:28080`.
-6. Record only sanitized smoke evidence: counts, statuses, validation codes, and pass/fail notes.
-7. Do not record raw transaction descriptions, account details, balances, filenames with private information, generated reports, databases, screenshots containing financial rows, or transaction-level values in git or GitHub.
+1. Run the full synthetic verification set at `127.0.0.1:28081` per `docs/qa_validation_strategy.md` and record in `planning/v1_synthetic_qa_record.md`.
+2. Complete governance QA script (permissions, elevation, suggestions/approvals).
+3. Green CI and Security workflows on `main`.
+4. RC release gates in `docs/runbooks/v1-rc-release-gates.md` (tag protection, waived Codex #80 for RC).
 
-Until v1.0.0 RC, **do not** treat owner real-data smoke as a release blocker. Use the five QA seed scenarios and CI instead.
+## Pending Before v1.0.0 Stable
+
+Required after RC tag:
+
+1. Owner explicitly approves a local real-data smoke run.
+2. Perform owner smoke using `docs/owner_smoke_checklist_v1.md` against personal `ffos-personal` at `127.0.0.1:28080`.
+3. Record only sanitized smoke evidence: counts, statuses, validation codes, and pass/fail notes.
+4. Do not record raw transaction descriptions, account details, balances, filenames with private information, generated reports, databases, screenshots containing financial rows, or transaction-level values in git or GitHub.
+
+Until owner approves real-data smoke, **do not** treat personal-data validation as a release blocker. Use the five QA seed scenarios and CI instead.
 
 ## Recommended Next Step
 
-Continue v1 RC foundation implementation and synthetic QA validation. Schedule owner real-data smoke only after v1.0.0 RC scope is merged and explicitly approved.
+Complete synthetic QA marathon and tag `v1.0.0-rc.1`. Schedule owner real-data smoke only after RC tag and explicit owner approval.
