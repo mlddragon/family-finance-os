@@ -51,19 +51,25 @@ Never commit or record: raw transaction rows, merchants, balances, account ident
 
 Complete before tagging `v1.0.0-rc.N`:
 
-- [ ] `phase/v1-rc-foundation` (or successor RC branch) merged to `main` with green CI and Security workflows
-- [ ] Permission enforcement and B.1 permission preview scope complete per [planning/issue_55_view_as_decision_record.md](../../planning/issue_55_view_as_decision_record.md)
-- [ ] All five named QA seed scenarios pass on semi-persistent QA
+- [x] RC foundation and 0.5.0 governance merged to `main` with green CI and Security workflows
+- [x] Permission enforcement and B.1 permission preview complete per [planning/issue_55_view_as_decision_record.md](../../planning/issue_55_view_as_decision_record.md)
+- [x] All five named QA seed scenarios pass on semi-persistent QA — see [planning/v1_synthetic_qa_record.md](../../planning/v1_synthetic_qa_record.md)
 - [ ] Open P0/P1 security findings resolved or explicitly accepted by owner
-- [ ] Tag protection and GitHub Release policy decided ([#72](#tag-protection-and-github-releases-issue-72))
-- [ ] Codex subscription GitHub integration complete or explicitly waived for RC ([#80](https://github.com/mlddragon/family-finance-os/issues/80))
-- [ ] Second maintainer posture reviewed ([#73](https://github.com/mlddragon/family-finance-os/issues/73)) — admin bypass remains acceptable while solo maintainer
+- [ ] Tag protection enabled for `v*` ([#72](#tag-protection-and-github-releases-issue-72)) — **owner action in GitHub repo settings**
+- [x] Codex subscription GitHub integration **waived for RC** ([#80](https://github.com/mlddragon/family-finance-os/issues/80)); manual `@codex review` only
+- [x] Second maintainer posture reviewed ([#73](https://github.com/mlddragon/family-finance-os/issues/73)) — solo-maintainer admin bypass acceptable
 
 ## Tag protection and GitHub Releases (issue #72)
 
 Tracked in [#72](https://github.com/mlddragon/family-finance-os/issues/72).
 
-**Decisions already made for v0.4.0 rehome:**
+**Owner action before RC tag (recommended):**
+
+1. GitHub → **Settings** → **Tags** → add rule for pattern `v*`
+2. Enable: restrict deletions; restrict force-push; optionally require signed tags
+3. Do not block tag creation for maintainers who will cut RC releases
+
+**Decisions for v0.4.0 rehome (historical):**
 
 - No tag protection on `v*` yet
 - `v0.4.0` published as the public rehome boundary
@@ -122,4 +128,6 @@ Stop RC tagging if:
 - [docs/qa_validation_strategy.md](../qa_validation_strategy.md) — validation layers and deferred gates
 - [docs/owner_smoke_checklist_v1.md](../owner_smoke_checklist_v1.md) — owner real-data smoke (RC only)
 - [docs/runbooks/public-release-v0.4.0.md](public-release-v0.4.0.md) — completed v0.4.0 rehome steps
+- [planning/v1_synthetic_qa_record.md](../../planning/v1_synthetic_qa_record.md) — synthetic scenario validation record
+- [docs/runbooks/v1-owner-smoke-handoff.md](v1-owner-smoke-handoff.md) — post-RC owner smoke steps
 - [planning/owner_decision_record.md](../../planning/owner_decision_record.md) — owner-approved planning constraints

@@ -1,49 +1,81 @@
-# v1.0.0 RC Foundation — Review Guide
+# v1.0.0 RC Validation Guide
 
-Branch: **`phase/v1-rc-foundation`**
+Use this guide on **`main`** after the 0.5.0 governance release. Tracking issue [#90](https://github.com/mlddragon/family-finance-os/issues/90) is closed; RC foundation and B.2/B.3 are merged.
 
-Review this branch as a single phase before opening a merge PR to `main`. Tracking issue: [#90](https://github.com/mlddragon/family-finance-os/issues/90).
-
-## Owner direction applied
+## Owner direction (locked)
 
 | Decision | Outcome |
 | --- | --- |
-| Real-data smoke | **Deferred until v1.0.0 RC** — use QA synthetic data ([docs/qa_validation_strategy.md](../docs/qa_validation_strategy.md)) |
-| Issue #55 view-as | **Non-mutating permission preview in B.1** ([planning/issue_55_view_as_decision_record.md](../planning/issue_55_view_as_decision_record.md)) |
-| Validation path | Expand synthetic QA scenarios as needed; no personal `DATA_ROOT` in CI or docs |
+| v1.0.0 stable scope | Closed loop + governance on synthetic QA through RC; **no Amazon enrichment in v1.0.0** |
+| Real-data smoke | **After** `v1.0.0-rc.N` tag and explicit owner approval — [docs/owner_smoke_checklist_v1.md](../docs/owner_smoke_checklist_v1.md) |
+| Issue #55 view-as | Non-mutating permission preview in Settings (QA only) — [planning/issue_55_view_as_decision_record.md](issue_55_view_as_decision_record.md) |
+| RC gates | Enable `v*` tag protection ([#72](https://github.com/mlddragon/family-finance-os/issues/72)); waive Codex auto-setup ([#80](https://github.com/mlddragon/family-finance-os/issues/80)) for RC; solo-maintainer bypass ([#73](https://github.com/mlddragon/family-finance-os/issues/73)) |
 
-## Merged PRs (into this branch)
+## Landed on main (0.5.0)
 
-| PR | Scope |
+| Area | PR / evidence |
 | --- | --- |
-| [#86](https://github.com/mlddragon/family-finance-os/pull/86) | Planning doc refresh, CHANGELOG 0.3/0.4 released, QA validation strategy |
-| [#87](https://github.com/mlddragon/family-finance-os/pull/87) | Permission matrix B.1 backend: evaluator, migration, API 403 enforcement |
-| [#88](https://github.com/mlddragon/family-finance-os/pull/88) | Phase A polish: v1 RC runbook, issue status comments (#72, #80, #73, #55) |
-| [#89](https://github.com/mlddragon/family-finance-os/pull/89) | Permission UI: hide/disable mutating controls; QA preview panel |
+| B.1 permission enforcement + preview | #87, #89, #96 (preview in Settings, collapsible) |
+| B.2 elevated mode backend + UI | #94, #96 (Control plane header dropdown + lightbox) |
+| B.3 suggestions + approvals | #94 |
+| QA deploy cache fix | #96 (`index.html` no-cache) |
 
-## Human QA script (synthetic only)
+## Preconditions
 
-**Preconditions:** Docker Desktop running; QA at http://127.0.0.1:28081 (`make qa-up`).
+- Docker Desktop running
+- QA at http://127.0.0.1:28081 (`make qa-up` or `make qa-update`)
+- Synthetic data only — no personal `DATA_ROOT` in validation notes
 
-1. Open QA UI; confirm red synthetic banner.
-2. Select **Finance Manager** persona — import, review save, reports, and close controls enabled.
-3. Select **Finance Contributor** — review save disabled; suggestion hint visible.
-4. Select **Administrator** — financial mutating controls disabled; settings may remain available per matrix.
-5. Open **Permission preview** panel (QA only); preview **Report Viewer**; confirm read-oriented allows, mutations denied.
-6. Run `make qa-seed QA_SCENARIO=review-backlog` after reset; confirm scenario still seeds.
+## Closed-loop QA (five scenarios)
 
-**Stop if:** personal port 28080 affected; preview allows writes; real financial data required.
+For each scenario:
+
+```bash
+make qa-reset CONFIRM="RESET QA DATA"
+make qa-seed QA_SCENARIO=<name>
+```
+
+| Scenario | Expected signal |
+| --- | --- |
+| `baseline` | Closed loop operable; manifests present |
+| `stale-source` | Stale/missing required source warnings |
+| `blocked-import` | Blocking validation / quarantine visible |
+| `review-backlog` | Unreviewed transactions in review queue |
+| `monthly-close-ready` | Reports/close/export readiness |
+
+Record sanitized pass/fail in [planning/v1_synthetic_qa_record.md](v1_synthetic_qa_record.md).
+
+## Governance QA (synthetic)
+
+See [docs/qa_validation_strategy.md](../docs/qa_validation_strategy.md) — **Governance validation (0.5.0)** section.
+
+Summary:
+
+1. QA banner on every screen checked.
+2. **Finance Manager** — import, review, reports, close enabled.
+3. **Finance Contributor** — review save disabled; suggestions path available.
+4. **Administrator** — financial mutations disabled; settings per matrix.
+5. **Settings → Permission preview** (QA only, collapsed by default) — matrix matches persona.
+6. **Control plane** — Operator / Administrator / Financial Governor; lightbox requires purpose; `approval_rule_change` requires note.
+7. Elevated mode — financial mutations read-only; exit via Operator Mode.
+8. Suggestions — contributor propose; manager accept/dismiss on `review-backlog`.
+9. Approval mode (optional second pass) — enable `approval.approval_mode_enabled` in QA Settings only; convert suggestion → approval → approve/deny.
+
+**Stop if:** personal `:28080` affected; preview allows writes; real financial data required.
 
 ## Verification commands
 
 ```bash
 .venv/bin/python -m pytest
-cd apps/web && npm test
-cd apps/web && npm run build
+cd apps/web && npm test && npm run build
 ```
 
-## After approval
+CI on `main` must be green before RC tag.
 
-1. Open PR: `phase/v1-rc-foundation` → `main`
-2. Close or update #90
-3. Continue B.2 (elevated mode) and B.3 (suggestions/approvals) on new phase branches
+## After synthetic sign-off
+
+1. Complete [docs/runbooks/v1-rc-release-gates.md](../docs/runbooks/v1-rc-release-gates.md) checklist
+2. Tag `v1.0.0-rc.1` (prerelease)
+3. Owner approves real-data smoke
+4. Run [docs/owner_smoke_checklist_v1.md](../docs/owner_smoke_checklist_v1.md) on `ffos-personal` (`:28080`)
+5. Tag stable `v1.0.0` when smoke passes

@@ -2,11 +2,20 @@
 
 All notable changes to Family Finance OS will be tracked here.
 
-## 0.5.0 - Planned
+## 1.0.0 - Planned
 
-- Permission matrix enforcement (B.1) with persona-based UI gating and QA permission preview.
-- Shared elevated mode with system administration and financial governance contexts.
-- Suggestions queue and optional approval mode (off by default) with approval requests.
+- First stable release after owner real-data smoke passes on personal `ffos-personal` (`:28080`).
+- Scope: closed-loop MVP + governance (permissions, elevation, suggestions/approvals) validated on synthetic QA through RC.
+- Amazon vendor enrichment remains **v1.1**.
+
+## 0.5.0 - 2026-06-26
+
+- Permission matrix enforcement (B.1) with persona-based UI gating.
+- QA permission preview in Settings (collapsible, collapsed by default; QA runtime only).
+- Shared elevated mode (B.2) with system administration and financial governance contexts.
+- Control-plane header dropdown and elevation lightbox with required purpose and conditional notes.
+- Suggestions queue and optional approval mode (B.3; off by default) with approval requests.
+- Serve SPA `index.html` with `Cache-Control: no-cache` so QA rebuilds pick up new bundles without hard refresh.
 
 ## 0.4.0 - 2026-06-23
 
