@@ -2,6 +2,12 @@
 
 All notable changes to Family Finance OS will be tracked here.
 
+## 0.5.0 - Planned
+
+- Permission matrix enforcement (B.1) with persona-based UI gating and QA permission preview.
+- Shared elevated mode with system administration and financial governance contexts.
+- Suggestions queue and optional approval mode (off by default) with approval requests.
+
 ## 0.4.0 - 2026-06-23
 
 - Rehome GitHub repository to `mlddragon/family-finance-os`.
