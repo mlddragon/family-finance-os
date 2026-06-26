@@ -191,11 +191,11 @@ def create_app(
 
     @app.middleware("http")
     async def elevated_session_middleware(request: Request, call_next):
-        token = set_request_elevated_session_id(request.headers.get("X-Elevated-Session-Id"))
+        session_context = set_request_elevated_session_id(request.headers.get("X-Elevated-Session-Id"))
         try:
             return await call_next(request)
         finally:
-            reset_request_elevated_session_id(token)
+            reset_request_elevated_session_id(session_context)
 
     def status_payload() -> Dict[str, Any]:
         active_data_root = get_data_root()
