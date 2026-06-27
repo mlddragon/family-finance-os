@@ -32,7 +32,7 @@ if include_provisional_exposure:
 Card obligation is separate:
 
 ```text
-card_obligation = outstanding_credit_card_balance
+card_obligation_total = outstanding_credit_card_balance
 ```
 
 Credit card purchases reduce pool remaining and category/budget target usage through transaction allocations/reviewed current state, but they do not reduce verified liquid cash until a payment imports against a liquid account.
@@ -70,7 +70,7 @@ def compute_spendable(month: str, include_provisional: bool) -> SpendablePayload
         exclude_neutral=True,
     )
 
-    card_obligation = sum_outstanding_card_balances(
+    card_obligation_total, card_obligation_items = summarize_card_obligations(
         source_keys=credit_card_source_keys,
         required_statuses={"accepted"},
     )
@@ -95,7 +95,8 @@ def compute_spendable(month: str, include_provisional: bool) -> SpendablePayload
         manual_obligations_total=manual_obligations_total,
         provisional_exposure=provisional_exposure,
         include_provisional=include_provisional,
-        card_obligation=card_obligation,
+        card_obligation_total=card_obligation_total,
+        card_obligation_items=card_obligation_items,
         confidence=confidence_from(warnings),
         warnings=warnings,
     )
@@ -150,13 +151,18 @@ Rules:
 Preferred v1.1 approach:
 
 1. For each configured credit card source profile, use the latest accepted imported row with a non-null `balance`.
-2. Normalize sign so `card_obligation` is a positive amount owed.
+2. Normalize sign so each item's `owed` value and `card_obligation_total` are positive amounts owed.
 3. Sum across active configured credit card source keys.
-4. Emit source-level details in the payload for transparency.
+4. Emit per-card items in the payload for the Home card-obligation table, aligned with B1's `card_obligation_items` shape:
+   - `card`: user-facing card/source display name.
+   - `owed`: positive amount owed, serialized as a money string when known.
+   - `note`: short Home-table note such as "Pool remaining already reflects this" or statement-date copy when available.
+   - Optional implementation metadata such as `source_key`, `status`, `latest_transaction_date`, and `confidence` may be included when useful.
+5. Emit the scalar `card_obligation_total` for summary, snapshot, operator-summary, and monthly-close use.
 
 Fallback behavior:
 
-- If a credit card source has accepted transactions but no balance field, set that source's card obligation to `null` in details and exclude it from the summed `card_obligation`.
+- If a credit card source has accepted transactions but no balance field, include a `card_obligation_items` row with `owed: null` and a warning note/status, then exclude it from the summed `card_obligation_total`.
 - Emit warning `missing_card_balance`.
 - Do not synthesize card obligation by summing all card purchases unless B5 explicitly accepts that approximation for reporting only.
 
@@ -203,7 +209,23 @@ Response shape:
   "manual_obligations_total": "867.42",
   "provisional_exposure": "1842.00",
   "include_provisional": false,
-  "card_obligation": "1523.23",
+  "card_obligation_total": "1523.23",
+  "card_obligation_items": [
+    {
+      "card": "Synthetic Rewards Card",
+      "owed": "1018.23",
+      "note": "Pool remaining already reflects this",
+      "source_key": "alliant_credit_card",
+      "status": "current"
+    },
+    {
+      "card": "Synthetic Travel Card",
+      "owed": "505.00",
+      "note": "Statement due Jul 02",
+      "source_key": "chase_prime_visa",
+      "status": "stale"
+    }
+  ],
   "confidence": "provisional",
   "warnings": [
     {
@@ -229,6 +251,7 @@ Response shape:
 Implementation notes:
 
 - Serialize money as strings to avoid JavaScript float ambiguity, matching common API finance practice.
+- `card_obligation_total` and `card_obligation_items` intentionally match the B1 funds summary shape so Home can render the same per-card table from either backing payload.
 - Keep stable warning codes. Display text can later move to locale resources.
 - `snapshot_id` is null for live reads unless the endpoint is explicitly asked to create/read a close snapshot.
 
@@ -246,7 +269,19 @@ Implementation notes:
     "manual_obligations_total": "867.42",
     "provisional_exposure": "1842.00",
     "include_provisional": false,
-    "card_obligation": "1523.23",
+    "card_obligation_total": "1523.23",
+    "card_obligation_items": [
+      {
+        "card": "Synthetic Rewards Card",
+        "owed": "1018.23",
+        "note": "Pool remaining already reflects this"
+      },
+      {
+        "card": "Synthetic Travel Card",
+        "owed": "505.00",
+        "note": "Statement due Jul 02"
+      }
+    ],
     "confidence": "provisional",
     "warnings": []
   }
@@ -303,8 +338,9 @@ Mockup IDs:
   - `#prov-op`
   - `#prov-term`
   - `#spendable-note`
-  - Card obligation table.
-  - Fund commitments/pool remaining/reserved goal balance metrics.
+  - Breakdown line labels pinned to Screen A: "Verified liquid cash", "Reserved goal balance", and "Manual obligations". "Manual obligations" is the display shorthand for D1's manual upcoming obligations.
+  - Card obligation table with the heading intent "Card obligation (not yet netted)" and `Card`, `Owed`, and `Note` columns, backed by `card_obligation_items`.
+  - Fund commitments/pool remaining/reserved goal balance metrics. These "Where your money is committed" tiles are sourced from the B1 funds summary, not `/api/spendable`; A2 backs the Home headline, breakdown, provisional toggle, and card-obligation panel only.
 - `funds`
   - Commitment health and pool remaining values feed warnings.
 - `dashboard`
@@ -320,6 +356,11 @@ UI copy must use D2 locked terms:
 - Card obligation
 - Fund commitment
 - Pool remaining
+
+Confidence and warning surfacing on Home follows Screen A:
+
+- Stale or blocked source warnings feed the Home "Next action" card and relevant card-obligation subhead copy.
+- Do not invent a new standalone confidence chip on the Spendable balance headline unless a later UI decision approves it.
 
 ## Test Plan
 

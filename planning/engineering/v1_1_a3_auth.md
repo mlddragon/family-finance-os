@@ -85,6 +85,7 @@ Approved mockup screen IDs and controls:
 - Enrollment card: `data-auth="enroll"`.
 - QA banner: `#auth-qa-banner`.
 - Passphrase login field in the login card.
+- Show/hide passphrase control: `#toggle-passphrase`.
 - TOTP field: `#totp-field`.
 - Recovery field: `#recovery-field`.
 - Recovery link: `#recovery-link`.
@@ -92,6 +93,8 @@ Approved mockup screen IDs and controls:
 - Enrollment wizard panels: `data-wizard-panel="1"`, `data-wizard-panel="2"`, and `data-wizard-panel="3"`.
 
 The implementation should preserve the mockup structure: passphrase + TOTP login, recovery-code fallback, first-boot owner enrollment, one-time recovery code display/acknowledgement, and a visibly distinct QA dev-bypass state.
+
+The mockup's Personal / QA `data-authmode` tab is a demo-only switch for reviewing the two variants. The application must not render this as a user-facing toggle in personal runtime; the QA banner and bypass button render only when the env-gated DEV_MODE bypass is active.
 
 ## Middleware And Session Spec
 
@@ -155,18 +158,20 @@ Flow:
 1. `GET /api/auth/status` returns `requires_owner_enrollment = true`.
 2. UI shows `data-auth="enroll"` from the approved mockup:
    - Step 1: passphrase and confirmation.
+   - Step 1 also shows a passphrase strength indicator. v1.1 does not lock a specific complexity policy beyond the passphrase/TOTP contract, so implementation should avoid adding hard complexity gates without owner approval.
    - Step 2: TOTP QR/manual key and first code confirmation.
-   - Step 3: one-time recovery codes and acknowledgement.
+   - Step 3: 10 one-time recovery codes, Copy/Download recovery-kit actions, and acknowledgement.
 3. Backend creates one owner user:
    - `role = "administrator"`
    - `status = "active"` only after passphrase hash, confirmed TOTP, generated recovery codes, and recovery acknowledgement are complete.
    - `totp_required = true`
    - `recovery_required = false` after acknowledgement.
 4. Backend generates the household recovery kit:
-   - one-time recovery codes shown once
+   - 10 one-time recovery codes shown once
    - instructions for using and storing the kit
    - no raw financial data
-   - saved outside `DATA_ROOT` at an owner-chosen path or printed, per D10.
+   - Copy/Download actions must save only outside `DATA_ROOT`, never inside the git repository, at an owner-chosen path or printed, per D10.
+   - the downloaded/copied kit is the owner's responsibility after it leaves the app.
 5. Backend creates a login session only after enrollment fully succeeds.
 6. Audit records the enrollment event with actor context for the new owner. The event payload must not include secret material.
 
