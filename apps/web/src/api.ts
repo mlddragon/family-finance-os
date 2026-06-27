@@ -172,6 +172,17 @@ export function loginOwner(payload: { username: string; passphrase: string; totp
   });
 }
 
+export function recoveryLoginOwner(payload: { username: string; recoveryCode: string }) {
+  return apiJson<AuthStatus>("/api/auth/recovery-login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: payload.username.trim(),
+      recovery_code: payload.recoveryCode.trim(),
+    }),
+  });
+}
+
 export function enrollOwner(payload: {
   username: string;
   displayName: string;
@@ -220,6 +231,8 @@ export function createFinancialGoal(payload: {
   name: string;
   goalType: string;
   targetAmount: string;
+  targetDate?: string;
+  linkedFundPoolId?: string;
   reservedBalance: string;
   actor: string;
   actorContext?: ActorContext;
@@ -231,6 +244,8 @@ export function createFinancialGoal(payload: {
       name: payload.name.trim(),
       goal_type: payload.goalType,
       target_amount: payload.targetAmount,
+      target_date: payload.targetDate?.trim() || null,
+      linked_fund_pool_id: payload.linkedFundPoolId || null,
       reserved_balance: payload.reservedBalance,
       actor: payload.actor,
       actor_context: payload.actorContext,

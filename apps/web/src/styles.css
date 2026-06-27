@@ -141,6 +141,35 @@ button:disabled {
   width: 100%;
 }
 
+.auth-mini-link {
+  min-height: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #254f42;
+  text-decoration: underline;
+}
+
+.recovery-codes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  border: 1px solid #d2d6cf;
+  border-radius: 6px;
+  padding: 12px;
+  background: #f8faf7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.recovery-codes p {
+  grid-column: 1 / -1;
+  margin: 0 0 4px;
+  color: #425048;
+  font-family: inherit;
+  font-weight: 760;
+}
+
 .primary-button {
   border-color: #254f42;
   background: #254f42;
@@ -490,6 +519,12 @@ button:disabled {
 
 .next-action strong {
   font-size: 15px;
+}
+
+.next-action p {
+  margin: 0;
+  color: #58635b;
+  font-size: 12px;
 }
 
 .metric-grid {

@@ -7,6 +7,7 @@ import { enUS } from "./locales/en-US";
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   window.localStorage?.clear();
 });
 
@@ -685,8 +686,8 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
           name: goalBody.name,
           goal_type: goalBody.goal_type,
           target_amount: goalBody.target_amount,
-          target_date: null,
-          linked_fund_pool_id: null,
+          target_date: goalBody.target_date,
+          linked_fund_pool_id: goalBody.linked_fund_pool_id,
           reserved_balance: goalBody.reserved_balance,
           remaining_to_target: "1600.00",
           status: "active",
@@ -994,11 +995,25 @@ test("renders operator home from API state", async () => {
   expect(await screen.findByText("Spendable balance")).toBeInTheDocument();
   expect(screen.getByText("$3,412.58")).toBeInTheDocument();
   expect(screen.getByText("Card obligation (not yet netted)")).toBeInTheDocument();
+  expect(screen.getByText("Total card obligation: $1,523.23")).toBeInTheDocument();
   expect(await screen.findByText("Local browser mode")).toBeInTheDocument();
   expect(await screen.findByText("Resolve blocking validation findings")).toBeInTheDocument();
+  expect(screen.getByText("Resolve blocking validation findings before monthly close or reporting.")).toBeInTheDocument();
   expect(screen.getByText("Open blockers")).toBeInTheDocument();
   expect(screen.getByText("Review queue")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Validation Issues" })).toBeInTheDocument();
+});
+
+test("requests the funds summary for the current month by default", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date("2026-07-04T12:00:00Z"));
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  await waitFor(() => {
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/funds/summary?month=2026-07"))).toBe(true);
+  });
 });
 
 test("shows auth enrollment and login flows before the operator shell", async () => {
@@ -1040,6 +1055,88 @@ test("shows auth enrollment and login flows before the operator shell", async ()
   expect(await screen.findByText("Local sign in")).toBeInTheDocument();
 });
 
+test("lets owners sign in with a recovery code", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = pathFor(input);
+    if (path === "/api/auth/status") {
+      return response({
+        ...authenticatedStatus,
+        authenticated: false,
+        user: null,
+        session: null,
+      });
+    }
+    if (path === "/api/auth/recovery-login" && init?.method === "POST") {
+      return response(authenticatedStatus);
+    }
+    return response({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  expect(await screen.findByText("Local sign in")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Use a recovery code" }));
+  fireEvent.change(screen.getByLabelText("Recovery code"), { target: { value: "ffos-synthetic-recovery" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in with recovery code" }));
+
+  await waitFor(() => {
+    const recoveryCall = fetchMock.mock.calls.find(([input]) => String(input).includes("/api/auth/recovery-login"));
+    expect(recoveryCall).toBeDefined();
+    expect(JSON.parse(String(recoveryCall?.[1]?.body))).toMatchObject({
+      username: "owner",
+      recovery_code: "ffos-synthetic-recovery",
+    });
+  });
+});
+
+test("shows recovery codes before enrollment acknowledgment", async () => {
+  let enrollmentStep = 0;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = pathFor(input);
+    if (path === "/api/auth/status") {
+      return response({
+        ...authenticatedStatus,
+        requires_owner_enrollment: true,
+        authenticated: false,
+        user: null,
+        session: null,
+        qa_auth_bypass_available: false,
+      });
+    }
+    if (path === "/api/auth/enroll-owner" && init?.method === "POST") {
+      enrollmentStep += 1;
+      if (enrollmentStep === 1) {
+        return response({
+          status: "totp_confirmation_required",
+          totp_secret: "SYNTHETIC-TOTP-SECRET",
+        });
+      }
+      return response({
+        ...authenticatedStatus,
+        recovery_codes: ["ffos-synthetic-one", "ffos-synthetic-two"],
+      });
+    }
+    return response({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  expect(await screen.findByText("First-boot setup - Owner enrollment")).toBeInTheDocument();
+  expect(screen.queryByLabelText("I have saved the recovery codes.")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "correct horse battery staple" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue to authenticator" }));
+
+  expect(await screen.findByText("SYNTHETIC-TOTP-SECRET")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Authenticator code (6 digits)"), { target: { value: "123456" } });
+  fireEvent.click(screen.getByRole("button", { name: "Generate recovery codes" }));
+
+  expect(await screen.findByText("1. ffos-synthetic-one")).toBeInTheDocument();
+  expect(screen.getByLabelText("I have saved the recovery codes.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Finish enrollment" })).toBeDisabled();
+});
+
 test("funds screen renders commitment warning and blocks unnamed goals", async () => {
   installApiMock();
 
@@ -1050,9 +1147,36 @@ test("funds screen renders commitment warning and blocks unnamed goals", async (
   expect(screen.getByText("Warning: fund commitments exceed funding by $100.00")).toBeInTheDocument();
   expect(screen.getByText("Pool remaining")).toBeInTheDocument();
   expect(screen.getByText("Over by $41.10")).toBeInTheDocument();
+  expect(screen.getByText("-$41.10")).toHaveClass("danger-text");
 
   expect(screen.getByRole("button", { name: "Save financial goal" })).toBeDisabled();
   expect(screen.getByText("Financial goal name is required.")).toBeInTheDocument();
+});
+
+test("goal form sends target date and linked fund pool", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("link", { name: "Funds" }));
+  await screen.findByRole("heading", { name: "Funds" });
+  fireEvent.change(screen.getByLabelText("Goal name"), { target: { value: "Synthetic vacation" } });
+  fireEvent.change(screen.getByLabelText("Target amount"), { target: { value: "2200.00" } });
+  fireEvent.change(screen.getByLabelText("Target date"), { target: { value: "2026-12-31" } });
+  fireEvent.change(screen.getByLabelText("Linked fund pool"), { target: { value: "pool-auto" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save financial goal" }));
+
+  await waitFor(() => {
+    const goalCall = fetchMock.mock.calls.find(
+      ([input, init]) => String(input).includes("/api/financial-goals") && init?.method === "POST",
+    );
+    expect(goalCall).toBeDefined();
+    expect(JSON.parse(String(goalCall?.[1]?.body))).toMatchObject({
+      name: "Synthetic vacation",
+      target_date: "2026-12-31",
+      linked_fund_pool_id: "pool-auto",
+    });
+  });
 });
 
 test("shows persistent QA environment marker for synthetic runtime", async () => {

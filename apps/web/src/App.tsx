@@ -52,6 +52,7 @@ import {
   previewPermission,
   readStoredElevatedSessionId,
   rejectApprovalRequest,
+  recoveryLoginOwner,
   resolveValidationFinding,
   runReports,
   saveCategoryDecision,
@@ -117,6 +118,29 @@ const screens: Array<{ key: ScreenKey; labelKey: string }> = [
 const OTHER_LIST_VALUE = "__other__";
 const OTHER_LIST_LABEL = "Other";
 
+function currentMonthString(date = new Date()) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${date.getFullYear()}-${month}`;
+}
+
+function explainNextAction(code: string) {
+  switch (code) {
+    case "resolve_validation_blockers":
+      return "Resolve blocking validation findings before monthly close or reporting.";
+    case "import_required_sources":
+    case "import_missing_sources":
+      return "Import missing source exports so spendable and obligations reflect current balances.";
+    case "review_transactions":
+      return "Review queued transactions so the ledger can move toward monthly close.";
+    case "monthly_close_ready":
+      return "Draft monthly close once the local ledger and validation checks are ready.";
+    case "loading":
+      return "Loading local operating state before recommending the next step.";
+    default:
+      return "Use this next step to keep spendable balance and fund commitments current.";
+  }
+}
+
 const emptySummary: OperatorSummary = {
   runtime: {
     app: "Family Finance OS",
@@ -172,7 +196,7 @@ const emptySummary: OperatorSummary = {
 };
 
 const emptyFundsSummary: FundsSummary = {
-  month: new Date().toISOString().slice(0, 7),
+  month: currentMonthString(),
   spendable: {
     headline: "0.00",
     verified_liquid_cash: "0.00",
@@ -498,6 +522,8 @@ function AuthStage({ mode, authStatus }: { mode: "login" | "enroll"; authStatus:
   const [displayName, setDisplayName] = useState("Owner");
   const [passphrase, setPassphrase] = useState("");
   const [totpCode, setTotpCode] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [usingRecoveryLogin, setUsingRecoveryLogin] = useState(false);
   const [recoveryAcknowledged, setRecoveryAcknowledged] = useState(false);
   const [totpSecret, setTotpSecret] = useState<string | null>(null);
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
@@ -512,17 +538,26 @@ function AuthStage({ mode, authStatus }: { mode: "login" | "enroll"; authStatus:
     onError: (error) => setFormStatus(formatApiError(error, "Sign in failed")),
   });
 
+  const recoveryLoginMutation = useMutation({
+    mutationFn: recoveryLoginOwner,
+    onSuccess: () => {
+      setFormStatus("Signed in with recovery code");
+      void queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: (error) => setFormStatus(formatApiError(error, "Recovery sign in failed")),
+  });
+
   const enrollMutation = useMutation({
     mutationFn: enrollOwner,
     onSuccess: (body) => {
       if (body.status === "totp_confirmation_required") {
         setTotpSecret(body.totp_secret ?? null);
+        setTotpCode("");
         setFormStatus("Enter the authenticator code to finish owner enrollment");
         return;
       }
       setRecoveryCodes(body.recovery_codes ?? []);
-      setFormStatus("Owner enrollment complete");
-      void queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+      setFormStatus("Save these recovery codes before finishing owner enrollment");
     },
     onError: (error) => setFormStatus(formatApiError(error, "Owner enrollment failed")),
   });
@@ -538,19 +573,52 @@ function AuthStage({ mode, authStatus }: { mode: "login" | "enroll"; authStatus:
 
   function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (usingRecoveryLogin) {
+      recoveryLoginMutation.mutate({ username, recoveryCode });
+      return;
+    }
     loginMutation.mutate({ username, passphrase, totpCode });
   }
 
   function handleEnrollSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (recoveryCodes.length > 0) {
+      if (!recoveryAcknowledged) {
+        setFormStatus("Save recovery codes before finishing owner enrollment");
+        return;
+      }
+      setFormStatus("Owner enrollment complete");
+      void queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+      return;
+    }
     enrollMutation.mutate({
       username,
       displayName,
       passphrase,
       totpConfirmCode: totpCode || "000000",
-      recoveryAcknowledged,
+      recoveryAcknowledged: Boolean(totpSecret),
     });
   }
+
+  const isEnrollment = mode === "enroll";
+  const authPending = loginMutation.isPending || recoveryLoginMutation.isPending || enrollMutation.isPending;
+  const submitDisabled =
+    !username.trim() ||
+    (isEnrollment
+      ? !passphrase || Boolean(totpSecret && !totpCode.trim()) || Boolean(recoveryCodes.length && !recoveryAcknowledged)
+      : usingRecoveryLogin
+        ? !recoveryCode.trim()
+        : !passphrase || !totpCode.trim()) ||
+    authPending;
+  const authSubmitLabel = isEnrollment
+    ? recoveryCodes.length
+      ? "Finish enrollment"
+      : totpSecret
+        ? "Generate recovery codes"
+        : "Continue to authenticator"
+    : usingRecoveryLogin
+      ? "Sign in with recovery code"
+      : "Sign in";
 
   return (
     <div className="auth-stage">
@@ -565,38 +633,52 @@ function AuthStage({ mode, authStatus }: { mode: "login" | "enroll"; authStatus:
             <h1>Family Finance OS</h1>
             <p>{mode === "enroll" ? "First-boot setup - Owner enrollment" : "Local sign in"}</p>
           </div>
-          <form className="auth-form" onSubmit={mode === "enroll" ? handleEnrollSubmit : handleLoginSubmit}>
+          <form className="auth-form" onSubmit={isEnrollment ? handleEnrollSubmit : handleLoginSubmit}>
             <label>
               Username
               <input value={username} onChange={(event) => setUsername(event.target.value)} />
             </label>
-            {mode === "enroll" ? (
+            {isEnrollment ? (
               <label>
                 Display name
                 <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
               </label>
             ) : null}
-            <label>
-              Passphrase
-              <input type="password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} />
-            </label>
-            {totpSecret ? (
+            {!usingRecoveryLogin ? (
+              <label>
+                Passphrase
+                <input type="password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} />
+              </label>
+            ) : null}
+            {isEnrollment && totpSecret && !recoveryCodes.length ? (
               <div className="auth-secret-panel">
                 <span>Authenticator manual key</span>
                 <code>{totpSecret}</code>
               </div>
             ) : null}
-            <label>
-              Authenticator code
-              <input
-                inputMode="numeric"
-                maxLength={12}
-                placeholder="------"
-                value={totpCode}
-                onChange={(event) => setTotpCode(event.target.value)}
-              />
-            </label>
-            {mode === "enroll" ? (
+            {!usingRecoveryLogin && (!isEnrollment || totpSecret) && !recoveryCodes.length ? (
+              <label>
+                Authenticator code (6 digits)
+                <input
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="------"
+                  value={totpCode}
+                  onChange={(event) => setTotpCode(event.target.value)}
+                />
+              </label>
+            ) : null}
+            {usingRecoveryLogin ? (
+              <label>
+                Recovery code
+                <input
+                  autoComplete="one-time-code"
+                  value={recoveryCode}
+                  onChange={(event) => setRecoveryCode(event.target.value)}
+                />
+              </label>
+            ) : null}
+            {isEnrollment && recoveryCodes.length > 0 ? (
               <label className="checkbox-row inline-checkbox">
                 <input
                   type="checkbox"
@@ -609,18 +691,26 @@ function AuthStage({ mode, authStatus }: { mode: "login" | "enroll"; authStatus:
             <button
               type="submit"
               className="primary-button"
-              disabled={
-                !username.trim() ||
-                !passphrase ||
-                (mode === "login" && !totpCode.trim()) ||
-                (mode === "enroll" && !recoveryAcknowledged) ||
-                loginMutation.isPending ||
-                enrollMutation.isPending
-              }
+              disabled={submitDisabled}
             >
-              {mode === "enroll" ? "Confirm & continue" : "Sign in"}
+              {authSubmitLabel}
             </button>
           </form>
+          {!isEnrollment ? (
+            <p className="auth-foot">
+              Lost your device?{" "}
+              <button
+                type="button"
+                className="auth-mini-link"
+                onClick={() => {
+                  setUsingRecoveryLogin((current) => !current);
+                  setFormStatus(null);
+                }}
+              >
+                {usingRecoveryLogin ? "Use authenticator code" : "Use a recovery code"}
+              </button>
+            </p>
+          ) : null}
           {authStatus?.qa_auth_bypass_available ? (
             <button
               type="button"
@@ -633,6 +723,7 @@ function AuthStage({ mode, authStatus }: { mode: "login" | "enroll"; authStatus:
           ) : null}
           {recoveryCodes.length > 0 ? (
             <div className="recovery-codes" aria-label="Recovery codes">
+              <p>Save these one-time recovery codes before continuing.</p>
               {recoveryCodes.map((code, index) => (
                 <span key={code}>{index + 1}. {code}</span>
               ))}
@@ -657,9 +748,10 @@ function OperatorApp() {
   const [activePersonaKey, setActivePersonaKey] = useState(() =>
     readLocalStorage(ACTIVE_PERSONA_STORAGE_KEY, "finance_manager"),
   );
+  const [fundsMonth] = useState(() => currentMonthString());
 
   const summaryQuery = useQuery({ queryKey: ["operator-summary"], queryFn: fetchOperatorSummary });
-  const fundsSummaryQuery = useQuery({ queryKey: ["funds-summary"], queryFn: () => fetchFundsSummary("2026-06") });
+  const fundsSummaryQuery = useQuery({ queryKey: ["funds-summary", fundsMonth], queryFn: () => fetchFundsSummary(fundsMonth) });
   const actorsQuery = useQuery({ queryKey: ["actors"], queryFn: fetchActors });
   const inboxQuery = useQuery({ queryKey: ["inbox-scan"], queryFn: scanInbox });
   const findingsQuery = useQuery({ queryKey: ["validation-findings"], queryFn: fetchValidationFindings });
@@ -1276,6 +1368,7 @@ function HomeScreen({
   const displayedSpendable = includeProvisional
     ? decimalSubtract(spendable.headline, spendable.provisional_exposure)
     : spendable.headline;
+  const nextActionExplanation = explainNextAction(summary.next_action.code);
   return (
     <section className="screen" aria-labelledby="home-heading">
       <div className="screen-heading split-heading">
@@ -1290,6 +1383,7 @@ function HomeScreen({
         <div className="next-action">
           <span>Next action</span>
           <strong>{summary.next_action.label}</strong>
+          <p>{nextActionExplanation}</p>
         </div>
       </div>
 
@@ -1326,6 +1420,7 @@ function HomeScreen({
 
       <section className="work-panel">
         <h3>Card obligation (not yet netted)</h3>
+        <p className="section-note">Total card obligation: {formatMoney(spendable.card_obligation_total)}</p>
         <DataTable
           data={spendable.card_obligation_items}
           emptyLabel="No card obligation items available."
@@ -1387,6 +1482,8 @@ function FundsScreen({
   const [goalName, setGoalName] = useState("");
   const [goalType, setGoalType] = useState("purchase");
   const [targetAmount, setTargetAmount] = useState("");
+  const [targetDate, setTargetDate] = useState("");
+  const [linkedFundPoolId, setLinkedFundPoolId] = useState("");
   const [reservedBalance, setReservedBalance] = useState("0.00");
   const [goalStatus, setGoalStatus] = useState<string | null>(null);
   const createGoalMutation = useMutation({
@@ -1394,6 +1491,8 @@ function FundsScreen({
     onSuccess: () => {
       setGoalName("");
       setTargetAmount("");
+      setTargetDate("");
+      setLinkedFundPoolId("");
       setReservedBalance("0.00");
       setGoalStatus("Financial goal saved");
       void queryClient.invalidateQueries({ queryKey: ["funds-summary"] });
@@ -1412,6 +1511,8 @@ function FundsScreen({
       name: goalName,
       goalType,
       targetAmount: targetAmount || "0.00",
+      targetDate,
+      linkedFundPoolId,
       reservedBalance: reservedBalance || "0.00",
       actor: operatorActor,
       actorContext: operatorActorContext,
@@ -1464,7 +1565,14 @@ function FundsScreen({
             { header: "Pool", accessorKey: "name" },
             { header: "Commitment", cell: ({ row }) => formatMoney(row.original.commitment) },
             { header: "Spent", cell: ({ row }) => formatMoney(row.original.spent) },
-            { header: "Pool remaining", cell: ({ row }) => formatMoney(row.original.pool_remaining) },
+            {
+              header: "Pool remaining",
+              cell: ({ row }) => (
+                <span className={Number(row.original.pool_remaining) < 0 ? "danger-text" : undefined}>
+                  {formatMoney(row.original.pool_remaining)}
+                </span>
+              ),
+            },
             {
               header: "Status",
               cell: ({ row }) =>
@@ -1511,6 +1619,21 @@ function FundsScreen({
           <label>
             Target amount
             <input value={targetAmount} onChange={(event) => setTargetAmount(event.target.value)} placeholder="2000.00" />
+          </label>
+          <label>
+            Target date
+            <input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
+          </label>
+          <label>
+            Linked fund pool
+            <select value={linkedFundPoolId} onChange={(event) => setLinkedFundPoolId(event.target.value)}>
+              <option value="">No linked pool</option>
+              {fundsSummary.pools.map((pool) => (
+                <option key={pool.id} value={pool.id}>
+                  {pool.name}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             Reserved balance
