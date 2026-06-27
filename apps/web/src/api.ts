@@ -22,6 +22,7 @@ import type {
   Suggestion,
   SuggestionsPayload,
   Transaction,
+  TransactionAllocationsPayload,
   TransactionDetail,
   ValidationFinding,
 } from "./types";
@@ -317,6 +318,36 @@ export function fetchTransactions() {
 
 export function fetchTransactionDetail(transactionId: string) {
   return apiJson<{ transaction: TransactionDetail }>(`/api/transactions/${transactionId}`);
+}
+
+export function fetchTransactionAllocations(transactionId: string) {
+  return apiJson<TransactionAllocationsPayload>(`/api/transactions/${transactionId}/allocations`);
+}
+
+export function saveTransactionAllocations(payload: {
+  transactionId: string;
+  actor: string;
+  actorContext?: ActorContext;
+  note?: string;
+  lines: Array<{
+    amount: string;
+    category_id: string;
+    subcategory?: string | null;
+    fund_pool_id?: string | null;
+    financial_goal_id?: string | null;
+    memo?: string | null;
+  }>;
+}) {
+  return apiJson<TransactionAllocationsPayload>(`/api/transactions/${payload.transactionId}/allocations`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+      note: payload.note?.trim() || null,
+      lines: payload.lines,
+    }),
+  });
 }
 
 export function fetchCategories() {

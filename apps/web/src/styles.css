@@ -874,6 +874,53 @@ input[readonly] {
   gap: 8px;
 }
 
+.alloc-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.allocation-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.35fr) minmax(180px, 0.45fr) minmax(180px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.allocation-row label,
+.metric-grid label {
+  display: grid;
+  gap: 5px;
+  color: #425048;
+  font-size: 12px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.split-actions {
+  margin-top: 10px;
+}
+
+.remainder-line {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.remainder-line > div {
+  border: 1px solid #e0e4dd;
+  border-radius: 6px;
+  padding: 10px;
+  background: #fafbf8;
+}
+
+.remainder-status {
+  display: grid;
+  align-content: center;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .table-actions {
   display: flex;
   flex-wrap: wrap;

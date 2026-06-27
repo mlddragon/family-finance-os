@@ -325,6 +325,44 @@ export type TransactionDetail = Transaction & {
   }>;
 };
 
+export type TransactionAllocation = {
+  id: string;
+  canonical_transaction_id: string;
+  allocation_group_id: string;
+  line_number: number;
+  amount: string;
+  category_id: string;
+  category_display_name: string | null;
+  subcategory: string | null;
+  fund_pool_id: string | null;
+  fund_pool_name: string | null;
+  financial_goal_id: string | null;
+  financial_goal_name: string | null;
+  memo: string | null;
+  source: string;
+  status: string;
+  decision_event_id: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type TransactionAllocationsPayload = {
+  transaction_id: string;
+  allocations: TransactionAllocation[];
+  summary: {
+    transaction_amount: string;
+    allocated: string;
+    remainder: string;
+    balanced: boolean;
+    allocation_count: number;
+  };
+  event?: {
+    id: string;
+    decision_type?: string;
+    field_name?: string;
+  };
+};
+
 export type SettingsPayload = {
   tabs: string[];
   local_only: boolean;

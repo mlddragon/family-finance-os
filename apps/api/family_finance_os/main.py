@@ -151,6 +151,16 @@ from family_finance_os.settings_service import (
     settings_payload,
 )
 from family_finance_os.spendable import SpendableError, compute_spendable
+from family_finance_os.splits import (
+    ReceiptPromotionRequest,
+    SplitsError,
+    TransactionAllocationsDeleteRequest,
+    TransactionAllocationsPutRequest,
+    delete_transaction_allocations,
+    list_transaction_allocations,
+    promote_receipt_lines_to_allocations,
+    replace_transaction_allocations,
+)
 
 
 APP_NAME = "Family Finance OS"
@@ -951,6 +961,68 @@ def create_app(
                     detail={"code": "transaction_not_found", "message": "Transaction not found"},
                 )
             return {"transaction": transaction}
+
+    def splits_http_error(exc: SplitsError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    @app.get("/api/transactions/{transaction_id}/allocations")
+    def get_transaction_allocations(transaction_id: str) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return list_transaction_allocations(session, transaction_id)
+            except SplitsError as exc:
+                raise splits_http_error(exc) from exc
+
+    @app.put("/api/transactions/{transaction_id}/allocations")
+    def put_transaction_allocations(transaction_id: str, payload: TransactionAllocationsPutRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return replace_transaction_allocations(session, transaction_id, payload)
+            except SplitsError as exc:
+                raise splits_http_error(exc) from exc
+
+    @app.delete("/api/transactions/{transaction_id}/allocations")
+    def delete_transaction_allocations_route(
+        transaction_id: str,
+        payload: TransactionAllocationsDeleteRequest,
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return delete_transaction_allocations(session, transaction_id, payload)
+            except SplitsError as exc:
+                raise splits_http_error(exc) from exc
+
+    @app.post("/api/transactions/{transaction_id}/allocations/from-receipt")
+    def post_transaction_allocations_from_receipt(
+        transaction_id: str,
+        payload: ReceiptPromotionRequest,
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return promote_receipt_lines_to_allocations(session, transaction_id, payload)
+            except SplitsError as exc:
+                raise splits_http_error(exc) from exc
 
     @app.post("/api/decision-events")
     def post_decision_event(payload: DecisionEventRequest) -> Dict[str, Any]:

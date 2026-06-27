@@ -392,6 +392,7 @@ const emptyApprovalRequestsPayload = {
 function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof personalRuntime } = {}) {
   let importBatchVoided = false;
   let validationFindingCleared = false;
+  let allocationLines: unknown[] = [];
   const runtime = options.runtime ?? personalRuntime;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = pathFor(input);
@@ -737,6 +738,37 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
             download_url: "/api/artifacts/artifact-advisor-1/download",
           },
         ],
+      });
+    }
+    if (path === "/api/transactions/tx-1/allocations" && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body));
+      allocationLines = body.lines.map((line: Record<string, unknown>, index: number) => ({
+        id: `allocation-${index + 1}`,
+        line_number: index + 1,
+        ...line,
+      }));
+      return response({
+        allocations: allocationLines,
+        summary: {
+          transaction_amount: "12.34",
+          allocated: "12.34",
+          remainder: "0.00",
+          balanced: true,
+          allocation_count: allocationLines.length,
+        },
+        event: { id: "split-event-1" },
+      });
+    }
+    if (path === "/api/transactions/tx-1/allocations") {
+      return response({
+        allocations: allocationLines,
+        summary: {
+          transaction_amount: "12.34",
+          allocated: allocationLines.length ? "12.34" : "0.00",
+          remainder: allocationLines.length ? "0.00" : "12.34",
+          balanced: allocationLines.length > 0,
+          allocation_count: allocationLines.length,
+        },
       });
     }
 
@@ -1361,6 +1393,70 @@ test("blocked validation filter selects blocked transaction and explains review 
   await waitFor(() => expect(screen.getByLabelText("Current category")).toHaveValue("Utilities"));
   expect(screen.getByText("Blocked transactions must be resolved in Validation Issues before review decisions can be saved.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Resolve validation first" })).toBeDisabled();
+});
+
+test("split editor balances allocation rows and saves from review", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Review" }));
+  expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Open split editor" }));
+
+  expect(await screen.findByRole("heading", { name: "Split transaction" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Transaction amount")).toHaveValue("12.34");
+  expect(screen.getByText("Imported row unchanged and remains linked")).toBeInTheDocument();
+  expect(screen.getByText("Receipt lines enrich this transaction only after explicit promotion.")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Split amount 1"), { target: { value: "5.00" } });
+  expect(screen.getByText("Remainder")).toBeInTheDocument();
+  expect(screen.getByText("$7.34")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save split" })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "+ Add allocation line" }));
+  fireEvent.change(screen.getByLabelText("Split amount 2"), { target: { value: "7.34" } });
+  fireEvent.change(screen.getByLabelText("Split category 2"), { target: { value: "utilities" } });
+
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save split" })).not.toBeDisabled());
+  fireEvent.click(screen.getByRole("button", { name: "Save split" }));
+
+  await waitFor(() => {
+    const splitSaveCall = fetchMock.mock.calls.find(
+      ([input, init]) => pathFor(input) === "/api/transactions/tx-1/allocations" && init?.method === "PUT",
+    );
+    expect(splitSaveCall).toBeTruthy();
+    expect(JSON.parse(String(splitSaveCall?.[1]?.body))).toMatchObject({
+      actor: "owner",
+      lines: [
+        { amount: "5.00", category_id: "category-groceries" },
+        { amount: "7.34", category_id: "category-utilities" },
+      ],
+    });
+  });
+  expect(await screen.findByText("Split saved")).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([input]) => pathFor(input) === "/api/funds/summary")).toBe(true);
+});
+
+test("transactions screen can launch and reset the split editor", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Transactions" }));
+  expect(await screen.findByRole("heading", { name: "Transactions" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Split selected transaction" }));
+  expect(await screen.findByRole("heading", { name: "Split transaction" })).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Split amount 1"), { target: { value: "5.00" } });
+  expect(screen.getByText("$7.34")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+  expect(screen.getByLabelText("Split amount 1")).toHaveValue("12.34");
+  expect(screen.getByText("Balanced - ready to save")).toBeInTheDocument();
 });
 
 test("reports screen runs artifacts and close/export actions", async () => {

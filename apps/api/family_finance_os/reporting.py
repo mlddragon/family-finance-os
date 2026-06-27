@@ -19,6 +19,8 @@ from family_finance_os.decision_events import serialize_decision_event
 from family_finance_os.ledger_normalization import list_transactions
 from family_finance_os.models import (
     Artifact,
+    CanonicalTransaction,
+    Category,
     DecisionEvent,
     ImportBatch,
     ImportedRow,
@@ -27,6 +29,7 @@ from family_finance_os.models import (
     ReportRun,
     Setting,
     SourceAccount,
+    TransactionAllocation,
     ValidationFinding,
     utc_now_iso,
 )
@@ -622,9 +625,21 @@ def _cashflow_summary(session: Session) -> dict[str, Any]:
 
 def _category_spending_summary(session: Session) -> dict[str, Any]:
     transaction_by_id = {transaction["id"]: transaction for transaction in list_transactions(session)}
+    allocations_by_transaction = _balanced_allocations_by_transaction(session)
+    category_names = _category_names_by_id(session)
     totals: defaultdict[str, Decimal] = defaultdict(Decimal)
+    split_transactions_counted: set[str] = set()
     for row in _imported_rows(session):
         if row.direction != "outflow" or row.canonical_transaction_id is None:
+            continue
+        allocations = allocations_by_transaction.get(row.canonical_transaction_id)
+        if allocations is not None:
+            if row.canonical_transaction_id in split_transactions_counted:
+                continue
+            split_transactions_counted.add(row.canonical_transaction_id)
+            for allocation in allocations:
+                category = category_names.get(allocation.category_id, "Uncategorized")
+                totals[category] += abs(Decimal(str(allocation.amount)))
             continue
         category = transaction_by_id.get(row.canonical_transaction_id, {}).get("category_current") or "Uncategorized"
         totals[category] += abs(Decimal(str(row.amount)))
@@ -665,20 +680,76 @@ def _top_merchants_sources(session: Session) -> dict[str, Any]:
 
 
 def _reviewed_transaction_rows(session: Session) -> list[dict[str, Any]]:
-    return [
-        {
+    allocations_by_transaction = _balanced_allocations_by_transaction(session)
+    category_names = _category_names_by_id(session)
+    rows: list[dict[str, Any]] = []
+    for transaction in list_transactions(session):
+        base_row = {
             "id": transaction["id"],
             "posted_date": transaction["posted_date"],
             "raw_description": transaction["raw_description"],
             "normalized_merchant": transaction["normalized_merchant"],
-            "amount": transaction["amount"],
-            "category_current": transaction["category_current"],
-            "subcategory_current": transaction.get("subcategory_current"),
             "review_status": transaction["review_status"],
             "validation_status": transaction["validation_status"],
         }
-        for transaction in list_transactions(session)
-    ]
+        allocations = allocations_by_transaction.get(transaction["id"])
+        if allocations is None:
+            rows.append(
+                {
+                    **base_row,
+                    "amount": transaction["amount"],
+                    "category_current": transaction["category_current"],
+                    "subcategory_current": transaction.get("subcategory_current"),
+                    "allocation_id": None,
+                    "allocation_group_id": None,
+                    "allocation_line_number": None,
+                    "allocation_source": None,
+                    "allocation_memo": None,
+                }
+            )
+            continue
+        for allocation in allocations:
+            rows.append(
+                {
+                    **base_row,
+                    "amount": _money(Decimal(str(allocation.amount))),
+                    "category_current": category_names.get(allocation.category_id, "Uncategorized"),
+                    "subcategory_current": allocation.subcategory,
+                    "allocation_id": allocation.id,
+                    "allocation_group_id": allocation.allocation_group_id,
+                    "allocation_line_number": allocation.line_number,
+                    "allocation_source": allocation.source,
+                    "allocation_memo": allocation.memo,
+                }
+            )
+    return rows
+
+
+def _balanced_allocations_by_transaction(session: Session) -> dict[str, list[TransactionAllocation]]:
+    transactions = {
+        transaction.id: Decimal(str(transaction.amount)).quantize(Decimal("0.01"))
+        for transaction in session.scalars(select(CanonicalTransaction)).all()
+    }
+    allocations = session.scalars(
+        select(TransactionAllocation)
+        .where(TransactionAllocation.status == "active")
+        .order_by(TransactionAllocation.canonical_transaction_id, TransactionAllocation.line_number)
+    ).all()
+    grouped: dict[str, list[TransactionAllocation]] = defaultdict(list)
+    for allocation in allocations:
+        grouped[allocation.canonical_transaction_id].append(allocation)
+    return {
+        transaction_id: lines
+        for transaction_id, lines in grouped.items()
+        if transaction_id in transactions
+        and sum((Decimal(str(line.amount)) for line in lines), Decimal("0.00")).quantize(Decimal("0.01"))
+        == transactions[transaction_id]
+    }
+
+
+def _category_names_by_id(session: Session) -> dict[str, str]:
+    categories = session.scalars(select(Category)).all()
+    return {category.id: category.display_name for category in categories}
 
 
 def _decision_event_rows(session: Session) -> list[dict[str, Any]]:

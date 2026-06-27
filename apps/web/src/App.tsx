@@ -42,6 +42,7 @@ import {
   fetchEffectivePermission,
   fetchSettings,
   fetchSuggestions,
+  fetchTransactionAllocations,
   fetchTransactionDetail,
   fetchTransactions,
   fetchValidationFindings,
@@ -55,6 +56,7 @@ import {
   runReports,
   saveCategoryDecision,
   saveReviewStatusDecision,
+  saveTransactionAllocations,
   saveSettingChange,
   scanInbox,
   setElevatedSessionId,
@@ -649,6 +651,7 @@ function AuthStage({ mode, authStatus }: { mode: "login" | "enroll"; authStatus:
 function OperatorApp() {
   const { t } = useTranslation();
   const [activeScreen, setActiveScreen] = useState<ScreenKey>("home");
+  const [splitReturnScreen, setSplitReturnScreen] = useState<"review" | "transactions" | null>(null);
   const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
   const [activeActorKey, setActiveActorKey] = useState(() => readLocalStorage(ACTIVE_ACTOR_STORAGE_KEY, "owner"));
   const [activePersonaKey, setActivePersonaKey] = useState(() =>
@@ -751,17 +754,28 @@ function OperatorApp() {
         </nav>
 
         <main className="content">
-          {activeScreen === "home" ? (
+          {splitReturnScreen && selectedTransaction ? (
+            <SplitEditorScreen
+              selectedTransaction={selectedTransaction}
+              categories={categories}
+              operatorActor={operatorActor}
+              operatorActorContext={operatorActorContext}
+              canSaveSplits={permissionAllows(permissions.review) && !elevatedModeActive}
+              onCancel={() => setSplitReturnScreen(null)}
+              onSaved={() => setSplitReturnScreen(splitReturnScreen)}
+            />
+          ) : null}
+          {!splitReturnScreen && activeScreen === "home" ? (
             <HomeScreen summary={summary} fundsSummary={fundsSummary} onOpenFunds={() => setActiveScreen("funds")} />
           ) : null}
-          {activeScreen === "funds" ? (
+          {!splitReturnScreen && activeScreen === "funds" ? (
             <FundsScreen
               fundsSummary={fundsSummary}
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
             />
           ) : null}
-          {activeScreen === "sources" ? (
+          {!splitReturnScreen && activeScreen === "sources" ? (
             <SourcesScreen
               key={sourceProfileKey}
               profiles={summary.sources.profiles}
@@ -772,7 +786,7 @@ function OperatorApp() {
               elevatedModeActive={elevatedModeActive}
             />
           ) : null}
-          {activeScreen === "validation" ? (
+          {!splitReturnScreen && activeScreen === "validation" ? (
             <ValidationScreen
               findings={findings}
               operatorActor={operatorActor}
@@ -780,7 +794,7 @@ function OperatorApp() {
               elevatedModeActive={elevatedModeActive}
             />
           ) : null}
-          {activeScreen === "review" ? (
+          {!splitReturnScreen && activeScreen === "review" ? (
             <ReviewScreen
               transactions={transactions}
               selectedTransaction={selectedTransaction}
@@ -793,17 +807,19 @@ function OperatorApp() {
               elevatedModeActive={elevatedModeActive}
               approvalModeEnabled={settingBoolean(settings, "approval", "approval.approval_mode_enabled")}
               onSelectTransaction={setSelectedTransactionId}
+              onOpenSplitEditor={() => setSplitReturnScreen("review")}
             />
           ) : null}
-          {activeScreen === "transactions" ? (
+          {!splitReturnScreen && activeScreen === "transactions" ? (
             <TransactionsScreen
               transactions={transactions}
               selectedTransaction={selectedTransaction}
               selectedTransactionId={selectedTransactionId}
               onSelectTransaction={setSelectedTransactionId}
+              onOpenSplitEditor={() => setSplitReturnScreen("transactions")}
             />
           ) : null}
-          {activeScreen === "reports" ? (
+          {!splitReturnScreen && activeScreen === "reports" ? (
             <ReportsScreen
               summary={summary}
               artifacts={artifactsQuery.data?.artifacts ?? []}
@@ -815,7 +831,7 @@ function OperatorApp() {
               elevatedModeActive={elevatedModeActive}
             />
           ) : null}
-          {activeScreen === "settings" ? (
+          {!splitReturnScreen && activeScreen === "settings" ? (
             <SettingsScreen
               settings={settings}
               runtime={summary.runtime}
@@ -2025,6 +2041,7 @@ function ReviewScreen({
   elevatedModeActive,
   approvalModeEnabled,
   onSelectTransaction,
+  onOpenSplitEditor,
 }: {
   transactions: Transaction[];
   selectedTransaction: TransactionDetail | Transaction | null;
@@ -2037,6 +2054,7 @@ function ReviewScreen({
   elevatedModeActive: boolean;
   approvalModeEnabled: boolean;
   onSelectTransaction: (id: string) => void;
+  onOpenSplitEditor: () => void;
 }) {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
@@ -2321,9 +2339,16 @@ function ReviewScreen({
 
   return (
     <section className="screen" aria-labelledby="review-heading">
-      <div className="screen-heading">
-        <p className="product-label">Controlled decision queue</p>
-        <h2 id="review-heading">Ledger Review</h2>
+      <div className="screen-heading split-heading">
+        <div>
+          <p className="product-label">Controlled decision queue</p>
+          <h2 id="review-heading">Ledger Review</h2>
+        </div>
+        <div className="action-row">
+          <button type="button" onClick={onOpenSplitEditor} disabled={!selectedTransaction}>
+            Open split editor
+          </button>
+        </div>
       </div>
 
       <div className="filters" aria-label="Review filters">
@@ -2492,16 +2517,284 @@ function ReviewScreen({
   );
 }
 
+type SplitEditorLine = {
+  localId: string;
+  amount: string;
+  categoryKey: string;
+  memo: string;
+};
+
+function SplitEditorScreen({
+  selectedTransaction,
+  categories,
+  operatorActor,
+  operatorActorContext,
+  canSaveSplits,
+  onCancel,
+  onSaved,
+}: {
+  selectedTransaction: TransactionDetail | Transaction;
+  categories: Category[];
+  operatorActor: string;
+  operatorActorContext: ActorContext;
+  canSaveSplits: boolean;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const activeCategories = useMemo(() => categories.filter((category) => category.active), [categories]);
+  const defaultCategoryKey = selectedTransaction.category_key_current ?? activeCategories[0]?.category_key ?? "";
+  const transactionAmount = selectedTransaction.amount ?? "0.00";
+  const [lines, setLines] = useState<SplitEditorLine[]>(() => [
+    { localId: "line-1", amount: transactionAmount, categoryKey: defaultCategoryKey, memo: "" },
+  ]);
+  const [formStatus, setFormStatus] = useState<string | null>(null);
+  const initializedTransactionId = useRef<string | null>(null);
+  const initializedAllocationSignature = useRef<string | null>(null);
+  const dirtyEditor = useRef(false);
+  const allocationsQuery = useQuery({
+    queryKey: ["transaction-allocations", selectedTransaction.id],
+    queryFn: () => fetchTransactionAllocations(selectedTransaction.id),
+  });
+
+  const categoryByKey = useMemo(
+    () => new Map(activeCategories.map((category) => [category.category_key, category])),
+    [activeCategories],
+  );
+  const categoryKeyById = useMemo(
+    () => new Map(activeCategories.map((category) => [category.id, category.category_key])),
+    [activeCategories],
+  );
+
+  const initialLines = useMemo(() => {
+    const savedLines = allocationsQuery.data?.allocations ?? [];
+    if (savedLines.length > 0) {
+      return savedLines.map((line) => ({
+        localId: line.id,
+        amount: line.amount,
+        categoryKey: categoryKeyById.get(line.category_id) ?? defaultCategoryKey,
+        memo: line.memo ?? "",
+      }));
+    }
+    return [{ localId: "line-1", amount: transactionAmount, categoryKey: defaultCategoryKey, memo: "" }];
+  }, [allocationsQuery.data?.allocations, categoryKeyById, defaultCategoryKey, transactionAmount]);
+
+  useEffect(() => {
+    const allocationSignature =
+      allocationsQuery.data?.allocations.map((allocation) => `${allocation.id}:${allocation.updated_at ?? ""}`).join("|") ??
+      "default";
+    const sameTransaction = initializedTransactionId.current === selectedTransaction.id;
+    const sameAllocations = initializedAllocationSignature.current === allocationSignature;
+    if (sameTransaction && dirtyEditor.current) {
+      return;
+    }
+    if (sameTransaction && sameAllocations) {
+      return;
+    }
+    initializedTransactionId.current = selectedTransaction.id;
+    initializedAllocationSignature.current = allocationSignature;
+    dirtyEditor.current = false;
+    setLines(initialLines);
+    setFormStatus(null);
+  }, [allocationsQuery.data, initialLines, selectedTransaction.id]);
+
+  const transactionCents = parseMoneyCents(transactionAmount);
+  const allocatedCents = lines.reduce((total, line) => total + parseMoneyCents(line.amount), 0);
+  const remainderCents = transactionCents - allocatedCents;
+  const allLinesValid = lines.every(
+    (line) => parseMoneyCents(line.amount) !== 0 && Boolean(categoryByKey.get(line.categoryKey)),
+  );
+  const balanced = lines.length > 0 && allLinesValid && remainderCents === 0;
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      saveTransactionAllocations({
+        transactionId: selectedTransaction.id,
+        actor: operatorActor,
+        actorContext: operatorActorContext,
+        note: "Save transaction split from split editor.",
+        lines: lines.map((line) => ({
+          amount: normalizeMoneyInput(line.amount),
+          category_id: categoryByKey.get(line.categoryKey)?.id ?? "",
+          memo: line.memo.trim() || null,
+        })),
+      }),
+    onSuccess: () => {
+      setFormStatus("Split saved");
+      void queryClient.invalidateQueries({ queryKey: ["transaction-allocations", selectedTransaction.id] });
+      void queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      void queryClient.invalidateQueries({ queryKey: ["transaction", selectedTransaction.id] });
+      void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["funds-summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
+      onSaved();
+    },
+    onError: (error) => setFormStatus(formatApiError(error, "Split save blocked")),
+  });
+
+  function updateLine(localId: string, patch: Partial<SplitEditorLine>) {
+    dirtyEditor.current = true;
+    setLines((current) => current.map((line) => (line.localId === localId ? { ...line, ...patch } : line)));
+    setFormStatus(null);
+  }
+
+  function addLine() {
+    dirtyEditor.current = true;
+    setLines((current) => [
+      ...current,
+      {
+        localId: `line-${Date.now()}`,
+        amount: formatCentsInput(remainderCents),
+        categoryKey: defaultCategoryKey,
+        memo: "",
+      },
+    ]);
+    setFormStatus(null);
+  }
+
+  function removeLine(localId: string) {
+    dirtyEditor.current = true;
+    setLines((current) => (current.length > 1 ? current.filter((line) => line.localId !== localId) : current));
+    setFormStatus(null);
+  }
+
+  function resetLines() {
+    dirtyEditor.current = false;
+    setLines(initialLines);
+    setFormStatus(null);
+  }
+
+  return (
+    <section className="screen" aria-labelledby="split-heading">
+      <div className="screen-heading split-heading">
+        <div>
+          <p className="product-label">Contextual allocation editor</p>
+          <h2 id="split-heading">Split transaction</h2>
+          <p className="screen-sub">Launched from Review / Transactions</p>
+        </div>
+        <StatusBadge status={balanced ? "balanced" : "unbalanced"} />
+      </div>
+
+      <section className="work-panel">
+        <h3>Imported fact</h3>
+        <div className="metric-grid compact">
+          <label>
+            Date
+            <input type="text" value={selectedTransaction.posted_date ?? ""} readOnly />
+          </label>
+          <label>
+            Merchant
+            <input type="text" value={selectedTransaction.normalized_merchant ?? selectedTransaction.raw_description ?? ""} readOnly />
+          </label>
+          <label>
+            Transaction amount
+            <input type="text" value={transactionAmount} readOnly />
+          </label>
+        </div>
+        <p className="section-note">Receipt lines enrich this transaction only after explicit promotion.</p>
+      </section>
+
+      <section className="work-panel">
+        <h3>Allocations</h3>
+        <div className="alloc-grid">
+          {lines.map((line, index) => (
+            <div className="allocation-row" key={line.localId}>
+              <label>
+                Split amount {index + 1}
+                <input
+                  inputMode="decimal"
+                  value={line.amount}
+                  onChange={(event) => updateLine(line.localId, { amount: event.target.value })}
+                />
+              </label>
+              <label>
+                Split category {index + 1}
+                <select
+                  value={line.categoryKey}
+                  onChange={(event) => updateLine(line.localId, { categoryKey: event.target.value })}
+                >
+                  {activeCategories.map((category) => (
+                    <option key={category.category_key} value={category.category_key}>
+                      {category.display_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Split memo {index + 1}
+                <input value={line.memo} onChange={(event) => updateLine(line.localId, { memo: event.target.value })} />
+              </label>
+              <button type="button" className="link-button" onClick={() => removeLine(line.localId)} disabled={lines.length <= 1}>
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="action-row split-actions">
+          <button type="button" className="link-button" onClick={addLine}>
+            + Add allocation line
+          </button>
+        </div>
+      </section>
+
+      <section className="work-panel">
+        <div className="remainder-line">
+          <div>
+            <dt>Transaction amount</dt>
+            <dd>{formatMoney(transactionAmount)}</dd>
+          </div>
+          <div>
+            <dt>Allocated</dt>
+            <dd>{formatMoney(formatCentsInput(allocatedCents))}</dd>
+          </div>
+          <div>
+            <dt>Remainder</dt>
+            <dd>{formatMoney(formatCentsInput(remainderCents))}</dd>
+          </div>
+          <div className={balanced ? "remainder-status ok-text" : "remainder-status warn-text"} aria-live="polite">
+            {balanced ? "Balanced - ready to save" : "Unbalanced - fix remainder before saving"}
+          </div>
+        </div>
+        <div className="audit-preview">
+          <span>Creates 1 split decision event with {lines.length} line(s)</span>
+          <span>Imported row unchanged and remains linked</span>
+          <span>Saved splits become the report source until replaced</span>
+        </div>
+        {!canSaveSplits ? <p className="form-status warn-text">Split saves are disabled for this persona or mode.</p> : null}
+        {formStatus ? <p className={formStatus === "Split saved" ? "form-status ok-text" : "form-status danger-text"}>{formStatus}</p> : null}
+        <div className="button-row">
+          <button type="button" onClick={resetLines}>
+            Reset
+          </button>
+          <button type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => saveMutation.mutate()}
+            disabled={!balanced || !canSaveSplits || saveMutation.isPending}
+          >
+            Save split
+          </button>
+        </div>
+      </section>
+    </section>
+  );
+}
+
 function TransactionsScreen({
   transactions,
   selectedTransaction,
   selectedTransactionId,
   onSelectTransaction,
+  onOpenSplitEditor,
 }: {
   transactions: Transaction[];
   selectedTransaction: TransactionDetail | Transaction | null;
   selectedTransactionId: string | null;
   onSelectTransaction: (id: string) => void;
+  onOpenSplitEditor: () => void;
 }) {
   const columns = useMemo<ColumnDef<Transaction>[]>(
     () => [
@@ -2531,7 +2824,12 @@ function TransactionsScreen({
           <p className="product-label">Reviewed/current ledger view</p>
           <h2 id="transactions-heading">Transactions</h2>
         </div>
-        <StatusBadge status={selectedTransactionId ? "selected" : "not_selected"} />
+        <div className="action-row">
+          <button type="button" onClick={onOpenSplitEditor} disabled={!selectedTransactionId}>
+            Split selected transaction
+          </button>
+          <StatusBadge status={selectedTransactionId ? "selected" : "not_selected"} />
+        </div>
       </div>
 
       <div className="two-column wide-left">
@@ -3392,6 +3690,22 @@ function formatStatus(status: string) {
 function formatMoney(value: string | number | null | undefined) {
   const amount = Number(value ?? 0);
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
+}
+
+function parseMoneyCents(value: string | number | null | undefined) {
+  const amount = Number(String(value ?? "0").replace(/[$,]/g, ""));
+  if (!Number.isFinite(amount)) {
+    return 0;
+  }
+  return Math.round(amount * 100);
+}
+
+function formatCentsInput(cents: number) {
+  return (cents / 100).toFixed(2);
+}
+
+function normalizeMoneyInput(value: string) {
+  return formatCentsInput(parseMoneyCents(value));
 }
 
 function decimalSubtract(left: string, right: string) {
