@@ -2,7 +2,7 @@
 
 Status: Draft  
 Build phase: Phase 2  
-Schema note: `planning/engineering/v1_1_a1_schema.md` is not present in this checkout. Use the table and API names below from `planning/v1_1_expansion_decision_record.md`; align to A1 on merge.
+Schema source: `planning/engineering/v1_1_a1_schema.md` defines `spendable_balance_snapshots.monthly_close_id`; this track extends the existing monthly close tables and artifacts.
 
 ## Purpose
 
@@ -37,7 +37,7 @@ Use existing tables:
 - `decision_events`
 - elevated mode/session tables from A3 or current permission foundation
 
-If A1 introduces close check tables, align to A1 on merge. Otherwise, store v1.1 gate detail in `monthly_closes.validation_summary` and artifact manifests.
+Store v1.1 gate detail in `monthly_closes.validation_summary` and artifact manifests.
 
 ### Close Readiness Additions
 
@@ -111,12 +111,14 @@ Mockup reference: existing Reports screen pattern plus v1.1 approved terminology
 Reports / Monthly close changes:
 
 - Show close readiness grouped by existing validation/source/review gates and new Funds/Spendable gates.
+- Render `funds_and_spendable.blockers` and `funds_and_spendable.warnings` in the existing warning-band pattern. Each item should name the affected pool or spendable input, the amount when available, and whether draft close may proceed.
 - Draft close button remains available when only D9 fund/spendable warnings exist.
-- Final close button is disabled with reason unless Governor override is active.
-- When override is available, require a purpose note field before finalizing.
+- Final close button is disabled with reason unless Governor override is active. Use this reason copy when D9 blockers are present: "Final close needs Financial Governor override because Funds/Spendable checks have blockers."
+- If existing source, review, or validation blockers remain, keep their current blocking copy and do not imply the D9 override clears them.
+- When override is available, require a purpose note field before finalizing. Field label: "Governor override purpose". Required-state message: "Enter why final close should proceed with these Funds/Spendable blockers."
 - Close result shows bundle artifact links and override/provisional status.
 
-The UI should reuse existing status badges and warning bands. No separate mockup screen is required beyond the Reports surface.
+The UI should reuse existing status badges and warning bands. Add a lightweight wireframe or annotated Reports screenshot for the Governor override flow before the B5 UI PR because the action is elevated and audited. Backend/gate logic is unblocked.
 
 ## Test Plan
 

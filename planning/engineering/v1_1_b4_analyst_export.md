@@ -2,7 +2,7 @@
 
 Status: Draft  
 Build phase: Phase 2  
-Schema note: `planning/engineering/v1_1_a1_schema.md` is not present in this checkout. Use the table and API names below from `planning/v1_1_expansion_decision_record.md`; align to A1 on merge.
+Schema source: `planning/engineering/v1_1_a1_schema.md` defines no dedicated analyst-pack table. Use the existing local job/artifact pattern unless a later approved schema doc changes it.
 
 ## Purpose
 
@@ -30,7 +30,7 @@ Use existing `jobs` and `artifacts` patterns from `reporting.py`, with a new rep
 - `artifact_type = "analyst_pack_prompt"`
 - optional `artifact_type = "analyst_pack_transactions_export"`
 
-If A1 introduces a dedicated `analyst_packs` table, align to A1 on merge. Otherwise, artifacts plus job output are sufficient for v1.1.
+Artifacts plus job output are sufficient for v1.1.
 
 ### Bundle Schema
 
@@ -131,12 +131,14 @@ Reports / Analyst export surface:
 
 - "Build export pack" primary action.
 - Checklist of included sections.
+- Add a net worth checklist row for actual net worth, with an include-estimates control that drives `include_estimates` in the build request. Screen G's approved checklist omits this row, so extend the mockup before the B4 UI PR.
 - Raw transaction rows unchecked by default and clearly marked as line-level detail.
 - Account numbers/balances marked as never included where applicable.
 - Privacy boundary panel: local generation, no AI or external service call.
 - Prompt picker with monthly spending review, cashflow and savings-rate analysis, goal progress check-in, and custom.
 - Prompt preview and "Copy prompt".
 - Preview pack and Export pack buttons.
+- Estimate-toggle copy must match B3/D6: actual net worth is the default, estimates are optional, and estimates never feed Spendable balance.
 
 Use existing `ReportsScreen` patterns for artifacts, report runs, monthly close, and export permissions.
 

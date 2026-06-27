@@ -2,7 +2,7 @@
 
 Status: Draft  
 Build phase: Phase 2  
-Schema note: `planning/engineering/v1_1_a1_schema.md` is not present in this checkout. Use the table and API names below from `planning/v1_1_expansion_decision_record.md`; align to A1 on merge.
+Schema source: `planning/engineering/v1_1_a1_schema.md` controls the table names and field contracts for this track.
 
 ## Purpose
 
@@ -45,16 +45,15 @@ Required fields or equivalents:
 - `balance`
 - `valuation_method` - `actual` or `estimate`
 - `confidence`
-- `as_of_date`
-- `source_note`
-- `notes`
-- import/source metadata
+- `source_notes`
+- `include_in_actual_net_worth`
+- import/source metadata where the implementation links CSV jobs or source files
 - audit metadata
 
 Validation:
 
-- `balance` must be numeric and signed consistently by `asset_or_liability`.
-- `valuation_method=estimate` requires `confidence`, `as_of_date`, and `source_note`.
+- `balance` must be numeric. Use the A1-recommended positive amount convention, with `asset_or_liability` determining rollup sign.
+- `valuation_method=estimate` requires `confidence`, `snapshot_date`, and `source_notes`.
 - `valuation_method=actual` should allow source notes but not require estimate confidence.
 - Snapshot dates must be valid ISO dates.
 - CSV imports must reject account numbers or columns outside the allowed contract if A1 defines a strict allowlist.
@@ -72,9 +71,7 @@ Input columns:
 - `balance`
 - `valuation_method`
 - `confidence`
-- `as_of_date`
-- `source_note`
-- `notes`
+- `source_notes`
 
 CSV import follows existing upload/import patterns:
 
@@ -131,9 +128,11 @@ Initial UI surfaces:
 
 - Net worth tile on Dashboard with "Actual net worth" default.
 - Secondary "With estimates" metric.
+- Confidence metric, for example `Confidence: Mixed`, with subtext "Estimates never feed Spendable balance".
 - Toggle: "Include estimates (home, vehicle, other)".
 - Warning banner when estimates are shown.
 - Entry/import surface can live under Dashboard or Reports until a dedicated Net Worth screen is approved.
+- Manual-entry and CSV-import surfaces do not have an approved mockup yet. Add a lightweight wireframe before the B3 UI PR. Backend/API work is unblocked.
 
 Manual entry form:
 

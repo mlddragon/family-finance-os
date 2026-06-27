@@ -2,7 +2,7 @@
 
 Status: Draft  
 Build phase: Phase 2  
-Schema note: `planning/engineering/v1_1_a1_schema.md` is not present in this checkout. Use the table and API names below from `planning/v1_1_expansion_decision_record.md`; align to A1 on merge.
+Schema source: `planning/engineering/v1_1_a1_schema.md` controls the table names and field contracts for this track.
 
 ## Purpose
 
@@ -32,10 +32,11 @@ The Funds screen must make monthly commitments and overcommitment warnings visib
 
 ### Tables
 
-Expected A1 tables or equivalents:
+Expected A1 tables:
 
 - `fund_pools`
-- `fund_commitments`
+- `pool_category_links`
+- `monthly_pool_commitments`
 - `financial_goals`
 - `budget_targets`
 - existing `decision_events`
@@ -53,7 +54,7 @@ Expected A1 tables or equivalents:
 - `status`
 - audit metadata aligned with A1
 
-`fund_pools` should include stable keys for API references and display names. `fund_commitments` should bind a pool to a month and committed amount. `budget_targets` should compare reviewed actuals and allocation-driven actuals to monthly targets.
+`fund_pools` should include stable keys for API references and display names. `monthly_pool_commitments` binds a pool to a month and committed amount. `pool_category_links` maps reviewed categories to default pools. `budget_targets` compares reviewed actuals and allocation-driven actuals to monthly targets.
 
 ### Derived Calculations
 
@@ -96,12 +97,25 @@ Proposed `GET /api/funds/summary` payload:
     "reserved_goal_balance": "1900.00",
     "manual_upcoming_obligations": "867.42",
     "provisional_exposure": "1842.00",
-    "card_obligation": "1523.23",
+    "card_obligation_total": "1523.23",
+    "card_obligation_items": [
+      {
+        "card": "Synthetic Rewards Card",
+        "owed": "1018.23",
+        "note": "Pool remaining already reflects this"
+      },
+      {
+        "card": "Synthetic Travel Card",
+        "owed": "505.00",
+        "note": "Statement due Jul 02"
+      }
+    ],
     "includes_provisional": false
   },
   "commitment_health": {
     "funded_this_month": "2800.00",
     "fund_commitments": "2640.00",
+    "pool_remaining_total": "160.00",
     "uncommitted": "160.00",
     "overcommitted": false
   },
@@ -134,17 +148,19 @@ Home changes:
 
 - Add Spendable balance headline panel.
 - Show verified liquid cash, Reserved goal balance, Manual obligations, optional Provisional exposure, and Card obligation.
+- Show Card obligation as a per-card table with `Card`, `Owed`, and `Note` columns, plus a total for summary use.
 - Include a toggle to include provisional exposure in the displayed scenario without changing the default headline formula.
-- Add "Where your money is committed" metrics linking to Funds.
+- Add "Where your money is committed" metrics linking to Funds: Fund commitments this month, Pool remaining (all pools), and Reserved goal balance.
 
 Funds screen:
 
 - Add sidebar entry `Funds`.
 - Show commitment health metrics: funded this month, Fund commitments, uncommitted/overcommitted.
-- Show warning band when commitments exceed funding.
-- Show pool table with commitment, spent, Pool remaining, and status.
+- Show warning band when commitments exceed funding. Copy should reassure that nothing is blocked, but Pool remaining assumes full funding.
+- Show pool table with commitment, spent, Pool remaining, and status. Status values are `On track`, `Not started`, and `Over by $X`.
 - Show Reserved goal balance table with Goal, Target, Reserved, and Remaining to target.
 - Goal creation/editing must require a goal name before save per D7.
+- Goal create/edit reuses existing form patterns because no dedicated approved mockup exists yet. The form must include required goal name and `goal_type` selection. Add a lightweight wireframe before the B1 UI PR.
 
 Use existing React screen patterns: `screens` array, conditional screen rendering, `work-panel`, `metric-grid`, `DataTable`, and mutation status messaging.
 

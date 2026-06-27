@@ -157,6 +157,13 @@ Approved mockup screen IDs from `planning/mockups/v1_1/index.html`:
 - `data-auth="login"`: Login, TOTP, recovery-code fallback, QA bypass variant.
 - `data-auth="enroll"`: First-boot owner enrollment and recovery codes.
 
+Wireframe-needed surfaces before UI PRs:
+
+- Goal create/edit form for required goal name and `goal_type` selection.
+- Net worth manual entry and CSV import screens.
+- Monthly close Governor override flow, including blocker copy and purpose note.
+- Scraper Sources adapter surface, including adapter list, last run, run control, safety banner, and job progress.
+
 ## Testing Strategy Per Track
 
 ### A1 Schema

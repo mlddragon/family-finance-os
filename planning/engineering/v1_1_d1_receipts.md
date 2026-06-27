@@ -2,7 +2,7 @@
 
 Status: Draft  
 Build phase: Phase 4  
-Schema note: `planning/engineering/v1_1_a1_schema.md` is not present in this checkout. Use the table and API names below from `planning/v1_1_expansion_decision_record.md`; align to A1 on merge.
+Schema source: `planning/engineering/v1_1_a1_schema.md` controls the table names and field contracts for this track.
 
 ## Purpose
 
@@ -31,52 +31,58 @@ D11 sets precedence:
 
 ### Tables
 
-Expected A1 tables or equivalents:
+Expected A1 tables and existing import infrastructure:
 
 - `receipts`
-- `receipt_lines`
-- `receipt_imports` or existing `import_batches` with receipt type
+- `receipt_line_items`
+- existing `import_batches` or an equivalent receipt import job model
 - existing `transaction_allocations`
 - existing `decision_events`
 
 `receipts` fields:
 
 - `id`
-- `transaction_id` nullable until matched
-- `merchant`
-- `receipt_date`
-- `total_amount`
-- `source_type` - `manual`, `csv_import`, `scraper`
-- `source_vendor`
+- `canonical_transaction_id` nullable until matched
+- `merchant_name`
+- `purchase_date`
+- `receipt_total`
+- `currency`
+- `source_type` - `manual`, `csv_import`, `vendor_scraper`
+- `source_file_id`
+- `stored_artifact_path`
+- `status`
 - `review_status`
 - audit metadata
 
-`receipt_lines` fields:
+`receipt_line_items` fields:
 
 - `id`
 - `receipt_id`
-- `line_index`
-- `description`
+- `line_number`
+- `item_description`
 - `quantity`
-- `amount`
-- `category_key`
+- `unit_price`
+- `line_total`
+- `category_id`
+- `subcategory`
 - `fund_pool_id`
-- `review_required`
-- `review_reason`
-- `promoted_to_allocation_id`
-- audit metadata
+- `tax_relevant_candidate`
+- `reimbursement_candidate`
+- `business_candidate`
+- `review_status`
+- `metadata_json`
 
 ### CSV Import
 
 Input columns:
 
 - `merchant`
-- `receipt_date`
+- `purchase_date`
 - `receipt_total`
 - `line_description`
 - `line_quantity`
 - `line_amount`
-- `category_key`
+- `category_id`
 - optional `transaction_id`
 - optional `source_vendor`
 
@@ -145,6 +151,8 @@ Receipt entry surface:
 
 - Launch from Transactions and Review.
 - Manual fields: Merchant, Date, Total, linked transaction.
+- Linked transaction row includes Change and Unlink controls.
+- When a transaction is linked, Total is derived from the linked transaction amount and is read-only. On Unlink, Total becomes user-entered again and existing line items remain in the editor.
 - Line item editor with Add line item.
 - Show Items total, Receipt total, and Unaccounted amount.
 - Saving partial itemization is allowed and should be labeled optional.

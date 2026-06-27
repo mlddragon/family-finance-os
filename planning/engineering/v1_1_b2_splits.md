@@ -2,7 +2,7 @@
 
 Status: Draft  
 Build phase: Phase 2  
-Schema note: `planning/engineering/v1_1_a1_schema.md` is not present in this checkout. Use the table and API names below from `planning/v1_1_expansion_decision_record.md`; align to A1 on merge.
+Schema source: `planning/engineering/v1_1_a1_schema.md` controls the table names and field contracts for this track.
 
 ## Purpose
 
@@ -29,23 +29,25 @@ Expected A1 table:
 Required fields or equivalents:
 
 - `id`
-- `transaction_id`
-- `line_index`
+- `canonical_transaction_id`
+- `allocation_group_id`
+- `line_number`
 - `amount`
-- `category_key`
-- `subcategory_key`
+- `category_id`
+- `subcategory`
 - `fund_pool_id`
 - `financial_goal_id`
-- `budget_target_id`
-- `allocation_note`
-- flags for `reimbursement_candidate`, `medical_tax_candidate`, `side_hustle_candidate`, and similar review queues as A1 permits
+- `memo`
+- `source` - `manual`, `receipt_promoted`, `import_heuristic`, or `rule_suggestion`
+- `status` - `active`, `superseded`, or `voided`
+- `decision_event_id`
 - audit metadata
 
 Constraints:
 
 - Allocation amounts for a transaction must balance exactly to the transaction amount before save.
 - Line order must be stable for audit and UI replay.
-- Deleted/replaced split sets should remain auditable through decision events. A1 may choose hard replacement plus event history or soft versioning.
+- Deleted/replaced split sets should remain auditable through decision events and status changes.
 
 ### API Shape
 
@@ -65,8 +67,8 @@ Proposed endpoints:
   "lines": [
     {
       "amount": "-120.00",
-      "category_key": "groceries",
-      "subcategory_key": null,
+      "category_id": "cat_groceries",
+      "subcategory": null,
       "fund_pool_id": "pool_groceries",
       "note": "Synthetic example"
     }
@@ -108,11 +110,13 @@ Mockup reference: `planning/mockups/v1_1/index.html`, Screen D.
 
 Split editor behavior:
 
-- Launch from Review and Transactions.
+- Launch from Review, Transactions, and Receipt entry via promote-to-splits. Receipt launches open pre-filled with proposed allocation lines.
 - Show imported fact as read-only: date, source, merchant, and amount.
 - Show editable allocation rows with amount, category, optional pool/goal/target, and note.
 - Show Transaction amount, Allocated, Remainder, and balanced/unbalanced status.
+- Include a Reset control that restores the editor to the original imported fact or receipt-proposed allocation set.
 - Disable Save split until the remainder is zero and all required fields validate.
+- When a linked receipt already has lines, show D11 reconciliation hints in the editor summary: receipt lines are enrichment until saved as splits, and existing saved splits remain the report source until replaced.
 - Audit preview must state that the imported row remains unchanged and linked.
 - Save creates one split decision event with line count and before/after allocation state.
 

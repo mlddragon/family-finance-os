@@ -2,7 +2,7 @@
 
 Status: Draft  
 Build phase: Phase 5 - last in build order  
-Schema note: `planning/engineering/v1_1_a1_schema.md` is not present in this checkout. Use the table and API names below from `planning/v1_1_expansion_decision_record.md`; align to A1 on merge.
+Schema source: `planning/engineering/v1_1_a1_schema.md` controls receipt output tables. A1 does not define scraper-specific tables, so this track should use the existing job/artifact pattern unless a later approved schema doc changes it.
 
 ## Purpose
 
@@ -29,18 +29,18 @@ Scrapers produce auditable receipt headers and receipt lines. They do not create
 
 ### Tables
 
-Expected A1 tables or equivalents:
+A1 receipt output tables:
 
-- `scraper_jobs`
-- `scraper_job_events`
-- `vendor_adapters`
 - `receipts`
-- `receipt_lines`
+- `receipt_line_items`
+
+Existing operational tables:
+
 - existing `jobs`
 - existing `artifacts`
 - existing `decision_events`
 
-If A1 keeps scraper jobs inside the generic `jobs` table, use:
+Use generic jobs for scraper runs:
 
 - `job_type = "vendor_scrape"`
 - `input_json` for adapter/options
@@ -57,18 +57,18 @@ Each adapter returns normalized receipt output:
   "receipts": [
     {
       "external_receipt_id": "synthetic-order-1",
-      "merchant": "Amazon",
-      "receipt_date": "2026-06-12",
-      "total_amount": "42.50",
+      "merchant_name": "Amazon",
+      "purchase_date": "2026-06-12",
+      "receipt_total": "42.50",
       "lines": [
         {
-          "line_index": 1,
-          "description": "Synthetic item",
+          "line_number": 1,
+          "item_description": "Synthetic item",
           "quantity": "1",
-          "amount": "42.50",
-          "category_key": null,
-          "review_required": true,
-          "review_reason": "category_needed"
+          "line_total": "42.50",
+          "category_id": null,
+          "review_status": "needs_review",
+          "metadata_json": "{\"review_reason\":\"category_needed\"}"
         }
       ]
     }
@@ -163,6 +163,7 @@ No dedicated scraper mockup is approved. Initial UI should attach to existing So
 - Sources: job progress, warnings, and artifact links.
 - Review: receipt review queues populated by scraper output.
 - Transactions/Receipts: matched receipt lines remain enrichment until D11 promotion.
+- Add a Sources adapter wireframe before the E2 Amazon adapter UI PR. It should cover adapter list, last run, run button, safety banner, and job progress. E1 framework, API, and audit work are unblocked without that UI wireframe.
 
 UI copy must state:
 
@@ -178,7 +179,7 @@ Backend unit tests:
 - Adapter registry lists Amazon, Costco, and Walmart disabled by default unless settings enable them.
 - Job creation rejects credential/session fields.
 - Output path safety rejects paths outside `DATA_ROOT`.
-- Normalizer converts synthetic vendor fixtures into `receipts` and `receipt_lines`.
+- Normalizer converts synthetic vendor fixtures into `receipts` and `receipt_line_items`.
 - Validation catches duplicate external ids, missing totals, invalid dates, and mismatched totals.
 - Job events record each stage and final status.
 - Scraper output does not affect reports until promoted to splits.

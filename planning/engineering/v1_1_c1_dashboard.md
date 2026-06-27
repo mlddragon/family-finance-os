@@ -2,7 +2,7 @@
 
 Status: Draft  
 Build phase: Phase 3  
-Schema note: `planning/engineering/v1_1_a1_schema.md` is not present in this checkout. Use the table and API names below from `planning/v1_1_expansion_decision_record.md`; align to A1 on merge.
+Schema source: `planning/engineering/v1_1_a1_schema.md` controls the table names consumed by Dashboard summary builders.
 
 ## Purpose
 
@@ -78,6 +78,7 @@ Dashboard screen:
 
 - Add sidebar entry `Dashboard`.
 - Header shows Freshness, Confidence, and Reviewed percentage.
+- Header/status strip includes a period control, starting with "Last 6 months", that drives the cashflow `months` parameter.
 - Cashflow chart: six-month net cashflow with provisional marker on incomplete/stale months.
 - Category spend chart: current month category totals.
 - Pool target progress chart: goal and pool progress including over-target warning state.
