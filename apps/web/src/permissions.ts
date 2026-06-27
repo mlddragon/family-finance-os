@@ -66,6 +66,10 @@ export function permissionSuggests(permission: EffectivePermission | undefined):
   return Boolean(permission?.suggestion_allowed);
 }
 
+export function canAccessReviewScreen(permission: EffectivePermission | undefined): boolean {
+  return permissionAllows(permission) || permissionSuggests(permission);
+}
+
 export function permissionSummaryLabel(permission: EffectivePermission): string {
   if (permission.allowed) {
     return "Allow";

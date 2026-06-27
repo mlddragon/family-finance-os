@@ -143,6 +143,20 @@ from family_finance_os.suggestions import (
     list_suggestions,
     route_review_decide,
 )
+from family_finance_os.analyst_export import (
+    AnalystExportRequest,
+    analyst_pack_options,
+    build_analyst_pack,
+    list_analyst_pack_prompts,
+)
+from family_finance_os.dashboard import (
+    DashboardError,
+    dashboard_cashflow,
+    dashboard_category_spend,
+    dashboard_net_worth,
+    dashboard_pool_progress,
+    dashboard_summary,
+)
 from family_finance_os.reporting import (
     AdvisorExportRequest,
     MonthlyCloseRequest,
@@ -1529,6 +1543,85 @@ def create_app(
             except ReportingError as exc:
                 raise reporting_http_error(exc) from exc
 
+    def dashboard_http_error(exc: DashboardError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    @app.get("/api/dashboard/summary")
+    def get_dashboard_summary(month: Optional[str] = None) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return dashboard_summary(session, month=month)
+            except DashboardError as exc:
+                raise dashboard_http_error(exc) from exc
+
+    @app.get("/api/dashboard/cashflow")
+    def get_dashboard_cashflow(months: int = 6, month: Optional[str] = None) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return dashboard_cashflow(session, months=months, anchor_month=month)
+            except DashboardError as exc:
+                raise dashboard_http_error(exc) from exc
+
+    @app.get("/api/dashboard/category-spend")
+    def get_dashboard_category_spend(month: Optional[str] = None) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return dashboard_category_spend(session, month=month)
+            except DashboardError as exc:
+                raise dashboard_http_error(exc) from exc
+
+    @app.get("/api/dashboard/pool-progress")
+    def get_dashboard_pool_progress(month: Optional[str] = None) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return dashboard_pool_progress(session, month=month)
+            except DashboardError as exc:
+                raise dashboard_http_error(exc) from exc
+
+    @app.get("/api/dashboard/net-worth")
+    def get_dashboard_net_worth(
+        date_from: Optional[str] = Query(default=None, alias="from"),
+        date_to: Optional[str] = Query(default=None, alias="to"),
+        include_estimates: bool = False,
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            return dashboard_net_worth(
+                session,
+                date_from=date_from,
+                date_to=date_to,
+                include_estimates=include_estimates,
+            )
+
+    @app.get("/api/analyst-pack/options")
+    def get_analyst_pack_options(month: Optional[str] = None) -> Dict[str, Any]:
+        with create_session() as session:
+            return analyst_pack_options(session, month=month)
+
+    @app.get("/api/analyst-pack/prompts")
+    def get_analyst_pack_prompts() -> Dict[str, Any]:
+        return list_analyst_pack_prompts()
+
+    @app.post("/api/analyst-pack/build")
+    def post_analyst_pack_build(payload: AnalystExportRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.EXPORTS_CREATE,
+                DataScopeKey.ADVISOR_EXPORT_ARTIFACTS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return build_analyst_pack(
+                    session,
+                    active_data_root,
+                    payload,
+                    synthetic_artifact_marker=runtime_identity.synthetic_artifact_marker,
+                )
+            except ReportingError as exc:
+                raise reporting_http_error(exc) from exc
+
     @app.post("/api/monthly-close/draft")
     def post_monthly_close_draft(payload: MonthlyCloseRequest) -> Dict[str, Any]:
         active_data_root = get_data_root()
@@ -1554,6 +1647,7 @@ def create_app(
     @app.post("/api/monthly-close/finalize")
     def post_monthly_close_finalize(payload: MonthlyCloseRequest) -> Dict[str, Any]:
         active_data_root = get_data_root()
+        registry = get_elevated_mode_registry()
         with create_session() as session:
             require_permission(
                 session,
@@ -1562,6 +1656,7 @@ def create_app(
                 DataScopeKey.MONTHLY_CLOSE,
                 actor_context=payload.actor_context,
             )
+            elevated_session = registry.get_active(session, current_elevated_session_id())
             try:
                 return create_monthly_close(
                     session,
@@ -1569,6 +1664,7 @@ def create_app(
                     payload,
                     status="final",
                     synthetic_artifact_marker=runtime_identity.synthetic_artifact_marker,
+                    elevated_session=elevated_session,
                 )
             except ReportingError as exc:
                 raise reporting_http_error(exc) from exc

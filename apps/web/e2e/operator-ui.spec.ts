@@ -63,7 +63,7 @@ const transaction = {
 
 const personalRuntime = {
   app: "Family Finance OS",
-  version: "0.3.0",
+  version: "0.5.0",
   local_only: true,
   bind_host: "127.0.0.1",
   app_env: "personal",

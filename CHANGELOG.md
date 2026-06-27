@@ -17,6 +17,14 @@ All notable changes to Family Finance OS will be tracked here.
 - Suggestions queue and optional approval mode (B.3; off by default) with approval requests.
 - Serve SPA `index.html` with `Cache-Control: no-cache` so QA rebuilds pick up new bundles without hard refresh.
 
+## 0.5.1 - Unreleased
+
+- v1.1 B1–B3: fund pools, goals, splits, net worth snapshots (API + operator UI).
+- v1.1 B4 analyst export artifacts and prompt library scaffolding.
+- v1.1 B5 monthly close readiness gates and reporting refinements.
+- v1.1 C1 dashboard metrics API and operator dashboard refresh.
+- QA patch backlog P001–P011: sticky chrome/sidebar, Home/Dashboard/Funds/Reports/Settings layout, scan inbox feedback, review permission UX, control-plane rail order.
+
 ## 0.4.0 - 2026-06-23
 
 - Rehome GitHub repository to `mlddragon/family-finance-os`.

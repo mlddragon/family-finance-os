@@ -36,8 +36,14 @@ import {
   fetchFundsSummary,
   fetchNetWorthSummary,
   fetchOperatorSummary,
+  buildAnalystPack,
   createAdvisorExport,
   draftMonthlyClose,
+  fetchDashboardCashflow,
+  fetchDashboardCategorySpend,
+  fetchDashboardNetWorth,
+  fetchDashboardPoolProgress,
+  fetchDashboardSummary,
   fetchArtifacts,
   fetchActors,
   fetchCategories,
@@ -70,6 +76,7 @@ import {
 } from "./api";
 import "./i18n";
 import {
+  canAccessReviewScreen,
   defaultUIPermissionMap,
   permissionAllows,
   permissionSuggests,
@@ -77,6 +84,7 @@ import {
   UI_PERMISSION_CHECKS,
   type UIPermissionMap,
 } from "./permissions";
+import { reviewDecideActionState } from "./permission-action";
 import type {
   Artifact,
   ActorContext,
@@ -104,11 +112,12 @@ import type {
 } from "./types";
 import "./styles.css";
 
-type ScreenKey = "home" | "funds" | "sources" | "validation" | "review" | "transactions" | "reports" | "settings";
+type ScreenKey = "home" | "dashboard" | "funds" | "sources" | "validation" | "review" | "transactions" | "reports" | "settings";
 type SettingRow = SettingsPayload["settings"][number];
 
 const screens: Array<{ key: ScreenKey; labelKey: string }> = [
   { key: "home", labelKey: "nav.home" },
+  { key: "dashboard", labelKey: "nav.dashboard" },
   { key: "funds", labelKey: "nav.funds" },
   { key: "sources", labelKey: "nav.sources" },
   { key: "validation", labelKey: "nav.validation" },
@@ -772,10 +781,6 @@ function OperatorApp() {
 
   const summaryQuery = useQuery({ queryKey: ["operator-summary"], queryFn: fetchOperatorSummary });
   const fundsSummaryQuery = useQuery({ queryKey: ["funds-summary", fundsMonth], queryFn: () => fetchFundsSummary(fundsMonth) });
-  const netWorthSummaryQuery = useQuery({
-    queryKey: ["net-worth-summary"],
-    queryFn: () => fetchNetWorthSummary({ includeEstimates: false }),
-  });
   const actorsQuery = useQuery({ queryKey: ["actors"], queryFn: fetchActors });
   const inboxQuery = useQuery({ queryKey: ["inbox-scan"], queryFn: scanInbox });
   const findingsQuery = useQuery({ queryKey: ["validation-findings"], queryFn: fetchValidationFindings });
@@ -799,7 +804,6 @@ function OperatorApp() {
 
   const summary = summaryQuery.data ?? emptySummary;
   const fundsSummary = fundsSummaryQuery.data ?? emptyFundsSummary;
-  const netWorthSummary = netWorthSummaryQuery.data ?? emptyNetWorthSummary;
   const actors = actorsQuery.data;
   const findings = findingsQuery.data?.findings ?? [];
   const inbox = inboxQuery.data?.import_batches ?? [];
@@ -811,6 +815,8 @@ function OperatorApp() {
   const permissions = permissionsQuery.data ?? defaultUIPermissionMap();
   const elevatedMode = useElevatedMode(operatorActor, operatorActorContext);
   const elevatedModeActive = elevatedMode.active;
+  const reviewPermissionResolved = permissionsQuery.isSuccess;
+  const canAccessReview = !reviewPermissionResolved || canAccessReviewScreen(permissions.review);
   const categories = categoriesQuery.data?.categories ?? [];
   const sourceProfileKey = summary.sources.profiles.map((profile) => profile.source_key).join("|") || "no-source-profiles";
   const selectedTransaction =
@@ -818,44 +824,54 @@ function OperatorApp() {
     transactions.find((transaction) => transaction.id === selectedTransactionId) ??
     null;
 
+  useEffect(() => {
+    if (reviewPermissionResolved && activeScreen === "review" && !canAccessReviewScreen(permissions.review)) {
+      setActiveScreen("home");
+    }
+  }, [activeScreen, reviewPermissionResolved, permissions.review]);
+
   return (
     <div className="app-shell">
-      {summary.runtime.app_env === "qa" ? (
-        <div className="qa-banner" role="status">
-          QA synthetic demo - not real financial data
-        </div>
-      ) : null}
-      <Header
-        summary={summary}
-        appDisplayName={appDisplayName}
-        actors={actors}
-        activeActorKey={operatorActorContext.actor_key}
-        activePersonaKey={operatorActorContext.persona_key ?? "finance_manager"}
-        onActorChange={(value) => {
-          setActiveActorKey(value);
-          writeLocalStorage(ACTIVE_ACTOR_STORAGE_KEY, value);
-        }}
-        onPersonaChange={(value) => {
-          setActivePersonaKey(value);
-          writeLocalStorage(ACTIVE_PERSONA_STORAGE_KEY, value);
-        }}
-        elevation={{
-          status: elevatedMode.status,
-          active: elevatedModeActive,
-          countdown: elevatedMode.countdown,
-          operatorActor,
-          operatorActorContext,
-          enterMutation: elevatedMode.enterMutation,
-          exitMutation: elevatedMode.exitMutation,
-          isLoading: elevatedMode.isLoading,
-          isError: elevatedMode.isError,
-          error: elevatedMode.error,
-        }}
-      />
+      <div className="app-chrome">
+        {summary.runtime.app_env === "qa" ? (
+          <div className="qa-banner" role="status">
+            QA synthetic demo - not real financial data
+          </div>
+        ) : null}
+        <Header
+          summary={summary}
+          appDisplayName={appDisplayName}
+          actors={actors}
+          activeActorKey={operatorActorContext.actor_key}
+          activePersonaKey={operatorActorContext.persona_key ?? "finance_manager"}
+          onActorChange={(value) => {
+            setActiveActorKey(value);
+            writeLocalStorage(ACTIVE_ACTOR_STORAGE_KEY, value);
+          }}
+          onPersonaChange={(value) => {
+            setActivePersonaKey(value);
+            writeLocalStorage(ACTIVE_PERSONA_STORAGE_KEY, value);
+          }}
+          elevation={{
+            status: elevatedMode.status,
+            active: elevatedModeActive,
+            countdown: elevatedMode.countdown,
+            operatorActor,
+            operatorActorContext,
+            enterMutation: elevatedMode.enterMutation,
+            exitMutation: elevatedMode.exitMutation,
+            isLoading: elevatedMode.isLoading,
+            isError: elevatedMode.isError,
+            error: elevatedMode.error,
+          }}
+        />
+      </div>
 
       <div className="workspace">
         <nav className="sidebar" aria-label="Primary">
-          {screens.map((screen) => (
+          {screens
+            .filter((screen) => screen.key !== "review" || canAccessReview)
+            .map((screen) => (
             <a
               key={screen.key}
               href={`#${screen.key}`}
@@ -885,11 +901,22 @@ function OperatorApp() {
           {!splitReturnScreen && activeScreen === "home" ? (
             <HomeScreen summary={summary} fundsSummary={fundsSummary} onOpenFunds={() => setActiveScreen("funds")} />
           ) : null}
+          {!splitReturnScreen && activeScreen === "dashboard" ? (
+            <DashboardScreen
+              month={currentMonthString()}
+              operatorActor={operatorActor}
+              operatorActorContext={operatorActorContext}
+              canReviewDecide={permissionAllows(permissions.review)}
+              elevatedModeActive={elevatedModeActive}
+            />
+          ) : null}
           {!splitReturnScreen && activeScreen === "funds" ? (
             <FundsScreen
               fundsSummary={fundsSummary}
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
+              canReviewDecide={permissionAllows(permissions.review)}
+              elevatedModeActive={elevatedModeActive}
             />
           ) : null}
           {!splitReturnScreen && activeScreen === "sources" ? (
@@ -943,15 +970,15 @@ function OperatorApp() {
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
               canRunReports={permissionAllows(permissions.reports) && !elevatedModeActive}
-              canRunMonthlyClose={permissionAllows(permissions.monthlyClose) && !elevatedModeActive}
+              canRunMonthlyClose={permissionAllows(permissions.monthlyClose)}
               canCreateExports={permissionAllows(permissions.exports) && !elevatedModeActive}
               elevatedModeActive={elevatedModeActive}
+              elevatedModeStatus={elevatedMode.status ?? null}
             />
           ) : null}
           {!splitReturnScreen && activeScreen === "settings" ? (
             <SettingsScreen
               settings={settings}
-              netWorthSummary={netWorthSummary}
               runtime={summary.runtime}
               profiles={summary.sources.profiles}
               operatorActor={operatorActor}
@@ -1007,7 +1034,6 @@ function Header({
         <h1>{appDisplayName}</h1>
       </div>
       <div className="actor-controls" aria-label="Active local actor">
-        <ElevationControls {...elevation} />
         <label>
           Actor
           <select value={activeActorKey} onChange={(event) => onActorChange(event.target.value)}>
@@ -1030,6 +1056,7 @@ function Header({
             )}
           </select>
         </label>
+        <ElevationControls {...elevation} />
       </div>
       <div className="status-strip" aria-label="Runtime status">
         {elevation.active ? (
@@ -1444,29 +1471,6 @@ function HomeScreen({
         </label>
       </section>
 
-      <section className="work-panel">
-        <h3>Card obligation (not yet netted)</h3>
-        <p className="section-note">Total card obligation: {formatMoney(spendable.card_obligation_total)}</p>
-        <DataTable
-          data={spendable.card_obligation_items}
-          emptyLabel="No card obligation items available."
-          columns={[
-            { header: "Card", accessorKey: "card" },
-            { header: "Owed", cell: ({ row }) => formatMoney(row.original.owed) },
-            { header: "Note", accessorKey: "note" },
-          ]}
-        />
-      </section>
-
-      <div className="metric-grid" aria-label="Operator overview">
-        <Metric label="Latest import" value={formatStatus(summary.latest_import.status)} detail={summary.latest_import.source_key ?? "No source loaded"} />
-        <Metric label="Open blockers" value={summary.validation.open_blocking} detail={`${summary.validation.open_warning} warning(s)`} tone={summary.validation.open_blocking ? "danger" : "ok"} />
-        <Metric label="Review queue" value={summary.review.unreviewed} detail={`${summary.review.total_transactions} ledger transaction(s)`} />
-        <Metric label="Required sources" value={`${summary.sources.required_count - summary.sources.missing_required_count}/${summary.sources.required_count}`} detail={`${summary.sources.missing_required_count} missing`} tone={summary.sources.missing_required_count ? "warn" : "ok"} />
-        <Metric label="Monthly close" value={summary.monthly_close.ready_for_final ? "Ready" : "Not ready"} detail={summary.monthly_close.ready_for_draft ? "Draft allowed" : "Draft blocked"} tone={summary.monthly_close.ready_for_final ? "ok" : "warn"} />
-        <Metric label="Data root" value={summary.runtime.data_root.exists ? "Available" : "Missing"} detail={summary.runtime.data_root.path} tone={summary.runtime.data_root.exists ? "ok" : "danger"} />
-      </div>
-
       <section className="work-panel" aria-label="Closed-loop checkpoint">
         <div className="screen-heading split-heading panel-heading">
           <h3>Where your money is committed</h3>
@@ -1491,6 +1495,29 @@ function HomeScreen({
           />
         </div>
       </section>
+
+      <section className="work-panel">
+        <h3>Card obligation (not yet netted)</h3>
+        <p className="section-note">Total card obligation: {formatMoney(spendable.card_obligation_total)}</p>
+        <DataTable
+          data={spendable.card_obligation_items}
+          emptyLabel="No card obligation items available."
+          columns={[
+            { header: "Card", accessorKey: "card" },
+            { header: "Owed", cell: ({ row }) => formatMoney(row.original.owed) },
+            { header: "Note", accessorKey: "note" },
+          ]}
+        />
+      </section>
+
+      <div className="metric-grid" aria-label="Operator overview">
+        <Metric label="Latest import" value={formatStatus(summary.latest_import.status)} detail={summary.latest_import.source_key ?? "No source loaded"} />
+        <Metric label="Open blockers" value={summary.validation.open_blocking} detail={`${summary.validation.open_warning} warning(s)`} tone={summary.validation.open_blocking ? "danger" : "ok"} />
+        <Metric label="Review queue" value={summary.review.unreviewed} detail={`${summary.review.total_transactions} ledger transaction(s)`} />
+        <Metric label="Required sources" value={`${summary.sources.required_count - summary.sources.missing_required_count}/${summary.sources.required_count}`} detail={`${summary.sources.missing_required_count} missing`} tone={summary.sources.missing_required_count ? "warn" : "ok"} />
+        <Metric label="Monthly close" value={summary.monthly_close.ready_for_final ? "Ready" : "Not ready"} detail={summary.monthly_close.ready_for_draft ? "Draft allowed" : "Draft blocked"} tone={summary.monthly_close.ready_for_final ? "ok" : "warn"} />
+        <Metric label="Data root" value={summary.runtime.data_root.exists ? "Available" : "Missing"} detail={summary.runtime.data_root.path} tone={summary.runtime.data_root.exists ? "ok" : "danger"} />
+      </div>
     </section>
   );
 }
@@ -1499,12 +1526,20 @@ function FundsScreen({
   fundsSummary,
   operatorActor,
   operatorActorContext,
+  canReviewDecide,
+  elevatedModeActive,
 }: {
   fundsSummary: FundsSummary;
   operatorActor: string;
   operatorActorContext: ActorContext;
+  canReviewDecide: boolean;
+  elevatedModeActive: boolean;
 }) {
   const queryClient = useQueryClient();
+  const goalAction = reviewDecideActionState(canReviewDecide, elevatedModeActive, {
+    denied: "Current persona cannot create financial goals.",
+    elevated: "Financial goal changes are disabled while elevated mode is active.",
+  });
   const [goalName, setGoalName] = useState("");
   const [goalType, setGoalType] = useState("purchase");
   const [targetAmount, setTargetAmount] = useState("");
@@ -1512,6 +1547,7 @@ function FundsScreen({
   const [linkedFundPoolId, setLinkedFundPoolId] = useState("");
   const [reservedBalance, setReservedBalance] = useState("0.00");
   const [goalStatus, setGoalStatus] = useState<string | null>(null);
+  const [goalModalOpen, setGoalModalOpen] = useState(false);
   const createGoalMutation = useMutation({
     mutationFn: createFinancialGoal,
     onSuccess: () => {
@@ -1521,6 +1557,7 @@ function FundsScreen({
       setLinkedFundPoolId("");
       setReservedBalance("0.00");
       setGoalStatus("Financial goal saved");
+      setGoalModalOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["funds-summary"] });
     },
     onError: (error) => setGoalStatus(formatApiError(error, "Financial goal save failed")),
@@ -1529,17 +1566,22 @@ function FundsScreen({
 
   function handleGoalSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!goalAction.allowed) {
+      return;
+    }
     if (goalNameMissing) {
       setGoalStatus("Financial goal name is required");
       return;
     }
+    const normalizedTargetAmount = normalizeMoneyInput(targetAmount || "0");
+    const normalizedReservedBalance = normalizeMoneyInput(reservedBalance || "0");
     createGoalMutation.mutate({
       name: goalName,
       goalType,
-      targetAmount: targetAmount || "0.00",
+      targetAmount: normalizedTargetAmount,
       targetDate,
       linkedFundPoolId,
-      reservedBalance: reservedBalance || "0.00",
+      reservedBalance: normalizedReservedBalance,
       actor: operatorActor,
       actorContext: operatorActorContext,
     });
@@ -1613,7 +1655,23 @@ function FundsScreen({
       </section>
 
       <section className="work-panel">
-        <h3>Reserved goal balance</h3>
+        <div className="screen-heading split-heading panel-heading">
+          <h3>Reserved goal balance</h3>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={!goalAction.allowed}
+            title={goalAction.disabledTitle}
+            onClick={() => {
+              if (goalAction.allowed) {
+                setGoalModalOpen(true);
+              }
+            }}
+          >
+            Add financial goal
+          </button>
+        </div>
+        {goalAction.blockedNotice ? <p className="form-status warn-text">{goalAction.blockedNotice}</p> : null}
         <DataTable<FinancialGoal>
           data={fundsSummary.goals}
           emptyLabel="No financial goals configured."
@@ -1624,58 +1682,80 @@ function FundsScreen({
             { header: "Remaining to target", cell: ({ row }) => formatMoney(row.original.remaining_to_target) },
           ]}
         />
-      </section>
-
-      <section className="work-panel">
-        <h3>Add financial goal</h3>
-        <form className="settings-form" onSubmit={handleGoalSubmit}>
-          <label>
-            Goal name
-            <input value={goalName} onChange={(event) => setGoalName(event.target.value)} aria-invalid={goalNameMissing} />
-          </label>
-          <label>
-            Goal type
-            <select value={goalType} onChange={(event) => setGoalType(event.target.value)}>
-              <option value="emergency">Emergency</option>
-              <option value="sinking_fund">Sinking fund</option>
-              <option value="purchase">Purchase</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-          <label>
-            Target amount
-            <input value={targetAmount} onChange={(event) => setTargetAmount(event.target.value)} placeholder="2000.00" />
-          </label>
-          <label>
-            Target date
-            <input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
-          </label>
-          <label>
-            Linked fund pool
-            <select value={linkedFundPoolId} onChange={(event) => setLinkedFundPoolId(event.target.value)}>
-              <option value="">No linked pool</option>
-              {fundsSummary.pools.map((pool) => (
-                <option key={pool.id} value={pool.id}>
-                  {pool.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Reserved balance
-            <input value={reservedBalance} onChange={(event) => setReservedBalance(event.target.value)} />
-          </label>
-          <button type="submit" className="primary-button" disabled={goalNameMissing || createGoalMutation.isPending}>
-            Save financial goal
-          </button>
-        </form>
-        {goalNameMissing ? <p className="form-status danger-text">Financial goal name is required.</p> : null}
-        {goalStatus ? (
+        {goalStatus && !goalModalOpen ? (
           <p className={goalStatus.includes("failed") || goalStatus.includes("required") ? "form-status danger-text" : "form-status ok-text"}>
             {goalStatus}
           </p>
         ) : null}
       </section>
+
+      {goalModalOpen ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setGoalModalOpen(false);
+            }
+          }}
+        >
+          <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="goal-modal-title">
+            <h3 id="goal-modal-title">Add financial goal</h3>
+            <form className="modal-form settings-form" onSubmit={handleGoalSubmit}>
+              <label>
+                Goal name
+                <input value={goalName} onChange={(event) => setGoalName(event.target.value)} aria-invalid={goalNameMissing} />
+              </label>
+              <label>
+                Goal type
+                <select value={goalType} onChange={(event) => setGoalType(event.target.value)}>
+                  <option value="emergency">Emergency</option>
+                  <option value="sinking_fund">Sinking fund</option>
+                  <option value="purchase">Purchase</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>
+                Target amount
+                <input value={targetAmount} onChange={(event) => setTargetAmount(event.target.value)} placeholder="2000.00" />
+              </label>
+              <label>
+                Target date
+                <input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
+              </label>
+              <label>
+                Linked fund pool
+                <select value={linkedFundPoolId} onChange={(event) => setLinkedFundPoolId(event.target.value)}>
+                  <option value="">No linked pool</option>
+                  {fundsSummary.pools.map((pool) => (
+                    <option key={pool.id} value={pool.id}>
+                      {pool.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Reserved balance
+                <input value={reservedBalance} onChange={(event) => setReservedBalance(event.target.value)} />
+              </label>
+              {goalNameMissing ? <p className="form-status danger-text">Financial goal name is required.</p> : null}
+              {goalStatus && goalModalOpen ? (
+                <p className={goalStatus.includes("failed") || goalStatus.includes("required") ? "form-status danger-text" : "form-status ok-text"}>
+                  {goalStatus}
+                </p>
+              ) : null}
+              <div className="button-row">
+                <button type="button" onClick={() => setGoalModalOpen(false)} disabled={createGoalMutation.isPending}>
+                  Cancel
+                </button>
+                <button type="submit" className="primary-button" disabled={goalNameMissing || createGoalMutation.isPending || !goalAction.allowed}>
+                  Save financial goal
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1699,6 +1779,8 @@ function SourcesScreen({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedUploadSourceKey, setSelectedUploadSourceKey] = useState(profiles[0]?.source_key ?? "");
   const [batchActionStatus, setBatchActionStatus] = useState<string | null>(null);
+  const [scanStatus, setScanStatus] = useState<string | null>(null);
+  const [scanPending, setScanPending] = useState(false);
   const [voidTarget, setVoidTarget] = useState<ImportBatch | null>(null);
   const [voidReason, setVoidReason] = useState("");
   const [destroyStoredFiles, setDestroyStoredFiles] = useState(false);
@@ -1812,6 +1894,32 @@ function SourcesScreen({
     });
   }
 
+  async function handleScanInbox() {
+    setScanPending(true);
+    setScanStatus(null);
+    const previousBatchIds = new Set(inbox.map((batch) => batch.id));
+    try {
+      const result = await queryClient.fetchQuery({ queryKey: ["inbox-scan"], queryFn: scanInbox });
+      const batches = result.import_batches;
+      if (batches.length === 0) {
+        setScanStatus("Inbox scan complete — no files in inbox");
+        return;
+      }
+      const newBatchCount = batches.filter((batch) => !previousBatchIds.has(batch.id)).length;
+      const batchLabel = batches.length === 1 ? "batch" : "batches";
+      if (newBatchCount > 0) {
+        const newLabel = newBatchCount === 1 ? "batch" : "batches";
+        setScanStatus(`Inbox scan complete — ${newBatchCount} new import ${newLabel} found (${batches.length} total)`);
+        return;
+      }
+      setScanStatus(`Inbox scan complete — ${batches.length} import ${batchLabel} in inbox (no new files)`);
+    } catch (error) {
+      setScanStatus(formatApiError(error, "Inbox scan failed"));
+    } finally {
+      setScanPending(false);
+    }
+  }
+
   return (
     <section className="screen" aria-labelledby="sources-heading">
       <div className="screen-heading split-heading">
@@ -1820,9 +1928,21 @@ function SourcesScreen({
           <h2 id="sources-heading">Sources</h2>
         </div>
         <div className="button-row">
-          <button type="button" onClick={() => void queryClient.invalidateQueries({ queryKey: ["inbox-scan"] })}>
-            Scan inbox
+          <button type="button" onClick={() => void handleScanInbox()} disabled={scanPending}>
+            {scanPending ? "Scanning…" : "Scan inbox"}
           </button>
+          {scanStatus ? (
+            <p
+              className={
+                scanStatus.startsWith("Inbox scan complete")
+                  ? "form-status ok-text"
+                  : "form-status danger-text"
+              }
+              aria-live="polite"
+            >
+              {scanStatus}
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -2641,19 +2761,15 @@ function ReviewScreen({
             </p>
           ) : null}
 
-          {reviewSuggestionAllowed && !canSaveReview ? (
-            <p className="form-status warn-text">
-              Contributor persona can suggest review changes, but direct save is disabled for this persona.
-            </p>
-          ) : null}
-
           {elevatedModeActive ? (
             <p className="form-status warn-text">Review decisions are disabled while elevated mode is active.</p>
           ) : null}
 
-          <button type="submit" disabled={saveDecisionDisabled}>
-            {selectedTransactionBlocked ? t("review.resolveValidationFirst") : t("review.saveDecision")}
-          </button>
+          {canSaveReview ? (
+            <button type="submit" className="primary-button" disabled={saveDecisionDisabled}>
+              {selectedTransactionBlocked ? t("review.resolveValidationFirst") : t("review.saveDecision")}
+            </button>
+          ) : null}
           {reviewSuggestionAllowed && !canSaveReview ? (
             <button type="button" disabled={submitSuggestionDisabled} onClick={() => suggestionMutation.mutate()}>
               Submit suggestion
@@ -3009,6 +3125,397 @@ function TransactionsScreen({
   );
 }
 
+function DashboardBarRow({
+  label,
+  value,
+  fillPercent,
+  tone = "default",
+  provisional = false,
+}: {
+  label: string;
+  value: string;
+  fillPercent: number;
+  tone?: "default" | "inflow" | "outflow" | "warn" | "danger";
+  provisional?: boolean;
+}) {
+  const fillClass =
+    tone === "outflow" || tone === "danger" ? "outflow" : tone === "warn" ? "warn" : tone === "inflow" ? "inflow" : "";
+  const valueClass =
+    tone === "danger" || tone === "outflow"
+      ? "bar-value danger-text"
+      : tone === "warn"
+        ? "bar-value warn-text"
+        : "bar-value";
+  return (
+    <div className="bar-row">
+      <span className="bar-label">
+        {label}
+        {provisional ? " ~" : ""}
+      </span>
+      <span className="bar-track" aria-hidden="true">
+        <span
+          className={`bar-fill ${fillClass}`.trim()}
+          style={{ width: `${Math.min(Math.max(fillPercent, 0), 100)}%` }}
+        />
+      </span>
+      <span className={valueClass}>{value}</span>
+    </div>
+  );
+}
+
+function DashboardScreen({
+  month,
+  operatorActor,
+  operatorActorContext,
+  canReviewDecide,
+  elevatedModeActive,
+}: {
+  month: string;
+  operatorActor: string;
+  operatorActorContext: ActorContext;
+  canReviewDecide: boolean;
+  elevatedModeActive: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const snapshotAction = reviewDecideActionState(canReviewDecide, elevatedModeActive, {
+    denied: "Current persona cannot add net worth snapshots.",
+    elevated: "Net worth snapshot changes are disabled while elevated mode is active.",
+  });
+  const summaryQuery = useQuery({
+    queryKey: ["dashboard-summary", month],
+    queryFn: () => fetchDashboardSummary(month),
+  });
+  const cashflowQuery = useQuery({
+    queryKey: ["dashboard-cashflow", month],
+    queryFn: () => fetchDashboardCashflow(6, month),
+  });
+  const categoryQuery = useQuery({
+    queryKey: ["dashboard-category-spend", month],
+    queryFn: () => fetchDashboardCategorySpend(month),
+  });
+  const poolQuery = useQuery({
+    queryKey: ["dashboard-pool-progress", month],
+    queryFn: () => fetchDashboardPoolProgress(month),
+  });
+  const [includeEstimates, setIncludeEstimates] = useState(false);
+  const netWorthQuery = useQuery({
+    queryKey: ["dashboard-net-worth", includeEstimates],
+    queryFn: () => fetchDashboardNetWorth(includeEstimates),
+  });
+  const netWorthSummaryQuery = useQuery({
+    queryKey: ["net-worth-summary"],
+    queryFn: () => fetchNetWorthSummary({ includeEstimates: false }),
+  });
+  const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
+  const [snapshotDate, setSnapshotDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [assetOrLiability, setAssetOrLiability] = useState("asset");
+  const [netWorthAccountName, setNetWorthAccountName] = useState("");
+  const [netWorthInstitution, setNetWorthInstitution] = useState("");
+  const [netWorthCategory, setNetWorthCategory] = useState("liquid_cash");
+  const [netWorthSubcategory, setNetWorthSubcategory] = useState("");
+  const [netWorthBalance, setNetWorthBalance] = useState("");
+  const [valuationMethod, setValuationMethod] = useState("actual");
+  const [estimateConfidence, setEstimateConfidence] = useState("");
+  const [sourceNotes, setSourceNotes] = useState("");
+  const [netWorthStatus, setNetWorthStatus] = useState<string | null>(null);
+
+  const estimateFieldsRequired = valuationMethod === "estimate";
+  const netWorthFormInvalid =
+    !snapshotDate ||
+    !netWorthAccountName.trim() ||
+    !netWorthCategory.trim() ||
+    !netWorthBalance.trim() ||
+    (estimateFieldsRequired && (!estimateConfidence || !sourceNotes.trim()));
+
+  const netWorthMutation = useMutation({
+    mutationFn: createNetWorthSnapshot,
+    onSuccess: () => {
+      setNetWorthStatus("Net worth snapshot saved");
+      setNetWorthAccountName("");
+      setNetWorthInstitution("");
+      setNetWorthCategory("liquid_cash");
+      setNetWorthSubcategory("");
+      setNetWorthBalance("");
+      setValuationMethod("actual");
+      setEstimateConfidence("");
+      setSourceNotes("");
+      setSnapshotModalOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["net-worth-summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-net-worth"] });
+    },
+    onError: (error) => setNetWorthStatus(formatApiError(error, "Net worth snapshot save failed")),
+  });
+
+  function saveNetWorthSnapshot(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!snapshotAction.allowed) {
+      return;
+    }
+    if (netWorthFormInvalid) {
+      setNetWorthStatus("Net worth snapshot is missing required fields");
+      return;
+    }
+    netWorthMutation.mutate({
+      snapshotDate,
+      assetOrLiability,
+      accountName: netWorthAccountName,
+      institution: netWorthInstitution,
+      category: netWorthCategory,
+      subcategory: netWorthSubcategory,
+      balance: netWorthBalance,
+      valuationMethod,
+      confidence: estimateFieldsRequired ? estimateConfidence : undefined,
+      sourceNotes: estimateFieldsRequired ? sourceNotes : undefined,
+      actor: operatorActor,
+      actorContext: operatorActorContext,
+    });
+  }
+
+  const cashflowPoints = cashflowQuery.data?.points ?? [];
+  const maxCashflowAbs = Math.max(...cashflowPoints.map((point) => Math.abs(Number(point.net))), 1);
+  const categoryItems = (categoryQuery.data?.categories ?? []).slice(0, 8);
+  const maxCategoryOutflow = Math.max(...categoryItems.map((item) => Number(item.outflow)), 1);
+  const poolItems = poolQuery.data?.pools ?? [];
+  const netWorthSummary = netWorthSummaryQuery.data ?? emptyNetWorthSummary;
+
+  const summary = summaryQuery.data as
+    | {
+        freshness?: string;
+        confidence?: string;
+        reviewed_percent?: string;
+        spendable?: { headline?: string };
+      }
+    | undefined;
+  const netWorth = netWorthQuery.data as { summary?: { headline_net_worth?: string }; warning?: string | null } | undefined;
+
+  return (
+    <section className="screen" aria-labelledby="dashboard-heading">
+      <div className="screen-heading split-heading">
+        <div>
+          <p className="product-label">Household dashboard</p>
+          <h2 id="dashboard-heading">Dashboard</h2>
+        </div>
+        <StatusBadge status={summary?.freshness === "current" ? "ready" : "not_ready"} />
+      </div>
+
+      <div className="dashboard-rail" aria-label="Dashboard summary">
+        <Metric label="Freshness" value={summary?.freshness ?? "Loading"} detail={month} />
+        <Metric label="Confidence" value={summary?.confidence ?? "Loading"} detail="Spendable source state" />
+        <Metric label="Reviewed" value={`${summary?.reviewed_percent ?? "0.00"}%`} detail="Ledger review coverage" />
+        <Metric label="Spendable balance" value={summary?.spendable?.headline ?? "—"} detail="Headline spendable" />
+      </div>
+
+      <section className="work-panel">
+        <h3>Cashflow (last 6 months)</h3>
+        <p className="chart-caption">Net cashflow by month — values shown inline</p>
+        {cashflowQuery.isLoading ? (
+          <p className="empty-state">Loading cashflow…</p>
+        ) : cashflowPoints.length ? (
+          <div className="bar-chart" aria-label="Six month net cashflow">
+            {cashflowPoints.map((point) => {
+              const net = Number(point.net);
+              const tone = net < 0 ? "outflow" : point.provisional ? "warn" : "inflow";
+              return (
+                <DashboardBarRow
+                  key={point.month}
+                  label={point.month}
+                  value={formatMoney(point.net)}
+                  fillPercent={(Math.abs(net) / maxCashflowAbs) * 100}
+                  tone={tone}
+                  provisional={point.provisional}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <p className="empty-state">No cashflow data for this period</p>
+        )}
+      </section>
+
+      <section className="work-panel">
+        <h3>Category spend</h3>
+        <p className="chart-caption">Top categories this month — outflow shown inline</p>
+        {categoryQuery.isLoading ? (
+          <p className="empty-state">Loading category spend…</p>
+        ) : categoryItems.length ? (
+          <div className="bar-chart" aria-label="Category spending">
+            {categoryItems.map((item) => (
+              <DashboardBarRow
+                key={item.category}
+                label={item.category}
+                value={formatMoney(item.outflow)}
+                fillPercent={(Number(item.outflow) / maxCategoryOutflow) * 100}
+                tone="outflow"
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="empty-state">No category spending for this month</p>
+        )}
+      </section>
+
+      <section className="work-panel">
+        <h3>Pool target progress</h3>
+        <p className="chart-caption">Fund pool usage vs target</p>
+        {poolQuery.isLoading ? (
+          <p className="empty-state">Loading pool progress…</p>
+        ) : poolItems.length ? (
+          <div className="bar-chart" aria-label="Pool target progress">
+            {poolItems.map((pool) => {
+              const progress = Number(pool.progress_percent);
+              return (
+                <DashboardBarRow
+                  key={pool.name}
+                  label={pool.name}
+                  value={`${pool.progress_percent}%`}
+                  fillPercent={progress}
+                  tone={pool.over_target ? "warn" : "default"}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <p className="empty-state">No fund pools configured</p>
+        )}
+      </section>
+
+      <section className="work-panel">
+        <div className="screen-heading split-heading panel-heading">
+          <h3>Net worth</h3>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={!snapshotAction.allowed}
+            title={snapshotAction.disabledTitle}
+            onClick={() => {
+              if (snapshotAction.allowed) {
+                setSnapshotModalOpen(true);
+              }
+            }}
+          >
+            Add snapshot
+          </button>
+        </div>
+        {snapshotAction.blockedNotice ? <p className="form-status warn-text">{snapshotAction.blockedNotice}</p> : null}
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={includeEstimates}
+            onChange={(event) => setIncludeEstimates(event.target.checked)}
+          />
+          Include estimates
+        </label>
+        {netWorth?.warning ? <p className="form-status warn-text">{netWorth.warning}</p> : null}
+        <div className="metric-grid compact">
+          <Metric
+            label="Actual net worth"
+            value={formatMoney(netWorthSummary.actual.net_worth)}
+            detail={`As of ${netWorthSummary.latest_snapshot_date ?? "no snapshot"}`}
+          />
+          <Metric
+            label={includeEstimates ? "With estimates" : "Headline (dashboard)"}
+            value={netWorth?.summary?.headline_net_worth ?? formatMoney(netWorthSummary.with_estimates.net_worth)}
+            detail="Manual snapshot totals"
+          />
+        </div>
+        <p className="form-status warn-text">Estimates never feed Spendable balance.</p>
+        {netWorthStatus && !snapshotModalOpen ? (
+          <p className={netWorthStatus.includes("failed") || netWorthStatus.includes("missing") ? "form-status danger-text" : "form-status ok-text"}>
+            {netWorthStatus}
+          </p>
+        ) : null}
+      </section>
+
+      {snapshotModalOpen ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setSnapshotModalOpen(false);
+            }
+          }}
+        >
+          <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="net-worth-modal-title">
+            <h3 id="net-worth-modal-title">Add net worth snapshot</h3>
+            <p className="modal-copy">Manual balances use positive amounts; asset or liability controls the rollup sign.</p>
+            <form className="modal-form settings-form" onSubmit={saveNetWorthSnapshot}>
+              <label>
+                Snapshot date
+                <input type="date" value={snapshotDate} onChange={(event) => setSnapshotDate(event.target.value)} />
+              </label>
+              <label>
+                Asset or liability
+                <select value={assetOrLiability} onChange={(event) => setAssetOrLiability(event.target.value)}>
+                  <option value="asset">Asset</option>
+                  <option value="liability">Liability</option>
+                </select>
+              </label>
+              <label>
+                Account display name
+                <input value={netWorthAccountName} onChange={(event) => setNetWorthAccountName(event.target.value)} />
+              </label>
+              <label>
+                Institution
+                <input value={netWorthInstitution} onChange={(event) => setNetWorthInstitution(event.target.value)} />
+              </label>
+              <label>
+                Net worth category
+                <input value={netWorthCategory} onChange={(event) => setNetWorthCategory(event.target.value)} />
+              </label>
+              <label>
+                Subcategory
+                <input value={netWorthSubcategory} onChange={(event) => setNetWorthSubcategory(event.target.value)} />
+              </label>
+              <label>
+                Balance
+                <input inputMode="decimal" value={netWorthBalance} onChange={(event) => setNetWorthBalance(event.target.value)} placeholder="1500.00" />
+              </label>
+              <label>
+                Valuation method
+                <select value={valuationMethod} onChange={(event) => setValuationMethod(event.target.value)}>
+                  <option value="actual">Actual</option>
+                  <option value="estimate">Estimate</option>
+                </select>
+              </label>
+              {estimateFieldsRequired ? (
+                <>
+                  <label>
+                    Estimate confidence
+                    <select value={estimateConfidence} onChange={(event) => setEstimateConfidence(event.target.value)}>
+                      <option value="">Select confidence</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </label>
+                  <label>
+                    Source notes
+                    <textarea value={sourceNotes} onChange={(event) => setSourceNotes(event.target.value)} rows={3} />
+                  </label>
+                </>
+              ) : null}
+              {netWorthStatus && snapshotModalOpen ? (
+                <p className={netWorthStatus.includes("failed") || netWorthStatus.includes("missing") ? "form-status danger-text" : "form-status ok-text"}>
+                  {netWorthStatus}
+                </p>
+              ) : null}
+              <div className="button-row">
+                <button type="button" onClick={() => setSnapshotModalOpen(false)} disabled={netWorthMutation.isPending}>
+                  Cancel
+                </button>
+                <button type="submit" className="primary-button" disabled={netWorthFormInvalid || netWorthMutation.isPending || !snapshotAction.allowed}>
+                  Save net worth snapshot
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function ReportsScreen({
   summary,
   artifacts,
@@ -3018,6 +3525,7 @@ function ReportsScreen({
   canRunMonthlyClose,
   canCreateExports,
   elevatedModeActive,
+  elevatedModeStatus,
 }: {
   summary: OperatorSummary;
   artifacts: Artifact[];
@@ -3027,9 +3535,22 @@ function ReportsScreen({
   canRunMonthlyClose: boolean;
   canCreateExports: boolean;
   elevatedModeActive: boolean;
+  elevatedModeStatus: ElevatedModeStatus | null;
 }) {
   const queryClient = useQueryClient();
   const [actionStatus, setActionStatus] = useState<string | null>(null);
+  const [overridePurpose, setOverridePurpose] = useState("");
+  const [includeEstimates, setIncludeEstimates] = useState(false);
+  const [includeRawTransactions, setIncludeRawTransactions] = useState(false);
+  const governorCloseMode =
+    elevatedModeStatus?.context === "financial_governance" &&
+    elevatedModeStatus?.purpose_code === "monthly_close_governance_review";
+  const fundsBlockers = summary.monthly_close.blockers.filter((blocker) =>
+    ["negative_pool_remaining", "reserved_goals_exceed_liquid", "negative_headline_spendable", "missing_fund_commitments"].includes(
+      blocker,
+    ),
+  );
+  const needsGovernorOverride = !summary.monthly_close.ready_for_final && fundsBlockers.length > 0;
 
   const refreshReportState = () => {
     void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
@@ -3052,12 +3573,21 @@ function ReportsScreen({
     onError: (error) => setActionStatus(formatApiError(error, "Draft close blocked")),
   });
   const finalCloseMutation = useMutation({
-    mutationFn: finalizeMonthlyClose,
+    mutationFn: (payload: { actor: string; actorContext?: ActorContext; overridePurpose?: string }) =>
+      finalizeMonthlyClose(payload),
     onSuccess: () => {
       setActionStatus("Final close finalized");
       refreshReportState();
     },
     onError: (error) => setActionStatus(formatApiError(error, "Final close blocked")),
+  });
+  const analystPackMutation = useMutation({
+    mutationFn: buildAnalystPack,
+    onSuccess: () => {
+      setActionStatus("Analyst export pack created");
+      refreshReportState();
+    },
+    onError: (error) => setActionStatus(formatApiError(error, "Analyst export blocked")),
   });
   const advisorExportMutation = useMutation({
     mutationFn: createAdvisorExport,
@@ -3071,7 +3601,8 @@ function ReportsScreen({
     runReportsMutation.isPending ||
     draftCloseMutation.isPending ||
     finalCloseMutation.isPending ||
-    advisorExportMutation.isPending;
+    advisorExportMutation.isPending ||
+    analystPackMutation.isPending;
   const artifactColumns = useMemo<ColumnDef<Artifact>[]>(
     () => [
       { header: "Title", cell: ({ row }) => row.original.title ?? formatStatus(row.original.artifact_type) },
@@ -3106,10 +3637,25 @@ function ReportsScreen({
         <Metric label="Artifacts" value={artifacts.length || summary.artifacts?.generated_count || 0} detail="Generated files" />
       </div>
 
-      <section className="work-panel">
+      <section className="work-panel report-actions-panel">
         <h3>Report actions</h3>
-        {elevatedModeActive ? (
+        {elevatedModeActive && !governorCloseMode ? (
           <p className="form-status warn-text">Report and close actions are disabled while elevated mode is active.</p>
+        ) : null}
+        {needsGovernorOverride ? (
+          <p className="form-status warn-text">
+            Final close needs Financial Governor override because Funds/Spendable checks have blockers.
+          </p>
+        ) : null}
+        {needsGovernorOverride ? (
+          <label className="field-block">
+            <span>Governor override purpose</span>
+            <input
+              value={overridePurpose}
+              onChange={(event) => setOverridePurpose(event.target.value)}
+              placeholder="Enter why final close should proceed with these Funds/Spendable blockers."
+            />
+          </label>
         ) : null}
         <div className="action-row">
           <button
@@ -3128,8 +3674,19 @@ function ReportsScreen({
           </button>
           <button
             type="button"
-            onClick={() => finalCloseMutation.mutate({ actor: operatorActor, actorContext: operatorActorContext })}
-            disabled={actionPending || !canRunMonthlyClose}
+            onClick={() =>
+              finalCloseMutation.mutate({
+                actor: operatorActor,
+                actorContext: operatorActorContext,
+                overridePurpose: overridePurpose.trim() || undefined,
+              })
+            }
+            disabled={
+              actionPending ||
+              !canRunMonthlyClose ||
+              (elevatedModeActive && !governorCloseMode) ||
+              (needsGovernorOverride && (!governorCloseMode || !overridePurpose.trim()))
+            }
           >
             Final close
           </button>
@@ -3140,7 +3697,40 @@ function ReportsScreen({
           >
             Advisor export
           </button>
+          <button
+            type="button"
+            onClick={() =>
+              analystPackMutation.mutate({
+                actor: operatorActor,
+                actorContext: operatorActorContext,
+                includeEstimates,
+                includeRawTransactions,
+              })
+            }
+            disabled={actionPending || !canCreateExports}
+          >
+            Build export pack
+          </button>
         </div>
+        <div className="report-actions-options" aria-label="Analyst pack options">
+          <label>
+            <input
+              type="checkbox"
+              checked={includeEstimates}
+              onChange={(event) => setIncludeEstimates(event.target.checked)}
+            />
+            Include estimates in analyst pack
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={includeRawTransactions}
+              onChange={(event) => setIncludeRawTransactions(event.target.checked)}
+            />
+            Include raw transaction rows (sensitive)
+          </label>
+        </div>
+        <p className="report-privacy-note">Analyst packs are generated locally only. No in-app AI or external service calls.</p>
         {actionStatus ? <p className="save-status">{actionStatus}</p> : null}
       </section>
 
@@ -3167,7 +3757,6 @@ function ReportsScreen({
 
 function SettingsScreen({
   settings,
-  netWorthSummary,
   runtime,
   profiles,
   operatorActor,
@@ -3179,7 +3768,6 @@ function SettingsScreen({
   actors,
 }: {
   settings?: SettingsPayload;
-  netWorthSummary: NetWorthSummary;
   runtime: RuntimeStatus;
   profiles: SourceProfile[];
   operatorActor: string;
@@ -3216,17 +3804,6 @@ function SettingsScreen({
   const [selectedSourceKey, setSelectedSourceKey] = useState(pendingProfiles[0]?.source_key ?? "");
   const [confirmationNote, setConfirmationNote] = useState("");
   const [confirmationStatus, setConfirmationStatus] = useState<string | null>(null);
-  const [snapshotDate, setSnapshotDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [assetOrLiability, setAssetOrLiability] = useState("asset");
-  const [netWorthAccountName, setNetWorthAccountName] = useState("");
-  const [netWorthInstitution, setNetWorthInstitution] = useState("");
-  const [netWorthCategory, setNetWorthCategory] = useState("liquid_cash");
-  const [netWorthSubcategory, setNetWorthSubcategory] = useState("");
-  const [netWorthBalance, setNetWorthBalance] = useState("");
-  const [valuationMethod, setValuationMethod] = useState("actual");
-  const [estimateConfidence, setEstimateConfidence] = useState("");
-  const [sourceNotes, setSourceNotes] = useState("");
-  const [netWorthStatus, setNetWorthStatus] = useState<string | null>(null);
   const settingsColumns = useMemo<ColumnDef<SettingRow>[]>(() => {
     const columns: ColumnDef<SettingRow>[] = [
       { header: "Friendly name", cell: ({ row }) => settingLabel(row.original) },
@@ -3294,31 +3871,6 @@ function SettingsScreen({
     onError: (error) => setSettingStatus(formatApiError(error, "Setting save blocked")),
   });
 
-  const netWorthMutation = useMutation({
-    mutationFn: createNetWorthSnapshot,
-    onSuccess: () => {
-      setNetWorthStatus("Net worth snapshot saved");
-      setNetWorthAccountName("");
-      setNetWorthInstitution("");
-      setNetWorthCategory("liquid_cash");
-      setNetWorthSubcategory("");
-      setNetWorthBalance("");
-      setValuationMethod("actual");
-      setEstimateConfidence("");
-      setSourceNotes("");
-      void queryClient.invalidateQueries({ queryKey: ["net-worth-summary"] });
-    },
-    onError: (error) => setNetWorthStatus(formatApiError(error, "Net worth snapshot save failed")),
-  });
-
-  const estimateFieldsRequired = valuationMethod === "estimate";
-  const netWorthFormInvalid =
-    !snapshotDate ||
-    !netWorthAccountName.trim() ||
-    !netWorthCategory.trim() ||
-    !netWorthBalance.trim() ||
-    (estimateFieldsRequired && (!estimateConfidence || !sourceNotes.trim()));
-
   function saveEditableSetting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedSetting) {
@@ -3350,28 +3902,6 @@ function SettingsScreen({
     });
   }
 
-  function saveNetWorthSnapshot(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (netWorthFormInvalid) {
-      setNetWorthStatus("Net worth snapshot is missing required fields");
-      return;
-    }
-    netWorthMutation.mutate({
-      snapshotDate,
-      assetOrLiability,
-      accountName: netWorthAccountName,
-      institution: netWorthInstitution,
-      category: netWorthCategory,
-      subcategory: netWorthSubcategory,
-      balance: netWorthBalance,
-      valuationMethod,
-      confidence: estimateFieldsRequired ? estimateConfidence : undefined,
-      sourceNotes: estimateFieldsRequired ? sourceNotes : undefined,
-      actor: operatorActor,
-      actorContext: operatorActorContext,
-    });
-  }
-
   return (
     <section className="screen" aria-labelledby="settings-heading">
       <div className="screen-heading">
@@ -3379,17 +3909,9 @@ function SettingsScreen({
         <h2 id="settings-heading">Settings</h2>
       </div>
 
-      <div className="tabs" role="tablist" aria-label="Settings sections">
-        {(settings?.tabs ?? []).map((tab, index) => (
-          <button key={tab} type="button" role="tab" aria-selected={index === 0} className={index === 0 ? "active" : undefined}>
-            {tab}
-          </button>
-        ))}
-      </div>
-
       <section className="work-panel environment-panel" aria-label="Runtime environment">
         <h3>Environment</h3>
-        <dl>
+        <dl className="environment-rail">
           <div>
             <dt>Environment</dt>
             <dd>{runtime.app_env_label}</dd>
@@ -3418,100 +3940,6 @@ function SettingsScreen({
       </section>
 
       {qaControlsEnabled ? <PermissionPreviewPanel actors={actors} /> : null}
-
-      <section className="work-panel">
-        <div className="screen-heading split-heading panel-heading">
-          <div>
-            <h3>Net worth snapshots</h3>
-            <p className="screen-sub">Manual balances use positive amounts; asset or liability controls the rollup sign.</p>
-          </div>
-        </div>
-        <div className="metric-grid">
-          <Metric
-            label="Actual net worth"
-            value={formatMoney(netWorthSummary.actual.net_worth)}
-            detail={`As of ${netWorthSummary.latest_snapshot_date ?? "no snapshot"}`}
-          />
-          <Metric
-            label="Actual assets"
-            value={formatMoney(netWorthSummary.actual.assets)}
-            detail={`Liabilities ${formatMoney(netWorthSummary.actual.liabilities)}`}
-          />
-          <Metric
-            label="With estimates"
-            value={formatMoney(netWorthSummary.with_estimates.net_worth)}
-            detail="Estimates are separate from Spendable"
-            tone="warn"
-          />
-        </div>
-        <p className="form-status warn-text">With estimates: {formatMoney(netWorthSummary.with_estimates.net_worth)}</p>
-        <p className="form-status warn-text">Estimates never feed Spendable balance.</p>
-        <form className="settings-form" onSubmit={saveNetWorthSnapshot}>
-          <label>
-            Snapshot date
-            <input type="date" value={snapshotDate} onChange={(event) => setSnapshotDate(event.target.value)} />
-          </label>
-          <label>
-            Asset or liability
-            <select value={assetOrLiability} onChange={(event) => setAssetOrLiability(event.target.value)}>
-              <option value="asset">Asset</option>
-              <option value="liability">Liability</option>
-            </select>
-          </label>
-          <label>
-            Account display name
-            <input value={netWorthAccountName} onChange={(event) => setNetWorthAccountName(event.target.value)} />
-          </label>
-          <label>
-            Institution
-            <input value={netWorthInstitution} onChange={(event) => setNetWorthInstitution(event.target.value)} />
-          </label>
-          <label>
-            Net worth category
-            <input value={netWorthCategory} onChange={(event) => setNetWorthCategory(event.target.value)} />
-          </label>
-          <label>
-            Subcategory
-            <input value={netWorthSubcategory} onChange={(event) => setNetWorthSubcategory(event.target.value)} />
-          </label>
-          <label>
-            Balance
-            <input inputMode="decimal" value={netWorthBalance} onChange={(event) => setNetWorthBalance(event.target.value)} placeholder="1500.00" />
-          </label>
-          <label>
-            Valuation method
-            <select value={valuationMethod} onChange={(event) => setValuationMethod(event.target.value)}>
-              <option value="actual">Actual</option>
-              <option value="estimate">Estimate</option>
-            </select>
-          </label>
-          {estimateFieldsRequired ? (
-            <>
-              <label>
-                Estimate confidence
-                <select value={estimateConfidence} onChange={(event) => setEstimateConfidence(event.target.value)}>
-                  <option value="">Select confidence</option>
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
-              </label>
-              <label>
-                Source notes
-                <textarea value={sourceNotes} onChange={(event) => setSourceNotes(event.target.value)} rows={3} />
-              </label>
-            </>
-          ) : null}
-          <button type="submit" className="primary-button" disabled={netWorthFormInvalid || netWorthMutation.isPending}>
-            Save net worth snapshot
-          </button>
-        </form>
-        {netWorthStatus ? (
-          <p className={netWorthStatus.includes("failed") || netWorthStatus.includes("missing") ? "form-status danger-text" : "form-status ok-text"}>
-            {netWorthStatus}
-          </p>
-        ) : null}
-      </section>
 
       <div className="two-column">
         <section className="work-panel">

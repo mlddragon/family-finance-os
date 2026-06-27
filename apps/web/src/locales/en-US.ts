@@ -5,6 +5,7 @@ export const enUS = {
   },
   nav: {
     home: "Home",
+    dashboard: "Dashboard",
     funds: "Funds",
     sources: "Sources",
     validation: "Validation Issues",

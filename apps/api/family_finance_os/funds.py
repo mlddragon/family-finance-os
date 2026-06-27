@@ -843,3 +843,57 @@ def _decimal(value: str) -> Decimal:
 
 def _money(value: Decimal) -> str:
     return str(Decimal(value).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP))
+
+
+def funds_close_readiness(session: Session, *, month: Optional[str] = None) -> dict[str, Any]:
+    summary = funds_summary(session, month=month)
+    spendable = summary["spendable"]
+    pools = summary["pools"]
+    negative_pool_remaining = [
+        pool["pool_key"] for pool in pools if _decimal(pool["pool_remaining"]) < Decimal("0.00")
+    ]
+    verified_liquid = _decimal(spendable["verified_liquid_cash"])
+    reserved = _decimal(spendable["reserved_goal_balance"])
+    reserved_goals_exceed_liquid = reserved > verified_liquid
+    negative_headline_spendable = _decimal(spendable["headline"]) < Decimal("0.00")
+    commitments_by_pool = {pool["id"]: _decimal(pool["commitment"]) for pool in pools}
+    missing_fund_commitments: list[str] = []
+    for target in summary["budget_targets"]:
+        if target.get("status") != "active" or not target.get("fund_pool_id"):
+            continue
+        pool_id = target["fund_pool_id"]
+        if commitments_by_pool.get(pool_id, Decimal("0.00")) <= Decimal("0.00"):
+            pool = next((item for item in pools if item["id"] == pool_id), None)
+            if pool is not None:
+                missing_fund_commitments.append(pool["pool_key"])
+    missing_fund_commitments = sorted(set(missing_fund_commitments))
+    blockers: list[str] = []
+    if negative_pool_remaining:
+        blockers.append("negative_pool_remaining")
+    if reserved_goals_exceed_liquid:
+        blockers.append("reserved_goals_exceed_liquid")
+    if negative_headline_spendable:
+        blockers.append("negative_headline_spendable")
+    if missing_fund_commitments:
+        blockers.append("missing_fund_commitments")
+    return {
+        "negative_pool_remaining": negative_pool_remaining,
+        "reserved_goals_exceed_liquid": reserved_goals_exceed_liquid,
+        "negative_headline_spendable": negative_headline_spendable,
+        "missing_fund_commitments": missing_fund_commitments,
+        "headline_spendable": spendable["headline"],
+        "verified_liquid_cash": spendable["verified_liquid_cash"],
+        "reserved_goal_balance": spendable["reserved_goal_balance"],
+        "pool_summaries": [
+            {
+                "pool_key": pool["pool_key"],
+                "name": pool["name"],
+                "commitment": pool["commitment"],
+                "spent": pool["spent"],
+                "pool_remaining": pool["pool_remaining"],
+            }
+            for pool in pools
+        ],
+        "warnings": [],
+        "blockers": blockers,
+    }

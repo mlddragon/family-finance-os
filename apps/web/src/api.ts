@@ -97,6 +97,16 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
         }
       } else if (typeof detail === "string") {
         message = detail;
+      } else if (Array.isArray(detail)) {
+        message = detail
+          .map((entry) => {
+            if (!isRecord(entry)) {
+              return String(entry);
+            }
+            const loc = Array.isArray(entry.loc) ? entry.loc.join(".") : "field";
+            return `${loc}: ${typeof entry.msg === "string" ? entry.msg : "invalid"}`;
+          })
+          .join("; ");
       }
     } catch {
       // Keep the fallback message when the server does not return JSON.
@@ -559,12 +569,79 @@ export function draftMonthlyClose(payload: { actor: string; actorContext?: Actor
   });
 }
 
-export function finalizeMonthlyClose(payload: { actor: string; actorContext?: ActorContext }) {
+export function finalizeMonthlyClose(payload: {
+  actor: string;
+  actorContext?: ActorContext;
+  overridePurpose?: string;
+}) {
   return apiJson<ArtifactActionResponse>("/api/monthly-close/finalize", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ actor: payload.actor, actor_context: payload.actorContext }),
+    body: JSON.stringify({
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+      override_purpose: payload.overridePurpose,
+    }),
   });
+}
+
+export function buildAnalystPack(payload: {
+  actor: string;
+  actorContext?: ActorContext;
+  month?: string;
+  includeRawTransactions?: boolean;
+  includeEstimates?: boolean;
+  promptKey?: string;
+}) {
+  return apiJson<ArtifactActionResponse & { manifest?: Record<string, unknown> }>("/api/analyst-pack/build", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+      month: payload.month,
+      include_raw_transactions: payload.includeRawTransactions ?? false,
+      include_estimates: payload.includeEstimates ?? false,
+      prompt_key: payload.promptKey ?? "monthly_spending_review",
+    }),
+  });
+}
+
+export function fetchDashboardSummary(month?: string) {
+  const query = month ? `?month=${encodeURIComponent(month)}` : "";
+  return apiJson<Record<string, unknown>>(`/api/dashboard/summary${query}`);
+}
+
+export function fetchDashboardCashflow(months = 6, month?: string) {
+  const params = new URLSearchParams({ months: String(months) });
+  if (month) {
+    params.set("month", month);
+  }
+  return apiJson<{ points: Array<{ month: string; net: string; provisional: boolean }> }>(
+    `/api/dashboard/cashflow?${params.toString()}`,
+  );
+}
+
+export function fetchDashboardCategorySpend(month?: string) {
+  const query = month ? `?month=${encodeURIComponent(month)}` : "";
+  return apiJson<{ categories: Array<{ category: string; outflow: string }> }>(
+    `/api/dashboard/category-spend${query}`,
+  );
+}
+
+export function fetchDashboardPoolProgress(month?: string) {
+  const query = month ? `?month=${encodeURIComponent(month)}` : "";
+  return apiJson<{ pools: Array<{ name: string; progress_percent: string; over_target: boolean }> }>(
+    `/api/dashboard/pool-progress${query}`,
+  );
+}
+
+export function fetchDashboardNetWorth(includeEstimates = false) {
+  const params = new URLSearchParams();
+  if (includeEstimates) {
+    params.set("include_estimates", "true");
+  }
+  return apiJson<Record<string, unknown>>(`/api/dashboard/net-worth?${params.toString()}`);
 }
 
 export function createAdvisorExport(payload: { actor: string; actorContext?: ActorContext }) {

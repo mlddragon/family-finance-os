@@ -14,6 +14,7 @@ afterEach(() => {
 test("en-US locale covers primary UI surfaces", () => {
   expect(Object.keys(enUS.nav)).toEqual([
     "home",
+    "dashboard",
     "funds",
     "sources",
     "validation",
@@ -415,11 +416,20 @@ const emptyApprovalRequestsPayload = {
   approval_requests: [],
 };
 
-function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof personalRuntime } = {}) {
+function installApiMock(
+  options: {
+    acceptImportError?: boolean;
+    runtime?: typeof personalRuntime;
+    actors?: typeof actorsPayload;
+    inboxScan?: { import_batches: unknown[] };
+  } = {},
+) {
   let importBatchVoided = false;
   let validationFindingCleared = false;
   let allocationLines: unknown[] = [];
   const runtime = options.runtime ?? personalRuntime;
+  const actors = options.actors ?? actorsPayload;
+  const inboxScanResponse = options.inboxScan ?? null;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = pathFor(input);
     const url = urlFor(input);
@@ -859,7 +869,8 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
       },
       "/api/funds/summary": fundsSummary,
       "/api/net-worth/summary": netWorthSummary,
-      "/api/inbox/scan": {
+      "/api/inbox/scan":
+        inboxScanResponse ?? {
         import_batches: [
           {
             id: "batch-1",
@@ -1016,7 +1027,7 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
           },
         ],
       },
-      "/api/actors": actorsPayload,
+      "/api/actors": actors,
     };
 
     return response(responses[path] ?? {});
@@ -1194,6 +1205,7 @@ test("funds screen renders commitment warning and blocks unnamed goals", async (
   expect(screen.getByText("Over by $41.10")).toBeInTheDocument();
   expect(screen.getByText("-$41.10")).toHaveClass("danger-text");
 
+  fireEvent.click(screen.getByRole("button", { name: "Add financial goal" }));
   expect(screen.getByRole("button", { name: "Save financial goal" })).toBeDisabled();
   expect(screen.getByText("Financial goal name is required.")).toBeInTheDocument();
 });
@@ -1205,6 +1217,7 @@ test("goal form sends target date and linked fund pool", async () => {
 
   fireEvent.click(await screen.findByRole("link", { name: "Funds" }));
   await screen.findByRole("heading", { name: "Funds" });
+  fireEvent.click(screen.getByRole("button", { name: "Add financial goal" }));
   fireEvent.change(screen.getByLabelText("Goal name"), { target: { value: "Synthetic vacation" } });
   fireEvent.change(screen.getByLabelText("Target amount"), { target: { value: "2200.00" } });
   fireEvent.change(screen.getByLabelText("Target date"), { target: { value: "2026-12-31" } });
@@ -1220,6 +1233,56 @@ test("goal form sends target date and linked fund pool", async () => {
       name: "Synthetic vacation",
       target_date: "2026-12-31",
       linked_fund_pool_id: "pool-auto",
+    });
+  });
+});
+
+test("dashboard add snapshot button is disabled for personas without review.decide", async () => {
+  window.localStorage.setItem("family-finance-os.activePersonaKey", "administrator");
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Dashboard" }));
+  expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add snapshot" })).toBeDisabled();
+  expect(screen.getByText("Current persona cannot add net worth snapshots.")).toBeInTheDocument();
+});
+
+test("add financial goal button is disabled for personas without review.decide", async () => {
+  window.localStorage.setItem("family-finance-os.activePersonaKey", "administrator");
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Funds" }));
+  expect(await screen.findByRole("heading", { name: "Funds" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add financial goal" })).toBeDisabled();
+  expect(screen.getByText("Current persona cannot create financial goals.")).toBeInTheDocument();
+});
+
+test("goal form normalizes comma-formatted target amount before submit", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("link", { name: "Funds" }));
+  await screen.findByRole("heading", { name: "Funds" });
+  fireEvent.click(screen.getByRole("button", { name: "Add financial goal" }));
+  fireEvent.change(screen.getByLabelText("Goal name"), { target: { value: "Synthetic goal" } });
+  fireEvent.change(screen.getByLabelText("Target amount"), { target: { value: "129,165.98" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save financial goal" }));
+
+  await waitFor(() => {
+    const goalCall = fetchMock.mock.calls.find(
+      ([input, init]) => String(input).includes("/api/financial-goals") && init?.method === "POST",
+    );
+    expect(goalCall).toBeDefined();
+    expect(JSON.parse(String(goalCall?.[1]?.body))).toMatchObject({
+      name: "Synthetic goal",
+      target_amount: "129165.98",
     });
   });
 });
@@ -1719,17 +1782,16 @@ test("settings screen saves source profile sample confirmation with owner note",
   });
 });
 
-test("settings screen adds a manual net worth snapshot", async () => {
+test("dashboard screen adds a manual net worth snapshot", async () => {
   const fetchMock = installApiMock();
 
   render(<App />);
 
   await waitForOperatorShell();
-  fireEvent.click(screen.getByRole("link", { name: "Settings" }));
-  expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
-  expect(await screen.findByText("Actual net worth")).toBeInTheDocument();
-  expect(screen.getByText("$1,200.00")).toBeInTheDocument();
-  expect(screen.getByText("With estimates: $9,200.00")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("link", { name: "Dashboard" }));
+  expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Add snapshot" }));
+  expect(await screen.findByRole("heading", { name: "Add net worth snapshot" })).toBeInTheDocument();
   expect(screen.getByText("Estimates never feed Spendable balance.")).toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText("Snapshot date"), { target: { value: "2026-06-30" } });
@@ -1896,4 +1958,95 @@ test("control plane dropdown opens elevation lightbox requiring purpose selectio
       expect.objectContaining({ method: "POST" }),
     );
   });
+});
+
+const contributorActorsPayload = {
+  ...actorsPayload,
+  selectable_personas: [
+    ...actorsPayload.selectable_personas,
+    { persona_key: "finance_contributor", persona_label: "Finance Contributor", group_keys: ["finance_contributor"] },
+  ],
+};
+
+test("top rail orders actor and persona before control plane", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  const actorGroup = screen.getByLabelText("Active local actor");
+  const selects = within(actorGroup).getAllByRole("combobox");
+  expect(selects[0]).toHaveAccessibleName("Actor");
+  expect(selects[1]).toHaveAccessibleName("Persona");
+  expect(selects[2]).toHaveAccessibleName("Control plane mode");
+});
+
+test("scan inbox reports completion when inbox is empty", async () => {
+  installApiMock({ inboxScan: { import_batches: [] } });
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Sources" }));
+  expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Scan inbox" }));
+  expect(await screen.findByText("Inbox scan complete — no files in inbox")).toBeInTheDocument();
+});
+
+test("scan inbox reports completion when batches are unchanged", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Sources" }));
+  expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Scan inbox" }));
+  expect(await screen.findByText("Inbox scan complete — 1 import batch in inbox (no new files)")).toBeInTheDocument();
+});
+
+test("review save decision uses disabled styling when form is invalid", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Review" }));
+  expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Approved category"), { target: { value: "__other__" } });
+  const saveButton = screen.getByRole("button", { name: "Save decision" });
+  expect(saveButton).toBeDisabled();
+  expect(saveButton).toHaveClass("primary-button");
+});
+
+test("contributor persona sees submit suggestion only on review", async () => {
+  window.localStorage.setItem("family-finance-os.activePersonaKey", "finance_contributor");
+  installApiMock({ actors: contributorActorsPayload });
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Review" }));
+  expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Save decision" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Submit suggestion" })).toBeInTheDocument();
+});
+
+test("administrator persona hides review navigation and redirects away from review", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Review" }));
+  expect(await screen.findByRole("heading", { name: "Ledger Review" })).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Persona"), { target: { value: "administrator" } });
+
+  await waitFor(() => expect(screen.queryByRole("link", { name: "Review" })).not.toBeInTheDocument());
+  expect(screen.queryByRole("heading", { name: "Ledger Review" })).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Home" })).toBeInTheDocument();
 });
