@@ -33,6 +33,7 @@ from family_finance_os.models import (
     ValidationFinding,
     utc_now_iso,
 )
+from family_finance_os.net_worth import net_worth_summary
 from family_finance_os.settings_service import CONFIRMED_SOURCE_PROFILE_STATUSES, list_settings
 from family_finance_os.source_profiles import list_source_profiles
 
@@ -601,6 +602,12 @@ def _core_report_payloads(
             "Review Backlog Summary",
             "Review and validation queue counts.",
             _review_backlog_summary(session),
+        ),
+        (
+            "net_worth_summary",
+            "Net Worth Summary",
+            "Actual-only and with-estimates manual net worth summary.",
+            net_worth_summary(session, include_estimates=True),
         ),
         (
             "top_merchants_sources",

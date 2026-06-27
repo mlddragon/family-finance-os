@@ -270,6 +270,31 @@ const fundsSummary = {
   budget_targets: [],
 };
 
+const netWorthSummary = {
+  include_estimates: false,
+  latest_snapshot_date: "2026-06-30",
+  actual: {
+    assets: "1500.00",
+    liabilities: "300.00",
+    net_worth: "1200.00",
+  },
+  with_estimates: {
+    assets: "9500.00",
+    liabilities: "300.00",
+    net_worth: "9200.00",
+    includes_estimates: true,
+  },
+  series: [
+    {
+      snapshot_date: "2026-06-30",
+      assets: "1500.00",
+      liabilities: "300.00",
+      net_worth: "1200.00",
+      includes_estimates: false,
+    },
+  ],
+};
+
 function response(body: unknown) {
   return {
     ok: true,
@@ -695,6 +720,25 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
         },
       });
     }
+    if (path === "/api/net-worth/snapshots" && init?.method === "POST") {
+      const snapshotBody = JSON.parse(String(init.body));
+      return response({
+        snapshot: {
+          id: "net-worth-snapshot-1",
+          snapshot_date: snapshotBody.snapshot_date,
+          asset_or_liability: snapshotBody.asset_or_liability,
+          account_name: snapshotBody.account_name,
+          institution: snapshotBody.institution,
+          category: snapshotBody.category,
+          subcategory: snapshotBody.subcategory,
+          balance: snapshotBody.balance,
+          valuation_method: snapshotBody.valuation_method,
+          confidence: snapshotBody.confidence ?? "high",
+          source_notes: snapshotBody.source_notes,
+          include_in_actual_net_worth: snapshotBody.valuation_method === "actual",
+        },
+      });
+    }
     if (path === "/api/reports/run" && init?.method === "POST") {
       return response({
         job: { id: "job-report", status: "completed" },
@@ -814,6 +858,7 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
         },
       },
       "/api/funds/summary": fundsSummary,
+      "/api/net-worth/summary": netWorthSummary,
       "/api/inbox/scan": {
         import_batches: [
           {
@@ -1672,6 +1717,55 @@ test("settings screen saves source profile sample confirmation with owner note",
       },
     ],
   });
+});
+
+test("settings screen adds a manual net worth snapshot", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+  expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
+  expect(await screen.findByText("Actual net worth")).toBeInTheDocument();
+  expect(screen.getByText("$1,200.00")).toBeInTheDocument();
+  expect(screen.getByText("With estimates: $9,200.00")).toBeInTheDocument();
+  expect(screen.getByText("Estimates never feed Spendable balance.")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Snapshot date"), { target: { value: "2026-06-30" } });
+  fireEvent.change(screen.getByLabelText("Asset or liability"), { target: { value: "asset" } });
+  fireEvent.change(screen.getByLabelText("Account display name"), { target: { value: "SYNTHETIC Vehicle" } });
+  fireEvent.change(screen.getByLabelText("Institution"), { target: { value: "Garage" } });
+  fireEvent.change(screen.getByLabelText("Net worth category"), { target: { value: "vehicle" } });
+  fireEvent.change(screen.getByLabelText("Balance"), { target: { value: "8000.00" } });
+  fireEvent.change(screen.getByLabelText("Valuation method"), { target: { value: "estimate" } });
+  expect(screen.getByRole("button", { name: "Save net worth snapshot" })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Estimate confidence"), { target: { value: "medium" } });
+  fireEvent.change(screen.getByLabelText("Source notes"), { target: { value: "SYNTHETIC market estimate" } });
+
+  const saveButton = screen.getByRole("button", { name: "Save net worth snapshot" });
+  await waitFor(() => expect(saveButton).not.toBeDisabled());
+  fireEvent.click(saveButton);
+
+  await waitFor(() => {
+    const snapshotCall = fetchMock.mock.calls.find(
+      ([input, init]) => pathFor(input) === "/api/net-worth/snapshots" && init?.method === "POST",
+    );
+    expect(snapshotCall).toBeTruthy();
+    expect(JSON.parse(String(snapshotCall?.[1]?.body))).toMatchObject({
+      actor: "owner",
+      snapshot_date: "2026-06-30",
+      asset_or_liability: "asset",
+      account_name: "SYNTHETIC Vehicle",
+      institution: "Garage",
+      category: "vehicle",
+      balance: "8000.00",
+      valuation_method: "estimate",
+      confidence: "medium",
+      source_notes: "SYNTHETIC market estimate",
+    });
+  });
+  expect(await screen.findByText("Net worth snapshot saved")).toBeInTheDocument();
 });
 
 test("settings screen edits editable database-backed settings with required notes", async () => {

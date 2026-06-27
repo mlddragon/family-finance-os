@@ -240,6 +240,40 @@ export type FundsSummary = {
   budget_targets: BudgetTarget[];
 };
 
+export type NetWorthRollup = {
+  assets: string;
+  liabilities: string;
+  net_worth: string;
+};
+
+export type NetWorthSummary = {
+  include_estimates: boolean;
+  latest_snapshot_date: string | null;
+  actual: NetWorthRollup;
+  with_estimates: NetWorthRollup & {
+    includes_estimates: boolean;
+  };
+  series: Array<NetWorthRollup & {
+    snapshot_date: string;
+    includes_estimates: boolean;
+  }>;
+};
+
+export type NetWorthSnapshot = {
+  id: string;
+  snapshot_date: string;
+  asset_or_liability: "asset" | "liability" | string;
+  account_name: string;
+  institution: string | null;
+  category: string;
+  subcategory: string | null;
+  balance: string;
+  valuation_method: "actual" | "estimate" | string;
+  confidence: "high" | "medium" | "low" | string;
+  source_notes: string | null;
+  include_in_actual_net_worth: boolean;
+};
+
 export type ImportBatch = {
   id: string;
   status: string;

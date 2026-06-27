@@ -24,6 +24,7 @@ import {
   createCategory,
   createDevBypassSession,
   createFinancialGoal,
+  createNetWorthSnapshot,
   createSuggestion,
   dismissSuggestion,
   enrollOwner,
@@ -33,6 +34,7 @@ import {
   fetchAuthStatus,
   fetchElevatedModeStatus,
   fetchFundsSummary,
+  fetchNetWorthSummary,
   fetchOperatorSummary,
   createAdvisorExport,
   draftMonthlyClose,
@@ -90,6 +92,7 @@ import type {
   FundsSummary,
   InboxScan,
   ImportBatch,
+  NetWorthSummary,
   OperatorSummary,
   SettingsPayload,
   SourceProfile,
@@ -218,6 +221,23 @@ const emptyFundsSummary: FundsSummary = {
   pools: [],
   goals: [],
   budget_targets: [],
+};
+
+const emptyNetWorthSummary: NetWorthSummary = {
+  include_estimates: false,
+  latest_snapshot_date: null,
+  actual: {
+    assets: "0.00",
+    liabilities: "0.00",
+    net_worth: "0.00",
+  },
+  with_estimates: {
+    assets: "0.00",
+    liabilities: "0.00",
+    net_worth: "0.00",
+    includes_estimates: true,
+  },
+  series: [],
 };
 
 function uniqueExistingListValues(values: Array<string | null | undefined>) {
@@ -752,6 +772,10 @@ function OperatorApp() {
 
   const summaryQuery = useQuery({ queryKey: ["operator-summary"], queryFn: fetchOperatorSummary });
   const fundsSummaryQuery = useQuery({ queryKey: ["funds-summary", fundsMonth], queryFn: () => fetchFundsSummary(fundsMonth) });
+  const netWorthSummaryQuery = useQuery({
+    queryKey: ["net-worth-summary"],
+    queryFn: () => fetchNetWorthSummary({ includeEstimates: false }),
+  });
   const actorsQuery = useQuery({ queryKey: ["actors"], queryFn: fetchActors });
   const inboxQuery = useQuery({ queryKey: ["inbox-scan"], queryFn: scanInbox });
   const findingsQuery = useQuery({ queryKey: ["validation-findings"], queryFn: fetchValidationFindings });
@@ -775,6 +799,7 @@ function OperatorApp() {
 
   const summary = summaryQuery.data ?? emptySummary;
   const fundsSummary = fundsSummaryQuery.data ?? emptyFundsSummary;
+  const netWorthSummary = netWorthSummaryQuery.data ?? emptyNetWorthSummary;
   const actors = actorsQuery.data;
   const findings = findingsQuery.data?.findings ?? [];
   const inbox = inboxQuery.data?.import_batches ?? [];
@@ -926,6 +951,7 @@ function OperatorApp() {
           {!splitReturnScreen && activeScreen === "settings" ? (
             <SettingsScreen
               settings={settings}
+              netWorthSummary={netWorthSummary}
               runtime={summary.runtime}
               profiles={summary.sources.profiles}
               operatorActor={operatorActor}
@@ -3141,6 +3167,7 @@ function ReportsScreen({
 
 function SettingsScreen({
   settings,
+  netWorthSummary,
   runtime,
   profiles,
   operatorActor,
@@ -3152,6 +3179,7 @@ function SettingsScreen({
   actors,
 }: {
   settings?: SettingsPayload;
+  netWorthSummary: NetWorthSummary;
   runtime: RuntimeStatus;
   profiles: SourceProfile[];
   operatorActor: string;
@@ -3188,6 +3216,17 @@ function SettingsScreen({
   const [selectedSourceKey, setSelectedSourceKey] = useState(pendingProfiles[0]?.source_key ?? "");
   const [confirmationNote, setConfirmationNote] = useState("");
   const [confirmationStatus, setConfirmationStatus] = useState<string | null>(null);
+  const [snapshotDate, setSnapshotDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [assetOrLiability, setAssetOrLiability] = useState("asset");
+  const [netWorthAccountName, setNetWorthAccountName] = useState("");
+  const [netWorthInstitution, setNetWorthInstitution] = useState("");
+  const [netWorthCategory, setNetWorthCategory] = useState("liquid_cash");
+  const [netWorthSubcategory, setNetWorthSubcategory] = useState("");
+  const [netWorthBalance, setNetWorthBalance] = useState("");
+  const [valuationMethod, setValuationMethod] = useState("actual");
+  const [estimateConfidence, setEstimateConfidence] = useState("");
+  const [sourceNotes, setSourceNotes] = useState("");
+  const [netWorthStatus, setNetWorthStatus] = useState<string | null>(null);
   const settingsColumns = useMemo<ColumnDef<SettingRow>[]>(() => {
     const columns: ColumnDef<SettingRow>[] = [
       { header: "Friendly name", cell: ({ row }) => settingLabel(row.original) },
@@ -3255,6 +3294,31 @@ function SettingsScreen({
     onError: (error) => setSettingStatus(formatApiError(error, "Setting save blocked")),
   });
 
+  const netWorthMutation = useMutation({
+    mutationFn: createNetWorthSnapshot,
+    onSuccess: () => {
+      setNetWorthStatus("Net worth snapshot saved");
+      setNetWorthAccountName("");
+      setNetWorthInstitution("");
+      setNetWorthCategory("liquid_cash");
+      setNetWorthSubcategory("");
+      setNetWorthBalance("");
+      setValuationMethod("actual");
+      setEstimateConfidence("");
+      setSourceNotes("");
+      void queryClient.invalidateQueries({ queryKey: ["net-worth-summary"] });
+    },
+    onError: (error) => setNetWorthStatus(formatApiError(error, "Net worth snapshot save failed")),
+  });
+
+  const estimateFieldsRequired = valuationMethod === "estimate";
+  const netWorthFormInvalid =
+    !snapshotDate ||
+    !netWorthAccountName.trim() ||
+    !netWorthCategory.trim() ||
+    !netWorthBalance.trim() ||
+    (estimateFieldsRequired && (!estimateConfidence || !sourceNotes.trim()));
+
   function saveEditableSetting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedSetting) {
@@ -3283,6 +3347,28 @@ function SettingsScreen({
       actor: operatorActor,
       actorContext: operatorActorContext,
       note: confirmationNote,
+    });
+  }
+
+  function saveNetWorthSnapshot(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (netWorthFormInvalid) {
+      setNetWorthStatus("Net worth snapshot is missing required fields");
+      return;
+    }
+    netWorthMutation.mutate({
+      snapshotDate,
+      assetOrLiability,
+      accountName: netWorthAccountName,
+      institution: netWorthInstitution,
+      category: netWorthCategory,
+      subcategory: netWorthSubcategory,
+      balance: netWorthBalance,
+      valuationMethod,
+      confidence: estimateFieldsRequired ? estimateConfidence : undefined,
+      sourceNotes: estimateFieldsRequired ? sourceNotes : undefined,
+      actor: operatorActor,
+      actorContext: operatorActorContext,
     });
   }
 
@@ -3332,6 +3418,100 @@ function SettingsScreen({
       </section>
 
       {qaControlsEnabled ? <PermissionPreviewPanel actors={actors} /> : null}
+
+      <section className="work-panel">
+        <div className="screen-heading split-heading panel-heading">
+          <div>
+            <h3>Net worth snapshots</h3>
+            <p className="screen-sub">Manual balances use positive amounts; asset or liability controls the rollup sign.</p>
+          </div>
+        </div>
+        <div className="metric-grid">
+          <Metric
+            label="Actual net worth"
+            value={formatMoney(netWorthSummary.actual.net_worth)}
+            detail={`As of ${netWorthSummary.latest_snapshot_date ?? "no snapshot"}`}
+          />
+          <Metric
+            label="Actual assets"
+            value={formatMoney(netWorthSummary.actual.assets)}
+            detail={`Liabilities ${formatMoney(netWorthSummary.actual.liabilities)}`}
+          />
+          <Metric
+            label="With estimates"
+            value={formatMoney(netWorthSummary.with_estimates.net_worth)}
+            detail="Estimates are separate from Spendable"
+            tone="warn"
+          />
+        </div>
+        <p className="form-status warn-text">With estimates: {formatMoney(netWorthSummary.with_estimates.net_worth)}</p>
+        <p className="form-status warn-text">Estimates never feed Spendable balance.</p>
+        <form className="settings-form" onSubmit={saveNetWorthSnapshot}>
+          <label>
+            Snapshot date
+            <input type="date" value={snapshotDate} onChange={(event) => setSnapshotDate(event.target.value)} />
+          </label>
+          <label>
+            Asset or liability
+            <select value={assetOrLiability} onChange={(event) => setAssetOrLiability(event.target.value)}>
+              <option value="asset">Asset</option>
+              <option value="liability">Liability</option>
+            </select>
+          </label>
+          <label>
+            Account display name
+            <input value={netWorthAccountName} onChange={(event) => setNetWorthAccountName(event.target.value)} />
+          </label>
+          <label>
+            Institution
+            <input value={netWorthInstitution} onChange={(event) => setNetWorthInstitution(event.target.value)} />
+          </label>
+          <label>
+            Net worth category
+            <input value={netWorthCategory} onChange={(event) => setNetWorthCategory(event.target.value)} />
+          </label>
+          <label>
+            Subcategory
+            <input value={netWorthSubcategory} onChange={(event) => setNetWorthSubcategory(event.target.value)} />
+          </label>
+          <label>
+            Balance
+            <input inputMode="decimal" value={netWorthBalance} onChange={(event) => setNetWorthBalance(event.target.value)} placeholder="1500.00" />
+          </label>
+          <label>
+            Valuation method
+            <select value={valuationMethod} onChange={(event) => setValuationMethod(event.target.value)}>
+              <option value="actual">Actual</option>
+              <option value="estimate">Estimate</option>
+            </select>
+          </label>
+          {estimateFieldsRequired ? (
+            <>
+              <label>
+                Estimate confidence
+                <select value={estimateConfidence} onChange={(event) => setEstimateConfidence(event.target.value)}>
+                  <option value="">Select confidence</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </label>
+              <label>
+                Source notes
+                <textarea value={sourceNotes} onChange={(event) => setSourceNotes(event.target.value)} rows={3} />
+              </label>
+            </>
+          ) : null}
+          <button type="submit" className="primary-button" disabled={netWorthFormInvalid || netWorthMutation.isPending}>
+            Save net worth snapshot
+          </button>
+        </form>
+        {netWorthStatus ? (
+          <p className={netWorthStatus.includes("failed") || netWorthStatus.includes("missing") ? "form-status danger-text" : "form-status ok-text"}>
+            {netWorthStatus}
+          </p>
+        ) : null}
+      </section>
 
       <div className="two-column">
         <section className="work-panel">

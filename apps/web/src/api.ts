@@ -15,6 +15,8 @@ import type {
   FundsSummary,
   InboxScan,
   ImportBatch,
+  NetWorthSnapshot,
+  NetWorthSummary,
   OperatorSummary,
   PermissionPreviewRequest,
   PermissionPreviewResponse,
@@ -225,6 +227,50 @@ export function fetchFundsSummary(month?: string) {
   }
   const query = params.toString();
   return apiJson<FundsSummary>(`/api/funds/summary${query ? `?${query}` : ""}`);
+}
+
+export function fetchNetWorthSummary(payload?: { includeEstimates?: boolean }) {
+  const params = new URLSearchParams();
+  if (payload?.includeEstimates) {
+    params.set("include_estimates", "true");
+  }
+  const query = params.toString();
+  return apiJson<NetWorthSummary>(`/api/net-worth/summary${query ? `?${query}` : ""}`);
+}
+
+export function createNetWorthSnapshot(payload: {
+  snapshotDate: string;
+  assetOrLiability: string;
+  accountName: string;
+  institution?: string;
+  category: string;
+  subcategory?: string;
+  balance: string;
+  valuationMethod: string;
+  confidence?: string;
+  sourceNotes?: string;
+  actor: string;
+  actorContext?: ActorContext;
+}) {
+  return apiJson<{ snapshot: NetWorthSnapshot }>("/api/net-worth/snapshots", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      snapshot_date: payload.snapshotDate,
+      asset_or_liability: payload.assetOrLiability,
+      account_name: payload.accountName.trim(),
+      institution: payload.institution?.trim() || null,
+      category: payload.category.trim(),
+      subcategory: payload.subcategory?.trim() || null,
+      balance: payload.balance,
+      valuation_method: payload.valuationMethod,
+      confidence: payload.confidence?.trim() || null,
+      source_notes: payload.sourceNotes?.trim() || null,
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+      note: "Create manual net worth snapshot from Settings.",
+    }),
+  });
 }
 
 export function createFinancialGoal(payload: {

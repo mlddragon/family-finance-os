@@ -108,6 +108,19 @@ from family_finance_os.import_validation import (
     void_import_batch,
 )
 from family_finance_os.ledger_normalization import get_transaction, list_transactions
+from family_finance_os.net_worth import (
+    ActorNetWorthRequest,
+    NetWorthError,
+    NetWorthSnapshotCreateRequest,
+    NetWorthSnapshotPatchRequest,
+    accept_net_worth_import,
+    create_net_worth_snapshot,
+    delete_net_worth_snapshot,
+    list_net_worth_snapshots,
+    net_worth_summary,
+    preview_net_worth_import,
+    update_net_worth_snapshot,
+)
 from family_finance_os.operator_summary import operator_summary_payload
 from family_finance_os.permissions import (
     ActionKey,
@@ -449,6 +462,12 @@ def create_app(
     def spendable_http_error(exc: SpendableError) -> HTTPException:
         return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
 
+    def net_worth_http_error(exc: NetWorthError) -> HTTPException:
+        return HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message, **exc.detail},
+        )
+
     @app.get("/api/spendable")
     def get_spendable(
         month: Optional[str] = Query(default=None),
@@ -469,6 +488,125 @@ def create_app(
                 )
             except SpendableError as exc:
                 raise spendable_http_error(exc) from exc
+
+    @app.get("/api/net-worth/snapshots")
+    def get_net_worth_snapshots(
+        from_date: Optional[str] = Query(default=None, alias="from"),
+        to_date: Optional[str] = Query(default=None, alias="to"),
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return {"snapshots": list_net_worth_snapshots(session, from_date=from_date, to_date=to_date)}
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
+
+    @app.post("/api/net-worth/snapshots")
+    def post_net_worth_snapshot(payload: NetWorthSnapshotCreateRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"snapshot": create_net_worth_snapshot(session, payload)}
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
+
+    @app.patch("/api/net-worth/snapshots/{snapshot_id}")
+    def patch_net_worth_snapshot(snapshot_id: str, payload: NetWorthSnapshotPatchRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"snapshot": update_net_worth_snapshot(session, snapshot_id, payload)}
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
+
+    @app.delete("/api/net-worth/snapshots/{snapshot_id}")
+    def delete_net_worth_snapshot_route(snapshot_id: str, payload: ActorNetWorthRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return delete_net_worth_snapshot(session, snapshot_id, payload)
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
+
+    @app.post("/api/net-worth/imports")
+    async def post_net_worth_import(
+        file: UploadFile = File(...),
+        actor: Optional[str] = Form(default="owner"),
+        actor_context_json: Optional[str] = Form(default=None),
+    ) -> Dict[str, Any]:
+        actor_context = (
+            ActorContext.model_validate_json(actor_context_json) if actor_context_json else None
+        )
+        active_data_root = get_data_root()
+        with create_session() as session:
+            require_permission(
+                session,
+                actor or "owner",
+                ActionKey.IMPORTS_RUN,
+                DataScopeKey.IMPORTED_SOURCE_RECORDS,
+                actor_context=actor_context,
+            )
+            try:
+                preview = preview_net_worth_import(
+                    active_data_root,
+                    filename=file.filename or "SYNTHETIC_net_worth.csv",
+                    content=await file.read(),
+                    actor=actor or "owner",
+                    actor_context=actor_context,
+                )
+                return {"import": preview}
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
+
+    @app.post("/api/net-worth/imports/{import_id}/accept")
+    def post_net_worth_import_accept(import_id: str, payload: ActorNetWorthRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.IMPORTS_RUN,
+                DataScopeKey.IMPORTED_SOURCE_RECORDS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return accept_net_worth_import(session, active_data_root, import_id, payload)
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
+
+    @app.get("/api/net-worth/summary")
+    def get_net_worth_summary(
+        from_date: Optional[str] = Query(default=None, alias="from"),
+        to_date: Optional[str] = Query(default=None, alias="to"),
+        include_estimates: bool = Query(default=False),
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return net_worth_summary(
+                    session,
+                    from_date=from_date,
+                    to_date=to_date,
+                    include_estimates=include_estimates,
+                )
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
 
     def funds_http_error(exc: FundsError) -> HTTPException:
         return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
