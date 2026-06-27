@@ -14,7 +14,7 @@ class ActorContext(BaseModel):
     persona_label: Optional[str] = None
     group_keys: list[str] = Field(default_factory=list)
     system_persona_key: Optional[str] = None
-    source: str = Field(pattern="^(local_selector|system|compat_actor_string)$")
+    source: str = Field(pattern="^(local_selector|system|compat_actor_string|auth_session|recovery|dev_bypass)$")
 
 
 GROUPS = [

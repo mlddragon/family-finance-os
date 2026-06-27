@@ -142,6 +142,38 @@ def default_settings() -> list[dict[str, Any]]:
             "note_required": False,
         },
         {
+            "domain": "spendable",
+            "setting_key": "spendable.liquid_source_keys",
+            "friendly_name": "Spendable liquid source keys",
+            "value": ["alliant_checking", "alliant_savings"],
+            "editable": True,
+            "note_required": True,
+        },
+        {
+            "domain": "spendable",
+            "setting_key": "spendable.card_obligation_source_keys",
+            "friendly_name": "Spendable card obligation source keys",
+            "value": ["alliant_credit_card", "chase_prime_visa"],
+            "editable": True,
+            "note_required": True,
+        },
+        {
+            "domain": "spendable",
+            "setting_key": "spendable.include_provisional_default",
+            "friendly_name": "Include provisional exposure by default",
+            "value": False,
+            "editable": True,
+            "note_required": False,
+        },
+        {
+            "domain": "spendable",
+            "setting_key": "spendable.manual_obligation_window_days",
+            "friendly_name": "Manual obligation window days",
+            "value": 45,
+            "editable": True,
+            "note_required": False,
+        },
+        {
             "domain": "future_integrations",
             "setting_key": "vendor_enrichment.status",
             "friendly_name": "Vendor enrichment status",
@@ -313,6 +345,27 @@ def _validate_change(change: SettingChange, existing: Setting) -> None:
             raise SettingsValidationError(
                 "invalid_high_value_threshold",
                 "High-value approval threshold must be a positive number.",
+            )
+
+    if change.domain == "spendable" and change.setting_key.endswith("_source_keys"):
+        if not isinstance(change.value, list) or not all(isinstance(item, str) for item in change.value):
+            raise SettingsValidationError(
+                "invalid_spendable_source_keys",
+                "Spendable source-key settings must be JSON arrays of strings.",
+            )
+
+    if change.domain == "spendable" and change.setting_key == "spendable.include_provisional_default":
+        if not isinstance(change.value, bool):
+            raise SettingsValidationError(
+                "invalid_spendable_provisional_default",
+                "Spendable provisional default must be a boolean value.",
+            )
+
+    if change.domain == "spendable" and change.setting_key == "spendable.manual_obligation_window_days":
+        if not isinstance(change.value, int) or not 1 <= change.value <= 365:
+            raise SettingsValidationError(
+                "invalid_manual_obligation_window",
+                "Manual obligation window must be an integer from 1 to 365 days.",
             )
 
     if change.domain == "sources" and change.setting_key.endswith(".profile_confirmation_status"):

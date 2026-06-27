@@ -4,7 +4,7 @@ import os
 from typing import Any, AsyncIterator, Dict, Optional
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
@@ -37,6 +37,23 @@ from family_finance_os.approvals import (
     is_approval_mode_enabled,
     list_approval_requests,
     reject_approval_request,
+)
+from family_finance_os.auth import (
+    DevBypassRequest,
+    LoginRequest,
+    OwnerEnrollmentRequest,
+    RecoveryLoginRequest,
+    SESSION_ABSOLUTE_DAYS,
+    SESSION_COOKIE_NAME,
+    AuthError,
+    any_users_exist,
+    auth_status,
+    create_dev_bypass_session,
+    enroll_owner,
+    login,
+    logout,
+    recovery_login,
+    resolve_session,
 )
 from family_finance_os.elevated_mode import (
     ElevatedModeEnterRequest,
@@ -107,6 +124,7 @@ from family_finance_os.settings_service import (
     serialize_events,
     settings_payload,
 )
+from family_finance_os.spendable import SpendableError, compute_spendable
 
 
 APP_NAME = "Family Finance OS"
@@ -199,6 +217,40 @@ def create_app(
         finally:
             reset_request_elevated_session_id(session_context)
 
+    def public_auth_path(path: str) -> bool:
+        return (
+            path in {"/api/health", "/api/status"}
+            or path.startswith("/api/auth/")
+            or path.startswith("/assets/")
+            or not path.startswith("/api/")
+        )
+
+    @app.middleware("http")
+    async def auth_session_middleware(request: Request, call_next):
+        if public_auth_path(request.url.path):
+            return await call_next(request)
+        with create_session() as session:
+            if not any_users_exist(session):
+                return await call_next(request)
+            resolved = resolve_session(
+                session,
+                session_token=request.cookies.get(SESSION_COOKIE_NAME),
+                client_host=request.client.host if request.client else "unknown",
+            )
+            if resolved is None:
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "detail": {
+                            "code": "authentication_required",
+                            "message": "Authentication is required for this API route.",
+                        }
+                    },
+                )
+            request.state.auth_actor_context = resolved["actor_context"]
+            request.state.auth_user = resolved["user"]
+        return await call_next(request)
+
     def status_payload() -> Dict[str, Any]:
         active_data_root = get_data_root()
         return {
@@ -222,12 +274,165 @@ def create_app(
     def status() -> Dict[str, Any]:
         return status_payload()
 
+    def auth_http_error(exc: AuthError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    def auth_bypass_allowed() -> bool:
+        return runtime_identity.qa_controls_enabled and bind_host == "127.0.0.1"
+
+    def set_session_cookie(response, session_token: str, request: Request) -> None:
+        response.set_cookie(
+            SESSION_COOKIE_NAME,
+            session_token,
+            max_age=SESSION_ABSOLUTE_DAYS * 24 * 60 * 60,
+            httponly=True,
+            samesite="strict",
+            secure=request.url.scheme == "https",
+            path="/",
+        )
+
+    def clear_session_cookie(response) -> None:
+        response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+
+    @app.get("/api/auth/status")
+    def get_auth_status(request: Request) -> Dict[str, Any]:
+        with create_session() as session:
+            return auth_status(
+                session,
+                session_token=request.cookies.get(SESSION_COOKIE_NAME),
+                client_host=request.client.host if request.client else "unknown",
+                qa_auth_bypass_available=auth_bypass_allowed(),
+            )
+
+    @app.post("/api/auth/enroll-owner")
+    def post_auth_enroll_owner(payload: OwnerEnrollmentRequest, request: Request):
+        if bind_host != "127.0.0.1":
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "local_session_required",
+                    "message": "Owner enrollment can only create sessions on localhost-bound runtimes.",
+                },
+            )
+        with create_session() as session:
+            try:
+                result = enroll_owner(
+                    session,
+                    payload,
+                    client_host=request.client.host if request.client else "unknown",
+                )
+            except AuthError as exc:
+                raise auth_http_error(exc) from exc
+        if result.get("status") == "totp_confirmation_required":
+            return JSONResponse(status_code=202, content=result)
+        session_token = result.pop("session_token")
+        response = JSONResponse(content=result)
+        set_session_cookie(response, session_token, request)
+        return response
+
+    @app.post("/api/auth/login")
+    def post_auth_login(payload: LoginRequest, request: Request):
+        if bind_host != "127.0.0.1":
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "local_session_required",
+                    "message": "Login can only create sessions on localhost-bound runtimes.",
+                },
+            )
+        with create_session() as session:
+            try:
+                result = login(
+                    session,
+                    payload,
+                    client_host=request.client.host if request.client else "unknown",
+                )
+            except AuthError as exc:
+                raise auth_http_error(exc) from exc
+        session_token = result.pop("session_token")
+        response = JSONResponse(content=result)
+        set_session_cookie(response, session_token, request)
+        return response
+
+    @app.post("/api/auth/recovery-login")
+    def post_auth_recovery_login(payload: RecoveryLoginRequest, request: Request):
+        if bind_host != "127.0.0.1":
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "local_session_required",
+                    "message": "Recovery login can only create sessions on localhost-bound runtimes.",
+                },
+            )
+        with create_session() as session:
+            try:
+                result = recovery_login(
+                    session,
+                    payload,
+                    client_host=request.client.host if request.client else "unknown",
+                )
+            except AuthError as exc:
+                raise auth_http_error(exc) from exc
+        session_token = result.pop("session_token")
+        response = JSONResponse(content=result)
+        set_session_cookie(response, session_token, request)
+        return response
+
+    @app.post("/api/auth/logout")
+    def post_auth_logout(request: Request):
+        with create_session() as session:
+            logout(session, session_token=request.cookies.get(SESSION_COOKIE_NAME))
+        response = JSONResponse(content={"authenticated": False})
+        clear_session_cookie(response)
+        return response
+
+    @app.post("/api/auth/dev-bypass")
+    def post_auth_dev_bypass(payload: DevBypassRequest, request: Request):
+        with create_session() as session:
+            try:
+                result = create_dev_bypass_session(
+                    session,
+                    payload,
+                    client_host=request.client.host if request.client else "unknown",
+                    allowed=auth_bypass_allowed(),
+                )
+            except AuthError as exc:
+                raise auth_http_error(exc) from exc
+        session_token = result.pop("session_token")
+        response = JSONResponse(content=result)
+        set_session_cookie(response, session_token, request)
+        return response
+
     @app.get("/api/operator-summary")
     def operator_summary() -> Dict[str, Any]:
         with create_session() as session:
             refresh_source_coverage_findings(session)
             session.commit()
             return operator_summary_payload(session, runtime=status_payload())
+
+    def spendable_http_error(exc: SpendableError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    @app.get("/api/spendable")
+    def get_spendable(
+        month: Optional[str] = Query(default=None),
+        include_provisional: Optional[bool] = Query(default=None),
+        persist_snapshot: bool = Query(default=False),
+        snapshot_type: str = Query(default="draft_close"),
+        monthly_close_id: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return compute_spendable(
+                    session,
+                    month=month,
+                    include_provisional=include_provisional,
+                    persist_snapshot=persist_snapshot,
+                    snapshot_type=snapshot_type,
+                    monthly_close_id=monthly_close_id,
+                )
+            except SpendableError as exc:
+                raise spendable_http_error(exc) from exc
 
     @app.get("/api/actors")
     def get_actors() -> Dict[str, Any]:
