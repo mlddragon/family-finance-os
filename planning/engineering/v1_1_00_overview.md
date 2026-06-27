@@ -148,14 +148,14 @@ Database names may use concise snake_case equivalents (`fund_pools`, `spendable_
 
 Approved mockup screen IDs from `planning/mockups/v1_1/index.html`:
 
-- `data-screen="home"`: Spendable balance, provisional exposure toggle, card obligation, fund commitment summary.
-- `data-screen="funds"`: Fund pools, fund commitments, pool remaining, reserved goal balance.
-- `data-screen="dashboard"`: Cashflow, category spend, pool target progress, net worth estimate toggle.
-- `data-screen="split"`: Transaction allocation editor and audit preview.
-- `data-screen="receipt"`: Manual receipt/line-item entry and save/start split actions.
-- `data-screen="export"`: Analyst export privacy boundary and contents.
-- `data-auth="login"`: Login, TOTP, recovery-code fallback, QA bypass variant.
-- `data-auth="enroll"`: First-boot owner enrollment and recovery codes.
+- Screen A, `data-screen="home"`: Spendable balance, provisional exposure toggle, card obligation, fund commitment summary.
+- Screen B, `data-screen="funds"`: Fund pools, fund commitments, pool remaining, reserved goal balance.
+- Screen C, `data-screen="dashboard"`: Cashflow, category spend, pool target progress, net worth estimate toggle.
+- Screen D, `data-screen="split"`: Transaction allocation editor and audit preview.
+- Screen E, `data-screen="receipt"`: Manual receipt/line-item entry and save/start split actions.
+- Screen G, `data-screen="export"`: Analyst export privacy boundary and contents.
+- Screen F/F-qa, `data-auth="login"`: Login, TOTP, recovery-code fallback, QA bypass variant.
+- Screen F, `data-auth="enroll"`: First-boot owner enrollment and recovery codes.
 
 Wireframe-needed surfaces before UI PRs:
 
