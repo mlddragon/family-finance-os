@@ -3713,21 +3713,21 @@ function ReportsScreen({
           </button>
         </div>
         <div className="report-actions-options" aria-label="Analyst pack options">
-          <label>
+          <label className="checkbox-row">
             <input
               type="checkbox"
               checked={includeEstimates}
               onChange={(event) => setIncludeEstimates(event.target.checked)}
             />
-            Include estimates in analyst pack
+            <span>Include estimates in analyst pack</span>
           </label>
-          <label>
+          <label className="checkbox-row">
             <input
               type="checkbox"
               checked={includeRawTransactions}
               onChange={(event) => setIncludeRawTransactions(event.target.checked)}
             />
-            Include raw transaction rows (sensitive)
+            <span>Include raw transaction rows (sensitive)</span>
           </label>
         </div>
         <p className="report-privacy-note">Analyst packs are generated locally only. No in-app AI or external service calls.</p>

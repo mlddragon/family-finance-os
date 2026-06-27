@@ -700,17 +700,34 @@ button.auth-mini-link:disabled:hover {
 }
 
 .report-actions-options {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+  align-items: flex-start;
+  width: 100%;
 }
 
-.report-actions-options label {
-  display: flex;
+.report-actions-panel .report-actions-options label.checkbox-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  justify-content: start;
+  column-gap: 8px;
+  width: min(100%, 560px);
   color: #425048;
   font-size: 13px;
   font-weight: 650;
+  text-transform: none;
+}
+
+.report-actions-panel .report-actions-options label.checkbox-row input[type="checkbox"] {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+}
+
+.report-actions-panel .report-actions-options label.checkbox-row span {
+  text-transform: none;
 }
 
 .report-privacy-note {
