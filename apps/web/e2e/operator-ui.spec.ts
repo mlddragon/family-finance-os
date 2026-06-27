@@ -116,6 +116,44 @@ const inactiveElevatedModeStatus = {
   purpose_requires_note: ["approval_rule_change"],
 };
 
+const fundsSummary = {
+  month: "2026-06",
+  spendable: {
+    headline: "3412.58",
+    verified_liquid_cash: "6180.00",
+    reserved_goal_balance: "1900.00",
+    manual_upcoming_obligations: "867.42",
+    provisional_exposure: "112.00",
+    card_obligation_total: "1523.23",
+    card_obligation_items: [],
+    includes_provisional: false,
+    warnings: [],
+  },
+  commitment_health: {
+    funded_this_month: "900.00",
+    fund_commitments: "1000.00",
+    pool_remaining_total: "146.50",
+    uncommitted: "-100.00",
+    overcommitted: true,
+  },
+  pools: [],
+  goals: [],
+  budget_targets: [],
+};
+
+const netWorthSummary = {
+  include_estimates: false,
+  latest_snapshot_date: "2026-06-30",
+  actual: { assets: "1500.00", liabilities: "300.00", net_worth: "1200.00" },
+  with_estimates: {
+    assets: "9500.00",
+    liabilities: "300.00",
+    net_worth: "9200.00",
+    includes_estimates: true,
+  },
+  series: [],
+};
+
 async function waitForMutatingControls(page: import("@playwright/test").Page) {
   await expect(page.getByRole("button", { name: "Validate batch" })).toBeEnabled({ timeout: 10_000 });
 }
@@ -454,6 +492,8 @@ async function mockApi(
           label: "Resolve blocking validation findings",
         },
       },
+      "/api/funds/summary": fundsSummary,
+      "/api/net-worth/summary": netWorthSummary,
       "/api/inbox/scan": {
         import_batches: [
           {
@@ -552,9 +592,12 @@ async function mockApi(
 test("navigates operator screens and shows local-only status", async ({ page }) => {
   await mockApi(page);
   await page.goto("/");
+  await page.waitForResponse(
+    (response) => response.url().includes("/api/operator-summary") && response.ok(),
+  );
 
   await expect(page.getByText("Local browser mode")).toBeVisible();
-  await expect(page.getByText("Resolve blocking validation findings")).toBeVisible();
+  await expect(page.getByText("Resolve blocking validation findings", { exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: "Sources" }).click();
   await expect(page.getByRole("heading", { name: "Sources", exact: true })).toBeVisible();
