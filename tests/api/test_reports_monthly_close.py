@@ -261,6 +261,8 @@ def test_monthly_close_manifest_references_registered_bundle_artifacts(tmp_path)
         artifact_by_type["monthly_close_memo"]["id"],
         artifact_by_type["settings_snapshot"]["id"],
         artifact_by_type["decision_event_export"]["id"],
+        artifact_by_type["fund_pool_summary"]["id"],
+        artifact_by_type["spendable_snapshot"]["id"],
     }
     assert manifest["monthly_close_id"] == body["monthly_close"]["id"]
     assert manifest["status"] == "draft"

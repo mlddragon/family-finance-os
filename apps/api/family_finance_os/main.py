@@ -4,7 +4,7 @@ import os
 from typing import Any, AsyncIterator, Dict, Optional
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
@@ -38,6 +38,23 @@ from family_finance_os.approvals import (
     list_approval_requests,
     reject_approval_request,
 )
+from family_finance_os.auth import (
+    DevBypassRequest,
+    LoginRequest,
+    OwnerEnrollmentRequest,
+    RecoveryLoginRequest,
+    SESSION_ABSOLUTE_DAYS,
+    SESSION_COOKIE_NAME,
+    AuthError,
+    any_users_exist,
+    auth_status,
+    create_dev_bypass_session,
+    enroll_owner,
+    login,
+    logout,
+    recovery_login,
+    resolve_session,
+)
 from family_finance_os.elevated_mode import (
     ElevatedModeEnterRequest,
     ElevatedModeError,
@@ -52,6 +69,32 @@ from family_finance_os.elevated_mode import (
     serialize_active_session,
     set_request_elevated_session_id,
 )
+from family_finance_os.funds import (
+    ActorMutationRequest,
+    BudgetTargetCreateRequest,
+    BudgetTargetPatchRequest,
+    FinancialGoalCreateRequest,
+    FinancialGoalPatchRequest,
+    FundCommitmentCreateRequest,
+    FundCommitmentPatchRequest,
+    FundPoolCreateRequest,
+    FundPoolPatchRequest,
+    FundsError,
+    create_budget_target,
+    create_financial_goal,
+    create_fund_commitment,
+    create_fund_pool,
+    delete_fund_commitment,
+    funds_summary,
+    list_budget_targets,
+    list_financial_goals,
+    list_fund_commitments,
+    list_fund_pools,
+    update_budget_target,
+    update_financial_goal,
+    update_fund_commitment,
+    update_fund_pool,
+)
 from family_finance_os.import_validation import (
     ImportValidationError,
     accept_import_batch,
@@ -65,6 +108,19 @@ from family_finance_os.import_validation import (
     void_import_batch,
 )
 from family_finance_os.ledger_normalization import get_transaction, list_transactions
+from family_finance_os.net_worth import (
+    ActorNetWorthRequest,
+    NetWorthError,
+    NetWorthSnapshotCreateRequest,
+    NetWorthSnapshotPatchRequest,
+    accept_net_worth_import,
+    create_net_worth_snapshot,
+    delete_net_worth_snapshot,
+    list_net_worth_snapshots,
+    net_worth_summary,
+    preview_net_worth_import,
+    update_net_worth_snapshot,
+)
 from family_finance_os.operator_summary import operator_summary_payload
 from family_finance_os.permissions import (
     ActionKey,
@@ -87,6 +143,20 @@ from family_finance_os.suggestions import (
     list_suggestions,
     route_review_decide,
 )
+from family_finance_os.analyst_export import (
+    AnalystExportRequest,
+    analyst_pack_options,
+    build_analyst_pack,
+    list_analyst_pack_prompts,
+)
+from family_finance_os.dashboard import (
+    DashboardError,
+    dashboard_cashflow,
+    dashboard_category_spend,
+    dashboard_net_worth,
+    dashboard_pool_progress,
+    dashboard_summary,
+)
 from family_finance_os.reporting import (
     AdvisorExportRequest,
     MonthlyCloseRequest,
@@ -106,6 +176,17 @@ from family_finance_os.settings_service import (
     seed_default_settings,
     serialize_events,
     settings_payload,
+)
+from family_finance_os.spendable import SpendableError, compute_spendable
+from family_finance_os.splits import (
+    ReceiptPromotionRequest,
+    SplitsError,
+    TransactionAllocationsDeleteRequest,
+    TransactionAllocationsPutRequest,
+    delete_transaction_allocations,
+    list_transaction_allocations,
+    promote_receipt_lines_to_allocations,
+    replace_transaction_allocations,
 )
 
 
@@ -199,6 +280,40 @@ def create_app(
         finally:
             reset_request_elevated_session_id(session_context)
 
+    def public_auth_path(path: str) -> bool:
+        return (
+            path in {"/api/health", "/api/status"}
+            or path.startswith("/api/auth/")
+            or path.startswith("/assets/")
+            or not path.startswith("/api/")
+        )
+
+    @app.middleware("http")
+    async def auth_session_middleware(request: Request, call_next):
+        if public_auth_path(request.url.path):
+            return await call_next(request)
+        with create_session() as session:
+            if not any_users_exist(session):
+                return await call_next(request)
+            resolved = resolve_session(
+                session,
+                session_token=request.cookies.get(SESSION_COOKIE_NAME),
+                client_host=request.client.host if request.client else "unknown",
+            )
+            if resolved is None:
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "detail": {
+                            "code": "authentication_required",
+                            "message": "Authentication is required for this API route.",
+                        }
+                    },
+                )
+            request.state.auth_actor_context = resolved["actor_context"]
+            request.state.auth_user = resolved["user"]
+        return await call_next(request)
+
     def status_payload() -> Dict[str, Any]:
         active_data_root = get_data_root()
         return {
@@ -222,12 +337,467 @@ def create_app(
     def status() -> Dict[str, Any]:
         return status_payload()
 
+    def auth_http_error(exc: AuthError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    def auth_bypass_allowed() -> bool:
+        return runtime_identity.qa_controls_enabled and bind_host == "127.0.0.1"
+
+    def set_session_cookie(response, session_token: str, request: Request) -> None:
+        response.set_cookie(
+            SESSION_COOKIE_NAME,
+            session_token,
+            max_age=SESSION_ABSOLUTE_DAYS * 24 * 60 * 60,
+            httponly=True,
+            samesite="strict",
+            secure=request.url.scheme == "https",
+            path="/",
+        )
+
+    def clear_session_cookie(response) -> None:
+        response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+
+    @app.get("/api/auth/status")
+    def get_auth_status(request: Request) -> Dict[str, Any]:
+        with create_session() as session:
+            return auth_status(
+                session,
+                session_token=request.cookies.get(SESSION_COOKIE_NAME),
+                client_host=request.client.host if request.client else "unknown",
+                qa_auth_bypass_available=auth_bypass_allowed(),
+            )
+
+    @app.post("/api/auth/enroll-owner")
+    def post_auth_enroll_owner(payload: OwnerEnrollmentRequest, request: Request):
+        if bind_host != "127.0.0.1":
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "local_session_required",
+                    "message": "Owner enrollment can only create sessions on localhost-bound runtimes.",
+                },
+            )
+        with create_session() as session:
+            try:
+                result = enroll_owner(
+                    session,
+                    payload,
+                    client_host=request.client.host if request.client else "unknown",
+                )
+            except AuthError as exc:
+                raise auth_http_error(exc) from exc
+        if result.get("status") == "totp_confirmation_required":
+            return JSONResponse(status_code=202, content=result)
+        session_token = result.pop("session_token")
+        response = JSONResponse(content=result)
+        set_session_cookie(response, session_token, request)
+        return response
+
+    @app.post("/api/auth/login")
+    def post_auth_login(payload: LoginRequest, request: Request):
+        if bind_host != "127.0.0.1":
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "local_session_required",
+                    "message": "Login can only create sessions on localhost-bound runtimes.",
+                },
+            )
+        with create_session() as session:
+            try:
+                result = login(
+                    session,
+                    payload,
+                    client_host=request.client.host if request.client else "unknown",
+                )
+            except AuthError as exc:
+                raise auth_http_error(exc) from exc
+        session_token = result.pop("session_token")
+        response = JSONResponse(content=result)
+        set_session_cookie(response, session_token, request)
+        return response
+
+    @app.post("/api/auth/recovery-login")
+    def post_auth_recovery_login(payload: RecoveryLoginRequest, request: Request):
+        if bind_host != "127.0.0.1":
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "local_session_required",
+                    "message": "Recovery login can only create sessions on localhost-bound runtimes.",
+                },
+            )
+        with create_session() as session:
+            try:
+                result = recovery_login(
+                    session,
+                    payload,
+                    client_host=request.client.host if request.client else "unknown",
+                )
+            except AuthError as exc:
+                raise auth_http_error(exc) from exc
+        session_token = result.pop("session_token")
+        response = JSONResponse(content=result)
+        set_session_cookie(response, session_token, request)
+        return response
+
+    @app.post("/api/auth/logout")
+    def post_auth_logout(request: Request):
+        with create_session() as session:
+            logout(session, session_token=request.cookies.get(SESSION_COOKIE_NAME))
+        response = JSONResponse(content={"authenticated": False})
+        clear_session_cookie(response)
+        return response
+
+    @app.post("/api/auth/dev-bypass")
+    def post_auth_dev_bypass(payload: DevBypassRequest, request: Request):
+        with create_session() as session:
+            try:
+                result = create_dev_bypass_session(
+                    session,
+                    payload,
+                    client_host=request.client.host if request.client else "unknown",
+                    allowed=auth_bypass_allowed(),
+                )
+            except AuthError as exc:
+                raise auth_http_error(exc) from exc
+        session_token = result.pop("session_token")
+        response = JSONResponse(content=result)
+        set_session_cookie(response, session_token, request)
+        return response
+
     @app.get("/api/operator-summary")
     def operator_summary() -> Dict[str, Any]:
         with create_session() as session:
             refresh_source_coverage_findings(session)
             session.commit()
             return operator_summary_payload(session, runtime=status_payload())
+
+    def spendable_http_error(exc: SpendableError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    def net_worth_http_error(exc: NetWorthError) -> HTTPException:
+        return HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message, **exc.detail},
+        )
+
+    @app.get("/api/spendable")
+    def get_spendable(
+        month: Optional[str] = Query(default=None),
+        include_provisional: Optional[bool] = Query(default=None),
+        persist_snapshot: bool = Query(default=False),
+        snapshot_type: str = Query(default="draft_close"),
+        monthly_close_id: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return compute_spendable(
+                    session,
+                    month=month,
+                    include_provisional=include_provisional,
+                    persist_snapshot=persist_snapshot,
+                    snapshot_type=snapshot_type,
+                    monthly_close_id=monthly_close_id,
+                )
+            except SpendableError as exc:
+                raise spendable_http_error(exc) from exc
+
+    @app.get("/api/net-worth/snapshots")
+    def get_net_worth_snapshots(
+        from_date: Optional[str] = Query(default=None, alias="from"),
+        to_date: Optional[str] = Query(default=None, alias="to"),
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return {"snapshots": list_net_worth_snapshots(session, from_date=from_date, to_date=to_date)}
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
+
+    @app.post("/api/net-worth/snapshots")
+    def post_net_worth_snapshot(payload: NetWorthSnapshotCreateRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"snapshot": create_net_worth_snapshot(session, payload)}
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
+
+    @app.patch("/api/net-worth/snapshots/{snapshot_id}")
+    def patch_net_worth_snapshot(snapshot_id: str, payload: NetWorthSnapshotPatchRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"snapshot": update_net_worth_snapshot(session, snapshot_id, payload)}
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
+
+    @app.delete("/api/net-worth/snapshots/{snapshot_id}")
+    def delete_net_worth_snapshot_route(snapshot_id: str, payload: ActorNetWorthRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return delete_net_worth_snapshot(session, snapshot_id, payload)
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
+
+    @app.post("/api/net-worth/imports")
+    async def post_net_worth_import(
+        file: UploadFile = File(...),
+        actor: Optional[str] = Form(default="owner"),
+        actor_context_json: Optional[str] = Form(default=None),
+    ) -> Dict[str, Any]:
+        actor_context = (
+            ActorContext.model_validate_json(actor_context_json) if actor_context_json else None
+        )
+        active_data_root = get_data_root()
+        with create_session() as session:
+            require_permission(
+                session,
+                actor or "owner",
+                ActionKey.IMPORTS_RUN,
+                DataScopeKey.IMPORTED_SOURCE_RECORDS,
+                actor_context=actor_context,
+            )
+            try:
+                preview = preview_net_worth_import(
+                    active_data_root,
+                    filename=file.filename or "SYNTHETIC_net_worth.csv",
+                    content=await file.read(),
+                    actor=actor or "owner",
+                    actor_context=actor_context,
+                )
+                return {"import": preview}
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
+
+    @app.post("/api/net-worth/imports/{import_id}/accept")
+    def post_net_worth_import_accept(import_id: str, payload: ActorNetWorthRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.IMPORTS_RUN,
+                DataScopeKey.IMPORTED_SOURCE_RECORDS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return accept_net_worth_import(session, active_data_root, import_id, payload)
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
+
+    @app.get("/api/net-worth/summary")
+    def get_net_worth_summary(
+        from_date: Optional[str] = Query(default=None, alias="from"),
+        to_date: Optional[str] = Query(default=None, alias="to"),
+        include_estimates: bool = Query(default=False),
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return net_worth_summary(
+                    session,
+                    from_date=from_date,
+                    to_date=to_date,
+                    include_estimates=include_estimates,
+                )
+            except NetWorthError as exc:
+                raise net_worth_http_error(exc) from exc
+
+    def funds_http_error(exc: FundsError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    @app.get("/api/funds/summary")
+    def get_funds_summary(month: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return funds_summary(session, month=month)
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+            except SpendableError as exc:
+                raise spendable_http_error(exc) from exc
+
+    @app.get("/api/fund-pools")
+    def get_fund_pools(month: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return {"pools": list_fund_pools(session, month=month)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.post("/api/fund-pools")
+    def post_fund_pool(payload: FundPoolCreateRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"pool": create_fund_pool(session, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.patch("/api/fund-pools/{pool_id}")
+    def patch_fund_pool(pool_id: str, payload: FundPoolPatchRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"pool": update_fund_pool(session, pool_id, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.get("/api/fund-commitments")
+    def get_fund_commitments(month: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return {"commitments": list_fund_commitments(session, month=month)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.post("/api/fund-commitments")
+    def post_fund_commitment(payload: FundCommitmentCreateRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"commitment": create_fund_commitment(session, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.patch("/api/fund-commitments/{commitment_id}")
+    def patch_fund_commitment(commitment_id: str, payload: FundCommitmentPatchRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"commitment": update_fund_commitment(session, commitment_id, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.delete("/api/fund-commitments/{commitment_id}")
+    def delete_fund_commitment_route(commitment_id: str, payload: ActorMutationRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"commitment": delete_fund_commitment(session, commitment_id, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.get("/api/financial-goals")
+    def get_financial_goals() -> Dict[str, Any]:
+        with create_session() as session:
+            return {"goals": list_financial_goals(session)}
+
+    @app.post("/api/financial-goals")
+    def post_financial_goal(payload: FinancialGoalCreateRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"goal": create_financial_goal(session, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.patch("/api/financial-goals/{goal_id}")
+    def patch_financial_goal(goal_id: str, payload: FinancialGoalPatchRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"goal": update_financial_goal(session, goal_id, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.get("/api/budget-targets")
+    def get_budget_targets(month: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return {"budget_targets": list_budget_targets(session, month=month)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.post("/api/budget-targets")
+    def post_budget_target(payload: BudgetTargetCreateRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"budget_target": create_budget_target(session, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.patch("/api/budget-targets/{target_id}")
+    def patch_budget_target(target_id: str, payload: BudgetTargetPatchRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"budget_target": update_budget_target(session, target_id, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
 
     @app.get("/api/actors")
     def get_actors() -> Dict[str, Any]:
@@ -543,6 +1113,68 @@ def create_app(
                     detail={"code": "transaction_not_found", "message": "Transaction not found"},
                 )
             return {"transaction": transaction}
+
+    def splits_http_error(exc: SplitsError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    @app.get("/api/transactions/{transaction_id}/allocations")
+    def get_transaction_allocations(transaction_id: str) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return list_transaction_allocations(session, transaction_id)
+            except SplitsError as exc:
+                raise splits_http_error(exc) from exc
+
+    @app.put("/api/transactions/{transaction_id}/allocations")
+    def put_transaction_allocations(transaction_id: str, payload: TransactionAllocationsPutRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return replace_transaction_allocations(session, transaction_id, payload)
+            except SplitsError as exc:
+                raise splits_http_error(exc) from exc
+
+    @app.delete("/api/transactions/{transaction_id}/allocations")
+    def delete_transaction_allocations_route(
+        transaction_id: str,
+        payload: TransactionAllocationsDeleteRequest,
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return delete_transaction_allocations(session, transaction_id, payload)
+            except SplitsError as exc:
+                raise splits_http_error(exc) from exc
+
+    @app.post("/api/transactions/{transaction_id}/allocations/from-receipt")
+    def post_transaction_allocations_from_receipt(
+        transaction_id: str,
+        payload: ReceiptPromotionRequest,
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return promote_receipt_lines_to_allocations(session, transaction_id, payload)
+            except SplitsError as exc:
+                raise splits_http_error(exc) from exc
 
     @app.post("/api/decision-events")
     def post_decision_event(payload: DecisionEventRequest) -> Dict[str, Any]:
@@ -911,6 +1543,85 @@ def create_app(
             except ReportingError as exc:
                 raise reporting_http_error(exc) from exc
 
+    def dashboard_http_error(exc: DashboardError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    @app.get("/api/dashboard/summary")
+    def get_dashboard_summary(month: Optional[str] = None) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return dashboard_summary(session, month=month)
+            except DashboardError as exc:
+                raise dashboard_http_error(exc) from exc
+
+    @app.get("/api/dashboard/cashflow")
+    def get_dashboard_cashflow(months: int = 6, month: Optional[str] = None) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return dashboard_cashflow(session, months=months, anchor_month=month)
+            except DashboardError as exc:
+                raise dashboard_http_error(exc) from exc
+
+    @app.get("/api/dashboard/category-spend")
+    def get_dashboard_category_spend(month: Optional[str] = None) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return dashboard_category_spend(session, month=month)
+            except DashboardError as exc:
+                raise dashboard_http_error(exc) from exc
+
+    @app.get("/api/dashboard/pool-progress")
+    def get_dashboard_pool_progress(month: Optional[str] = None) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return dashboard_pool_progress(session, month=month)
+            except DashboardError as exc:
+                raise dashboard_http_error(exc) from exc
+
+    @app.get("/api/dashboard/net-worth")
+    def get_dashboard_net_worth(
+        date_from: Optional[str] = Query(default=None, alias="from"),
+        date_to: Optional[str] = Query(default=None, alias="to"),
+        include_estimates: bool = False,
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            return dashboard_net_worth(
+                session,
+                date_from=date_from,
+                date_to=date_to,
+                include_estimates=include_estimates,
+            )
+
+    @app.get("/api/analyst-pack/options")
+    def get_analyst_pack_options(month: Optional[str] = None) -> Dict[str, Any]:
+        with create_session() as session:
+            return analyst_pack_options(session, month=month)
+
+    @app.get("/api/analyst-pack/prompts")
+    def get_analyst_pack_prompts() -> Dict[str, Any]:
+        return list_analyst_pack_prompts()
+
+    @app.post("/api/analyst-pack/build")
+    def post_analyst_pack_build(payload: AnalystExportRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.EXPORTS_CREATE,
+                DataScopeKey.ADVISOR_EXPORT_ARTIFACTS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return build_analyst_pack(
+                    session,
+                    active_data_root,
+                    payload,
+                    synthetic_artifact_marker=runtime_identity.synthetic_artifact_marker,
+                )
+            except ReportingError as exc:
+                raise reporting_http_error(exc) from exc
+
     @app.post("/api/monthly-close/draft")
     def post_monthly_close_draft(payload: MonthlyCloseRequest) -> Dict[str, Any]:
         active_data_root = get_data_root()
@@ -936,6 +1647,7 @@ def create_app(
     @app.post("/api/monthly-close/finalize")
     def post_monthly_close_finalize(payload: MonthlyCloseRequest) -> Dict[str, Any]:
         active_data_root = get_data_root()
+        registry = get_elevated_mode_registry()
         with create_session() as session:
             require_permission(
                 session,
@@ -944,6 +1656,7 @@ def create_app(
                 DataScopeKey.MONTHLY_CLOSE,
                 actor_context=payload.actor_context,
             )
+            elevated_session = registry.get_active(session, current_elevated_session_id())
             try:
                 return create_monthly_close(
                     session,
@@ -951,6 +1664,7 @@ def create_app(
                     payload,
                     status="final",
                     synthetic_artifact_marker=runtime_identity.synthetic_artifact_marker,
+                    elevated_session=elevated_session,
                 )
             except ReportingError as exc:
                 raise reporting_http_error(exc) from exc

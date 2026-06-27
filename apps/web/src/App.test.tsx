@@ -7,12 +7,15 @@ import { enUS } from "./locales/en-US";
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   window.localStorage?.clear();
 });
 
 test("en-US locale covers primary UI surfaces", () => {
   expect(Object.keys(enUS.nav)).toEqual([
     "home",
+    "dashboard",
+    "funds",
     "sources",
     "validation",
     "review",
@@ -126,7 +129,7 @@ const categories = [
 
 const personalRuntime = {
   app: "Family Finance OS",
-  version: "0.3.0",
+  version: "0.5.0",
   local_only: true,
   bind_host: "127.0.0.1",
   app_env: "personal",
@@ -169,6 +172,128 @@ const actorsPayload = {
     { persona_key: "administrator", persona_label: "Administrator", group_keys: ["administrator"] },
   ],
   system_personas: [{ system_persona_key: "system:importer", display_name: "System: Importer" }],
+};
+
+const authenticatedStatus = {
+  requires_owner_enrollment: false,
+  authenticated: true,
+  user: {
+    id: "user-1",
+    username: "owner",
+    display_name: "SYNTHETIC Owner",
+    role: "administrator",
+    status: "active",
+    totp_required: true,
+    recovery_required: false,
+  },
+  session: {
+    id: "session-1",
+    created_from: "login",
+    last_seen_at: "2026-06-18T00:00:00Z",
+    idle_expires_at: "2026-06-18T08:00:00Z",
+    absolute_expires_at: "2026-06-25T00:00:00Z",
+  },
+  qa_auth_bypass_available: false,
+};
+
+const fundsSummary = {
+  month: "2026-06",
+  spendable: {
+    headline: "3412.58",
+    verified_liquid_cash: "6180.00",
+    reserved_goal_balance: "1900.00",
+    manual_upcoming_obligations: "867.42",
+    provisional_exposure: "112.00",
+    card_obligation_total: "1523.23",
+    card_obligation_items: [
+      {
+        card: "Synthetic Rewards Card",
+        owed: "1018.23",
+        note: "Pool remaining already reflects this",
+      },
+      {
+        card: "Synthetic Travel Card",
+        owed: "505.00",
+        note: "Statement due Jul 02",
+      },
+    ],
+    includes_provisional: false,
+    warnings: [],
+  },
+  commitment_health: {
+    funded_this_month: "900.00",
+    fund_commitments: "1000.00",
+    pool_remaining_total: "146.50",
+    uncommitted: "-100.00",
+    overcommitted: true,
+  },
+  pools: [
+    {
+      id: "pool-groceries",
+      pool_key: "groceries",
+      name: "Groceries",
+      description: null,
+      status: "On track",
+      sort_order: 10,
+      rollover_policy: "none",
+      commitment: "700.00",
+      spent: "512.40",
+      pool_remaining: "187.60",
+    },
+    {
+      id: "pool-auto",
+      pool_key: "auto_fuel",
+      name: "Auto & fuel",
+      description: null,
+      status: "Over by $41.10",
+      sort_order: 20,
+      rollover_policy: "none",
+      commitment: "300.00",
+      spent: "341.10",
+      pool_remaining: "-41.10",
+    },
+  ],
+  goals: [
+    {
+      id: "goal-emergency",
+      goal_key: "emergency",
+      name: "Emergency fund",
+      goal_type: "emergency",
+      target_amount: "3000.00",
+      target_date: null,
+      linked_fund_pool_id: null,
+      reserved_balance: "1900.00",
+      remaining_to_target: "1100.00",
+      status: "active",
+      notes: null,
+    },
+  ],
+  budget_targets: [],
+};
+
+const netWorthSummary = {
+  include_estimates: false,
+  latest_snapshot_date: "2026-06-30",
+  actual: {
+    assets: "1500.00",
+    liabilities: "300.00",
+    net_worth: "1200.00",
+  },
+  with_estimates: {
+    assets: "9500.00",
+    liabilities: "300.00",
+    net_worth: "9200.00",
+    includes_estimates: true,
+  },
+  series: [
+    {
+      snapshot_date: "2026-06-30",
+      assets: "1500.00",
+      liabilities: "300.00",
+      net_worth: "1200.00",
+      includes_estimates: false,
+    },
+  ],
 };
 
 function response(body: unknown) {
@@ -291,15 +416,31 @@ const emptyApprovalRequestsPayload = {
   approval_requests: [],
 };
 
-function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof personalRuntime } = {}) {
+function installApiMock(
+  options: {
+    acceptImportError?: boolean;
+    runtime?: typeof personalRuntime;
+    actors?: typeof actorsPayload;
+    inboxScan?: { import_batches: unknown[] };
+  } = {},
+) {
   let importBatchVoided = false;
   let validationFindingCleared = false;
+  let allocationLines: unknown[] = [];
   const runtime = options.runtime ?? personalRuntime;
+  const actors = options.actors ?? actorsPayload;
+  const inboxScanResponse = options.inboxScan ?? null;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = pathFor(input);
     const url = urlFor(input);
     if (path === "/api/permissions/effective") {
       return response(mockEffectivePermission(url, init));
+    }
+    if (path === "/api/auth/status") {
+      return response({
+        ...authenticatedStatus,
+        qa_auth_bypass_available: runtime.qa_controls_enabled,
+      });
     }
     if (path === "/api/elevated-mode/status") {
       return response(inactiveElevatedModeStatus);
@@ -571,6 +712,43 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
         },
       });
     }
+    if (path === "/api/financial-goals" && init?.method === "POST") {
+      const goalBody = JSON.parse(String(init.body));
+      return response({
+        goal: {
+          id: "goal-new",
+          goal_key: "vacation_2026",
+          name: goalBody.name,
+          goal_type: goalBody.goal_type,
+          target_amount: goalBody.target_amount,
+          target_date: goalBody.target_date,
+          linked_fund_pool_id: goalBody.linked_fund_pool_id,
+          reserved_balance: goalBody.reserved_balance,
+          remaining_to_target: "1600.00",
+          status: "active",
+          notes: null,
+        },
+      });
+    }
+    if (path === "/api/net-worth/snapshots" && init?.method === "POST") {
+      const snapshotBody = JSON.parse(String(init.body));
+      return response({
+        snapshot: {
+          id: "net-worth-snapshot-1",
+          snapshot_date: snapshotBody.snapshot_date,
+          asset_or_liability: snapshotBody.asset_or_liability,
+          account_name: snapshotBody.account_name,
+          institution: snapshotBody.institution,
+          category: snapshotBody.category,
+          subcategory: snapshotBody.subcategory,
+          balance: snapshotBody.balance,
+          valuation_method: snapshotBody.valuation_method,
+          confidence: snapshotBody.confidence ?? "high",
+          source_notes: snapshotBody.source_notes,
+          include_in_actual_net_worth: snapshotBody.valuation_method === "actual",
+        },
+      });
+    }
     if (path === "/api/reports/run" && init?.method === "POST") {
       return response({
         job: { id: "job-report", status: "completed" },
@@ -617,6 +795,37 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
         ],
       });
     }
+    if (path === "/api/transactions/tx-1/allocations" && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body));
+      allocationLines = body.lines.map((line: Record<string, unknown>, index: number) => ({
+        id: `allocation-${index + 1}`,
+        line_number: index + 1,
+        ...line,
+      }));
+      return response({
+        allocations: allocationLines,
+        summary: {
+          transaction_amount: "12.34",
+          allocated: "12.34",
+          remainder: "0.00",
+          balanced: true,
+          allocation_count: allocationLines.length,
+        },
+        event: { id: "split-event-1" },
+      });
+    }
+    if (path === "/api/transactions/tx-1/allocations") {
+      return response({
+        allocations: allocationLines,
+        summary: {
+          transaction_amount: "12.34",
+          allocated: allocationLines.length ? "12.34" : "0.00",
+          remainder: allocationLines.length ? "0.00" : "12.34",
+          balanced: allocationLines.length > 0,
+          allocation_count: allocationLines.length,
+        },
+      });
+    }
 
     const responses: Record<string, unknown> = {
       "/api/operator-summary": {
@@ -658,7 +867,10 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
           label: "Resolve blocking validation findings",
         },
       },
-      "/api/inbox/scan": {
+      "/api/funds/summary": fundsSummary,
+      "/api/net-worth/summary": netWorthSummary,
+      "/api/inbox/scan":
+        inboxScanResponse ?? {
         import_batches: [
           {
             id: "batch-1",
@@ -815,7 +1027,7 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
           },
         ],
       },
-      "/api/actors": actorsPayload,
+      "/api/actors": actors,
     };
 
     return response(responses[path] ?? {});
@@ -825,6 +1037,10 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
   return fetchMock;
 }
 
+async function waitForOperatorShell() {
+  await screen.findByRole("link", { name: "Home" });
+}
+
 test("renders operator home from API state", async () => {
   installApiMock();
 
@@ -832,11 +1048,243 @@ test("renders operator home from API state", async () => {
 
   expect(screen.getByRole("heading", { name: "Family Finance OS" })).toBeInTheDocument();
   expect(await screen.findByText("Personal data")).toBeInTheDocument();
+  expect(await screen.findByText("Spendable balance")).toBeInTheDocument();
+  expect(screen.getByText("$3,412.58")).toBeInTheDocument();
+  expect(screen.getByText("Card obligation (not yet netted)")).toBeInTheDocument();
+  expect(screen.getByText("Total card obligation: $1,523.23")).toBeInTheDocument();
   expect(await screen.findByText("Local browser mode")).toBeInTheDocument();
   expect(await screen.findByText("Resolve blocking validation findings")).toBeInTheDocument();
+  expect(screen.getByText("Resolve blocking validation findings before monthly close or reporting.")).toBeInTheDocument();
   expect(screen.getByText("Open blockers")).toBeInTheDocument();
   expect(screen.getByText("Review queue")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Validation Issues" })).toBeInTheDocument();
+});
+
+test("requests the funds summary for the current month by default", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(new Date("2026-07-04T12:00:00Z"));
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  await waitFor(() => {
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/funds/summary?month=2026-07"))).toBe(true);
+  });
+});
+
+test("shows auth enrollment and login flows before the operator shell", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      response({
+        ...authenticatedStatus,
+        requires_owner_enrollment: true,
+        authenticated: false,
+        user: null,
+        session: null,
+        qa_auth_bypass_available: true,
+      }),
+    ),
+  );
+
+  const firstRender = render(<App />);
+
+  expect(await screen.findByText("First-boot setup - Owner enrollment")).toBeInTheDocument();
+  expect(screen.getByText("QA synthetic demo - dev bypass available")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Home" })).not.toBeInTheDocument();
+  firstRender.unmount();
+
+  vi.restoreAllMocks();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      response({
+        ...authenticatedStatus,
+        authenticated: false,
+        user: null,
+        session: null,
+      }),
+    ),
+  );
+
+  render(<App />);
+  expect(await screen.findByText("Local sign in")).toBeInTheDocument();
+});
+
+test("lets owners sign in with a recovery code", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = pathFor(input);
+    if (path === "/api/auth/status") {
+      return response({
+        ...authenticatedStatus,
+        authenticated: false,
+        user: null,
+        session: null,
+      });
+    }
+    if (path === "/api/auth/recovery-login" && init?.method === "POST") {
+      return response(authenticatedStatus);
+    }
+    return response({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  expect(await screen.findByText("Local sign in")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Use a recovery code" }));
+  fireEvent.change(screen.getByLabelText("Recovery code"), { target: { value: "ffos-synthetic-recovery" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in with recovery code" }));
+
+  await waitFor(() => {
+    const recoveryCall = fetchMock.mock.calls.find(([input]) => String(input).includes("/api/auth/recovery-login"));
+    expect(recoveryCall).toBeDefined();
+    expect(JSON.parse(String(recoveryCall?.[1]?.body))).toMatchObject({
+      username: "owner",
+      recovery_code: "ffos-synthetic-recovery",
+    });
+  });
+});
+
+test("shows recovery codes before enrollment acknowledgment", async () => {
+  let enrollmentStep = 0;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = pathFor(input);
+    if (path === "/api/auth/status") {
+      return response({
+        ...authenticatedStatus,
+        requires_owner_enrollment: true,
+        authenticated: false,
+        user: null,
+        session: null,
+        qa_auth_bypass_available: false,
+      });
+    }
+    if (path === "/api/auth/enroll-owner" && init?.method === "POST") {
+      enrollmentStep += 1;
+      if (enrollmentStep === 1) {
+        return response({
+          status: "totp_confirmation_required",
+          totp_secret: "SYNTHETIC-TOTP-SECRET",
+        });
+      }
+      return response({
+        ...authenticatedStatus,
+        recovery_codes: ["ffos-synthetic-one", "ffos-synthetic-two"],
+      });
+    }
+    return response({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  expect(await screen.findByText("First-boot setup - Owner enrollment")).toBeInTheDocument();
+  expect(screen.queryByLabelText("I have saved the recovery codes.")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Passphrase"), { target: { value: "correct horse battery staple" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue to authenticator" }));
+
+  expect(await screen.findByText("SYNTHETIC-TOTP-SECRET")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Authenticator code (6 digits)"), { target: { value: "123456" } });
+  fireEvent.click(screen.getByRole("button", { name: "Generate recovery codes" }));
+
+  expect(await screen.findByText("1. ffos-synthetic-one")).toBeInTheDocument();
+  expect(screen.getByLabelText("I have saved the recovery codes.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Finish enrollment" })).toBeDisabled();
+});
+
+test("funds screen renders commitment warning and blocks unnamed goals", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("link", { name: "Funds" }));
+  expect(await screen.findByRole("heading", { name: "Funds" })).toBeInTheDocument();
+  expect(screen.getByText("Warning: fund commitments exceed funding by $100.00")).toBeInTheDocument();
+  expect(screen.getByText("Pool remaining")).toBeInTheDocument();
+  expect(screen.getByText("Over by $41.10")).toBeInTheDocument();
+  expect(screen.getByText("-$41.10")).toHaveClass("danger-text");
+
+  fireEvent.click(screen.getByRole("button", { name: "Add financial goal" }));
+  expect(screen.getByRole("button", { name: "Save financial goal" })).toBeDisabled();
+  expect(screen.getByText("Financial goal name is required.")).toBeInTheDocument();
+});
+
+test("goal form sends target date and linked fund pool", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("link", { name: "Funds" }));
+  await screen.findByRole("heading", { name: "Funds" });
+  fireEvent.click(screen.getByRole("button", { name: "Add financial goal" }));
+  fireEvent.change(screen.getByLabelText("Goal name"), { target: { value: "Synthetic vacation" } });
+  fireEvent.change(screen.getByLabelText("Target amount"), { target: { value: "2200.00" } });
+  fireEvent.change(screen.getByLabelText("Target date"), { target: { value: "2026-12-31" } });
+  fireEvent.change(screen.getByLabelText("Linked fund pool"), { target: { value: "pool-auto" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save financial goal" }));
+
+  await waitFor(() => {
+    const goalCall = fetchMock.mock.calls.find(
+      ([input, init]) => String(input).includes("/api/financial-goals") && init?.method === "POST",
+    );
+    expect(goalCall).toBeDefined();
+    expect(JSON.parse(String(goalCall?.[1]?.body))).toMatchObject({
+      name: "Synthetic vacation",
+      target_date: "2026-12-31",
+      linked_fund_pool_id: "pool-auto",
+    });
+  });
+});
+
+test("dashboard add snapshot button is disabled for personas without review.decide", async () => {
+  window.localStorage.setItem("family-finance-os.activePersonaKey", "administrator");
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Dashboard" }));
+  expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add snapshot" })).toBeDisabled();
+  expect(screen.getByText("Current persona cannot add net worth snapshots.")).toBeInTheDocument();
+});
+
+test("add financial goal button is disabled for personas without review.decide", async () => {
+  window.localStorage.setItem("family-finance-os.activePersonaKey", "administrator");
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Funds" }));
+  expect(await screen.findByRole("heading", { name: "Funds" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add financial goal" })).toBeDisabled();
+  expect(screen.getByText("Current persona cannot create financial goals.")).toBeInTheDocument();
+});
+
+test("goal form normalizes comma-formatted target amount before submit", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("link", { name: "Funds" }));
+  await screen.findByRole("heading", { name: "Funds" });
+  fireEvent.click(screen.getByRole("button", { name: "Add financial goal" }));
+  fireEvent.change(screen.getByLabelText("Goal name"), { target: { value: "Synthetic goal" } });
+  fireEvent.change(screen.getByLabelText("Target amount"), { target: { value: "129,165.98" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save financial goal" }));
+
+  await waitFor(() => {
+    const goalCall = fetchMock.mock.calls.find(
+      ([input, init]) => String(input).includes("/api/financial-goals") && init?.method === "POST",
+    );
+    expect(goalCall).toBeDefined();
+    expect(JSON.parse(String(goalCall?.[1]?.body))).toMatchObject({
+      name: "Synthetic goal",
+      target_amount: "129165.98",
+    });
+  });
 });
 
 test("shows persistent QA environment marker for synthetic runtime", async () => {
@@ -869,6 +1317,10 @@ test("navigates through the PR8 operator screens", async () => {
 
   render(<App />);
 
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Funds" }));
+  expect(await screen.findByRole("heading", { name: "Funds" })).toBeInTheDocument();
+
   fireEvent.click(screen.getByRole("link", { name: "Sources" }));
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
@@ -900,6 +1352,7 @@ test("sources screen validates and accepts import batches from the browser", asy
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Sources" }));
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
@@ -932,6 +1385,7 @@ test("sources screen shows structured backend reasons when import acceptance is 
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Sources" }));
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
@@ -963,6 +1417,7 @@ test("sources screen voids an upload with confirmation and optional file destruc
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Sources" }));
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
@@ -1005,6 +1460,7 @@ test("sources upload sends selected source profile with the file", async () => {
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Sources" }));
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   await waitFor(() => expect(screen.getAllByText("Alliant Savings").length).toBeGreaterThan(0));
@@ -1040,6 +1496,7 @@ test("validation screen clears acknowledged findings from the default open queue
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Validation Issues" }));
   expect(await screen.findByRole("heading", { name: "Validation Issues" })).toBeInTheDocument();
   expect(await screen.findByText("schema_mismatch")).toBeInTheDocument();
@@ -1078,6 +1535,7 @@ test("review controls are labelled, focusable, and save append-only decisions", 
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Review" }));
   expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
 
@@ -1122,6 +1580,7 @@ test("review save approves unchanged category as a reviewed decision", async () 
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Review" }));
   expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
 
@@ -1156,6 +1615,7 @@ test("blocked validation filter selects blocked transaction and explains review 
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Review" }));
   expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
 
@@ -1167,11 +1627,76 @@ test("blocked validation filter selects blocked transaction and explains review 
   expect(screen.getByRole("button", { name: "Resolve validation first" })).toBeDisabled();
 });
 
+test("split editor balances allocation rows and saves from review", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Review" }));
+  expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Open split editor" }));
+
+  expect(await screen.findByRole("heading", { name: "Split transaction" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Transaction amount")).toHaveValue("12.34");
+  expect(screen.getByText("Imported row unchanged and remains linked")).toBeInTheDocument();
+  expect(screen.getByText("Receipt lines enrich this transaction only after explicit promotion.")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Split amount 1"), { target: { value: "5.00" } });
+  expect(screen.getByText("Remainder")).toBeInTheDocument();
+  expect(screen.getByText("$7.34")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save split" })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "+ Add allocation line" }));
+  fireEvent.change(screen.getByLabelText("Split amount 2"), { target: { value: "7.34" } });
+  fireEvent.change(screen.getByLabelText("Split category 2"), { target: { value: "utilities" } });
+
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save split" })).not.toBeDisabled());
+  fireEvent.click(screen.getByRole("button", { name: "Save split" }));
+
+  await waitFor(() => {
+    const splitSaveCall = fetchMock.mock.calls.find(
+      ([input, init]) => pathFor(input) === "/api/transactions/tx-1/allocations" && init?.method === "PUT",
+    );
+    expect(splitSaveCall).toBeTruthy();
+    expect(JSON.parse(String(splitSaveCall?.[1]?.body))).toMatchObject({
+      actor: "owner",
+      lines: [
+        { amount: "5.00", category_id: "category-groceries" },
+        { amount: "7.34", category_id: "category-utilities" },
+      ],
+    });
+  });
+  expect(await screen.findByText("Split saved")).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([input]) => pathFor(input) === "/api/funds/summary")).toBe(true);
+});
+
+test("transactions screen can launch and reset the split editor", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Transactions" }));
+  expect(await screen.findByRole("heading", { name: "Transactions" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Split selected transaction" }));
+  expect(await screen.findByRole("heading", { name: "Split transaction" })).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Split amount 1"), { target: { value: "5.00" } });
+  expect(screen.getByText("$7.34")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+  expect(screen.getByLabelText("Split amount 1")).toHaveValue("12.34");
+  expect(screen.getByText("Balanced - ready to save")).toBeInTheDocument();
+});
+
 test("reports screen runs artifacts and close/export actions", async () => {
   const fetchMock = installApiMock();
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Reports" }));
   expect(await screen.findByRole("heading", { name: "Reports & Monthly Close" })).toBeInTheDocument();
   expect(await screen.findByText("Import And Validation Summary")).toBeInTheDocument();
@@ -1219,6 +1744,7 @@ test("settings screen saves source profile sample confirmation with owner note",
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Settings" }));
   expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
   expect(await screen.findByText("Parser sample confirmation needed")).toBeInTheDocument();
@@ -1256,11 +1782,60 @@ test("settings screen saves source profile sample confirmation with owner note",
   });
 });
 
+test("dashboard screen adds a manual net worth snapshot", async () => {
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Dashboard" }));
+  expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Add snapshot" }));
+  expect(await screen.findByRole("heading", { name: "Add net worth snapshot" })).toBeInTheDocument();
+  expect(screen.getByText("Estimates never feed Spendable balance.")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Snapshot date"), { target: { value: "2026-06-30" } });
+  fireEvent.change(screen.getByLabelText("Asset or liability"), { target: { value: "asset" } });
+  fireEvent.change(screen.getByLabelText("Account display name"), { target: { value: "SYNTHETIC Vehicle" } });
+  fireEvent.change(screen.getByLabelText("Institution"), { target: { value: "Garage" } });
+  fireEvent.change(screen.getByLabelText("Net worth category"), { target: { value: "vehicle" } });
+  fireEvent.change(screen.getByLabelText("Balance"), { target: { value: "8000.00" } });
+  fireEvent.change(screen.getByLabelText("Valuation method"), { target: { value: "estimate" } });
+  expect(screen.getByRole("button", { name: "Save net worth snapshot" })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Estimate confidence"), { target: { value: "medium" } });
+  fireEvent.change(screen.getByLabelText("Source notes"), { target: { value: "SYNTHETIC market estimate" } });
+
+  const saveButton = screen.getByRole("button", { name: "Save net worth snapshot" });
+  await waitFor(() => expect(saveButton).not.toBeDisabled());
+  fireEvent.click(saveButton);
+
+  await waitFor(() => {
+    const snapshotCall = fetchMock.mock.calls.find(
+      ([input, init]) => pathFor(input) === "/api/net-worth/snapshots" && init?.method === "POST",
+    );
+    expect(snapshotCall).toBeTruthy();
+    expect(JSON.parse(String(snapshotCall?.[1]?.body))).toMatchObject({
+      actor: "owner",
+      snapshot_date: "2026-06-30",
+      asset_or_liability: "asset",
+      account_name: "SYNTHETIC Vehicle",
+      institution: "Garage",
+      category: "vehicle",
+      balance: "8000.00",
+      valuation_method: "estimate",
+      confidence: "medium",
+      source_notes: "SYNTHETIC market estimate",
+    });
+  });
+  expect(await screen.findByText("Net worth snapshot saved")).toBeInTheDocument();
+});
+
 test("settings screen edits editable database-backed settings with required notes", async () => {
   const fetchMock = installApiMock();
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Settings" }));
   expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
 
@@ -1305,6 +1880,7 @@ test("settings screen defaults to editable friendly settings with defaults and a
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Settings" }));
   expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
 
@@ -1350,6 +1926,7 @@ test("shows collapsible QA permission matrix inside settings for QA runtime", as
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Settings" }));
   expect(await screen.findByText("Permission preview")).toBeInTheDocument();
   const matrix = screen.getByText("Permission preview").closest("details");
@@ -1381,4 +1958,95 @@ test("control plane dropdown opens elevation lightbox requiring purpose selectio
       expect.objectContaining({ method: "POST" }),
     );
   });
+});
+
+const contributorActorsPayload = {
+  ...actorsPayload,
+  selectable_personas: [
+    ...actorsPayload.selectable_personas,
+    { persona_key: "finance_contributor", persona_label: "Finance Contributor", group_keys: ["finance_contributor"] },
+  ],
+};
+
+test("top rail orders actor and persona before control plane", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  const actorGroup = screen.getByLabelText("Active local actor");
+  const selects = within(actorGroup).getAllByRole("combobox");
+  expect(selects[0]).toHaveAccessibleName("Actor");
+  expect(selects[1]).toHaveAccessibleName("Persona");
+  expect(selects[2]).toHaveAccessibleName("Control plane mode");
+});
+
+test("scan inbox reports completion when inbox is empty", async () => {
+  installApiMock({ inboxScan: { import_batches: [] } });
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Sources" }));
+  expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Scan inbox" }));
+  expect(await screen.findByText("Inbox scan complete — no files in inbox")).toBeInTheDocument();
+});
+
+test("scan inbox reports completion when batches are unchanged", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Sources" }));
+  expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Scan inbox" }));
+  expect(await screen.findByText("Inbox scan complete — 1 import batch in inbox (no new files)")).toBeInTheDocument();
+});
+
+test("review save decision uses disabled styling when form is invalid", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Review" }));
+  expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Approved category"), { target: { value: "__other__" } });
+  const saveButton = screen.getByRole("button", { name: "Save decision" });
+  expect(saveButton).toBeDisabled();
+  expect(saveButton).toHaveClass("primary-button");
+});
+
+test("contributor persona sees submit suggestion only on review", async () => {
+  window.localStorage.setItem("family-finance-os.activePersonaKey", "finance_contributor");
+  installApiMock({ actors: contributorActorsPayload });
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Review" }));
+  expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Save decision" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Submit suggestion" })).toBeInTheDocument();
+});
+
+test("administrator persona hides review navigation and redirects away from review", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Review" }));
+  expect(await screen.findByRole("heading", { name: "Ledger Review" })).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Persona"), { target: { value: "administrator" } });
+
+  await waitFor(() => expect(screen.queryByRole("link", { name: "Review" })).not.toBeInTheDocument());
+  expect(screen.queryByRole("heading", { name: "Ledger Review" })).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Home" })).toBeInTheDocument();
 });

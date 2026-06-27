@@ -10,6 +10,7 @@ from family_finance_os.ledger_normalization import list_transactions
 from family_finance_os.models import Artifact, ImportBatch, MonthlyClose, Setting, SourceFile, ValidationFinding
 from family_finance_os.reporting import close_readiness
 from family_finance_os.source_profiles import list_source_profiles
+from family_finance_os.spendable import compute_spendable
 
 
 def operator_summary_payload(
@@ -36,6 +37,7 @@ def operator_summary_payload(
         readiness=close_readiness(session),
         latest_monthly_close=latest_monthly_close,
     )
+    spendable = compute_spendable(session)
 
     return {
         "runtime": runtime,
@@ -44,6 +46,7 @@ def operator_summary_payload(
         "validation": validation_summary,
         "review": review_summary,
         "monthly_close": monthly_close,
+        "spendable": spendable,
         "artifacts": {
             "generated_count": len(artifacts),
             "status": "available" if artifacts else "none",
@@ -57,6 +60,7 @@ def operator_summary_payload(
             review=review_summary,
             sources=source_summary,
             monthly_close=monthly_close,
+            spendable=spendable,
         ),
     }
 
@@ -207,6 +211,7 @@ def _next_action(
     review: dict[str, Any],
     sources: dict[str, Any],
     monthly_close: dict[str, Any],
+    spendable: dict[str, Any],
 ) -> dict[str, str]:
     if latest_import["status"] == "none":
         if sources["required_count"] == 0:
@@ -242,6 +247,22 @@ def _next_action(
         return {
             "code": "confirm_source_profile_samples",
             "label": "Confirm source profile samples",
+        }
+    spendable_warning_codes = {warning["code"] for warning in spendable["warnings"]}
+    if "negative_spendable" in spendable_warning_codes:
+        return {
+            "code": "negative_spendable",
+            "label": "Review Spendable balance blockers",
+        }
+    if "reserved_goals_exceed_liquid" in spendable_warning_codes:
+        return {
+            "code": "reserved_goals_exceed_liquid",
+            "label": "Review reserved goal balance",
+        }
+    if "missing_fund_commitments" in spendable_warning_codes:
+        return {
+            "code": "missing_fund_commitments",
+            "label": "Complete Fund commitments",
         }
     if monthly_close["status"] == "final":
         return {

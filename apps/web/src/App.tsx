@@ -22,33 +22,50 @@ import {
   confirmSourceProfileSample,
   convertSuggestionToApproval,
   createCategory,
+  createDevBypassSession,
+  createFinancialGoal,
+  createNetWorthSnapshot,
   createSuggestion,
   dismissSuggestion,
+  enrollOwner,
   enterElevatedMode,
   exitElevatedMode,
   fetchApprovalRequests,
+  fetchAuthStatus,
   fetchElevatedModeStatus,
+  fetchFundsSummary,
+  fetchNetWorthSummary,
   fetchOperatorSummary,
+  buildAnalystPack,
   createAdvisorExport,
   draftMonthlyClose,
+  fetchDashboardCashflow,
+  fetchDashboardCategorySpend,
+  fetchDashboardNetWorth,
+  fetchDashboardPoolProgress,
+  fetchDashboardSummary,
   fetchArtifacts,
   fetchActors,
   fetchCategories,
   fetchEffectivePermission,
   fetchSettings,
   fetchSuggestions,
+  fetchTransactionAllocations,
   fetchTransactionDetail,
   fetchTransactions,
   fetchValidationFindings,
   finalizeMonthlyClose,
   formatApiError,
+  loginOwner,
   previewPermission,
   readStoredElevatedSessionId,
   rejectApprovalRequest,
+  recoveryLoginOwner,
   resolveValidationFinding,
   runReports,
   saveCategoryDecision,
   saveReviewStatusDecision,
+  saveTransactionAllocations,
   saveSettingChange,
   scanInbox,
   setElevatedSessionId,
@@ -59,6 +76,7 @@ import {
 } from "./api";
 import "./i18n";
 import {
+  canAccessReviewScreen,
   defaultUIPermissionMap,
   permissionAllows,
   permissionSuggests,
@@ -66,17 +84,23 @@ import {
   UI_PERMISSION_CHECKS,
   type UIPermissionMap,
 } from "./permissions";
+import { reviewDecideActionState } from "./permission-action";
 import type {
   Artifact,
   ActorContext,
   ActorsPayload,
   ApprovalRequest,
+  AuthStatus,
   Category,
   EffectivePermission,
   ElevatedContext,
   ElevatedModeStatus,
+  FinancialGoal,
+  FundPoolSummary,
+  FundsSummary,
   InboxScan,
   ImportBatch,
+  NetWorthSummary,
   OperatorSummary,
   SettingsPayload,
   SourceProfile,
@@ -88,11 +112,13 @@ import type {
 } from "./types";
 import "./styles.css";
 
-type ScreenKey = "home" | "sources" | "validation" | "review" | "transactions" | "reports" | "settings";
+type ScreenKey = "home" | "dashboard" | "funds" | "sources" | "validation" | "review" | "transactions" | "reports" | "settings";
 type SettingRow = SettingsPayload["settings"][number];
 
 const screens: Array<{ key: ScreenKey; labelKey: string }> = [
   { key: "home", labelKey: "nav.home" },
+  { key: "dashboard", labelKey: "nav.dashboard" },
+  { key: "funds", labelKey: "nav.funds" },
   { key: "sources", labelKey: "nav.sources" },
   { key: "validation", labelKey: "nav.validation" },
   { key: "review", labelKey: "nav.review" },
@@ -104,10 +130,33 @@ const screens: Array<{ key: ScreenKey; labelKey: string }> = [
 const OTHER_LIST_VALUE = "__other__";
 const OTHER_LIST_LABEL = "Other";
 
+function currentMonthString(date = new Date()) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${date.getFullYear()}-${month}`;
+}
+
+function explainNextAction(code: string) {
+  switch (code) {
+    case "resolve_validation_blockers":
+      return "Resolve blocking validation findings before monthly close or reporting.";
+    case "import_required_sources":
+    case "import_missing_sources":
+      return "Import missing source exports so spendable and obligations reflect current balances.";
+    case "review_transactions":
+      return "Review queued transactions so the ledger can move toward monthly close.";
+    case "monthly_close_ready":
+      return "Draft monthly close once the local ledger and validation checks are ready.";
+    case "loading":
+      return "Loading local operating state before recommending the next step.";
+    default:
+      return "Use this next step to keep spendable balance and fund commitments current.";
+  }
+}
+
 const emptySummary: OperatorSummary = {
   runtime: {
     app: "Family Finance OS",
-    version: "0.3.0",
+    version: "0.5.0",
     local_only: true,
     bind_host: "127.0.0.1",
     app_env: "personal",
@@ -156,6 +205,48 @@ const emptySummary: OperatorSummary = {
     code: "loading",
     label: "Load local operating state",
   },
+};
+
+const emptyFundsSummary: FundsSummary = {
+  month: currentMonthString(),
+  spendable: {
+    headline: "0.00",
+    verified_liquid_cash: "0.00",
+    reserved_goal_balance: "0.00",
+    manual_upcoming_obligations: "0.00",
+    provisional_exposure: "0.00",
+    card_obligation_total: "0.00",
+    card_obligation_items: [],
+    includes_provisional: false,
+    warnings: [],
+  },
+  commitment_health: {
+    funded_this_month: "0.00",
+    fund_commitments: "0.00",
+    pool_remaining_total: "0.00",
+    uncommitted: "0.00",
+    overcommitted: false,
+  },
+  pools: [],
+  goals: [],
+  budget_targets: [],
+};
+
+const emptyNetWorthSummary: NetWorthSummary = {
+  include_estimates: false,
+  latest_snapshot_date: null,
+  actual: {
+    assets: "0.00",
+    liabilities: "0.00",
+    net_worth: "0.00",
+  },
+  with_estimates: {
+    assets: "0.00",
+    liabilities: "0.00",
+    net_worth: "0.00",
+    includes_estimates: true,
+  },
+  series: [],
 };
 
 function uniqueExistingListValues(values: Array<string | null | undefined>) {
@@ -412,21 +503,284 @@ export function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <OperatorApp />
+      <AppSessionGate />
     </QueryClientProvider>
+  );
+}
+
+function AppSessionGate() {
+  const authStatusQuery = useQuery({ queryKey: ["auth-status"], queryFn: fetchAuthStatus });
+  const authStatus = authStatusQuery.data;
+
+  if (authStatusQuery.isLoading) {
+    return (
+      <div className="auth-stage">
+        <section className="auth-card" aria-label="Loading authentication">
+          <h1>Family Finance OS</h1>
+          <p className="muted-text">Checking local session…</p>
+        </section>
+      </div>
+    );
+  }
+
+  if (authStatusQuery.isError) {
+    return (
+      <div className="auth-stage">
+        <section className="auth-card" aria-label="Authentication unavailable">
+          <h1>Family Finance OS</h1>
+          <p className="form-status danger-text">{formatApiError(authStatusQuery.error, "Authentication unavailable")}</p>
+        </section>
+      </div>
+    );
+  }
+
+  if (authStatus?.requires_owner_enrollment) {
+    return <AuthStage mode="enroll" authStatus={authStatus} />;
+  }
+
+  if (!authStatus?.authenticated) {
+    return <AuthStage mode="login" authStatus={authStatus ?? null} />;
+  }
+
+  return <OperatorApp />;
+}
+
+function AuthStage({ mode, authStatus }: { mode: "login" | "enroll"; authStatus: AuthStatus | null }) {
+  const queryClient = useQueryClient();
+  const [username, setUsername] = useState("owner");
+  const [displayName, setDisplayName] = useState("Owner");
+  const [passphrase, setPassphrase] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [usingRecoveryLogin, setUsingRecoveryLogin] = useState(false);
+  const [recoveryAcknowledged, setRecoveryAcknowledged] = useState(false);
+  const [totpSecret, setTotpSecret] = useState<string | null>(null);
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [formStatus, setFormStatus] = useState<string | null>(null);
+
+  const loginMutation = useMutation({
+    mutationFn: loginOwner,
+    onSuccess: () => {
+      setFormStatus("Signed in");
+      void queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: (error) => setFormStatus(formatApiError(error, "Sign in failed")),
+  });
+
+  const recoveryLoginMutation = useMutation({
+    mutationFn: recoveryLoginOwner,
+    onSuccess: () => {
+      setFormStatus("Signed in with recovery code");
+      void queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: (error) => setFormStatus(formatApiError(error, "Recovery sign in failed")),
+  });
+
+  const enrollMutation = useMutation({
+    mutationFn: enrollOwner,
+    onSuccess: (body) => {
+      if (body.status === "totp_confirmation_required") {
+        setTotpSecret(body.totp_secret ?? null);
+        setTotpCode("");
+        setFormStatus("Enter the authenticator code to finish owner enrollment");
+        return;
+      }
+      setRecoveryCodes(body.recovery_codes ?? []);
+      setFormStatus("Save these recovery codes before finishing owner enrollment");
+    },
+    onError: (error) => setFormStatus(formatApiError(error, "Owner enrollment failed")),
+  });
+
+  const devBypassMutation = useMutation({
+    mutationFn: createDevBypassSession,
+    onSuccess: () => {
+      setFormStatus("QA dev bypass session started");
+      void queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: (error) => setFormStatus(formatApiError(error, "QA dev bypass failed")),
+  });
+
+  function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (usingRecoveryLogin) {
+      recoveryLoginMutation.mutate({ username, recoveryCode });
+      return;
+    }
+    loginMutation.mutate({ username, passphrase, totpCode });
+  }
+
+  function handleEnrollSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (recoveryCodes.length > 0) {
+      if (!recoveryAcknowledged) {
+        setFormStatus("Save recovery codes before finishing owner enrollment");
+        return;
+      }
+      setFormStatus("Owner enrollment complete");
+      void queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+      return;
+    }
+    enrollMutation.mutate({
+      username,
+      displayName,
+      passphrase,
+      totpConfirmCode: totpCode || "000000",
+      recoveryAcknowledged: Boolean(totpSecret),
+    });
+  }
+
+  const isEnrollment = mode === "enroll";
+  const authPending = loginMutation.isPending || recoveryLoginMutation.isPending || enrollMutation.isPending;
+  const submitDisabled =
+    !username.trim() ||
+    (isEnrollment
+      ? !passphrase || Boolean(totpSecret && !totpCode.trim()) || Boolean(recoveryCodes.length && !recoveryAcknowledged)
+      : usingRecoveryLogin
+        ? !recoveryCode.trim()
+        : !passphrase || !totpCode.trim()) ||
+    authPending;
+  const authSubmitLabel = isEnrollment
+    ? recoveryCodes.length
+      ? "Finish enrollment"
+      : totpSecret
+        ? "Generate recovery codes"
+        : "Continue to authenticator"
+    : usingRecoveryLogin
+      ? "Sign in with recovery code"
+      : "Sign in";
+
+  return (
+    <div className="auth-stage">
+      <div className="auth-stack">
+        {authStatus?.qa_auth_bypass_available ? (
+          <div className="qa-banner" role="status">
+            QA synthetic demo - dev bypass available
+          </div>
+        ) : null}
+        <section className="auth-card" aria-label={mode === "enroll" ? "Owner enrollment" : "Local sign in"}>
+          <div className="auth-brand">
+            <h1>Family Finance OS</h1>
+            <p>{mode === "enroll" ? "First-boot setup - Owner enrollment" : "Local sign in"}</p>
+          </div>
+          <form className="auth-form" onSubmit={isEnrollment ? handleEnrollSubmit : handleLoginSubmit}>
+            <label>
+              Username
+              <input value={username} onChange={(event) => setUsername(event.target.value)} />
+            </label>
+            {isEnrollment ? (
+              <label>
+                Display name
+                <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+              </label>
+            ) : null}
+            {!usingRecoveryLogin ? (
+              <label>
+                Passphrase
+                <input type="password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} />
+              </label>
+            ) : null}
+            {isEnrollment && totpSecret && !recoveryCodes.length ? (
+              <div className="auth-secret-panel">
+                <span>Authenticator manual key</span>
+                <code>{totpSecret}</code>
+              </div>
+            ) : null}
+            {!usingRecoveryLogin && (!isEnrollment || totpSecret) && !recoveryCodes.length ? (
+              <label>
+                Authenticator code (6 digits)
+                <input
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="------"
+                  value={totpCode}
+                  onChange={(event) => setTotpCode(event.target.value)}
+                />
+              </label>
+            ) : null}
+            {usingRecoveryLogin ? (
+              <label>
+                Recovery code
+                <input
+                  autoComplete="one-time-code"
+                  value={recoveryCode}
+                  onChange={(event) => setRecoveryCode(event.target.value)}
+                />
+              </label>
+            ) : null}
+            {isEnrollment && recoveryCodes.length > 0 ? (
+              <label className="checkbox-row inline-checkbox">
+                <input
+                  type="checkbox"
+                  checked={recoveryAcknowledged}
+                  onChange={(event) => setRecoveryAcknowledged(event.target.checked)}
+                />
+                <span>I have saved the recovery codes.</span>
+              </label>
+            ) : null}
+            <button
+              type="submit"
+              className="primary-button"
+              disabled={submitDisabled}
+            >
+              {authSubmitLabel}
+            </button>
+          </form>
+          {!isEnrollment ? (
+            <p className="auth-foot">
+              Lost your device?{" "}
+              <button
+                type="button"
+                className="auth-mini-link"
+                onClick={() => {
+                  setUsingRecoveryLogin((current) => !current);
+                  setFormStatus(null);
+                }}
+              >
+                {usingRecoveryLogin ? "Use authenticator code" : "Use a recovery code"}
+              </button>
+            </p>
+          ) : null}
+          {authStatus?.qa_auth_bypass_available ? (
+            <button
+              type="button"
+              className="danger-button auth-wide-button"
+              onClick={() => devBypassMutation.mutate()}
+              disabled={devBypassMutation.isPending}
+            >
+              Dev bypass (QA only) - synthetic owner
+            </button>
+          ) : null}
+          {recoveryCodes.length > 0 ? (
+            <div className="recovery-codes" aria-label="Recovery codes">
+              <p>Save these one-time recovery codes before continuing.</p>
+              {recoveryCodes.map((code, index) => (
+                <span key={code}>{index + 1}. {code}</span>
+              ))}
+            </div>
+          ) : null}
+          {formStatus ? (
+            <p className={formStatus.includes("failed") ? "form-status danger-text" : "form-status ok-text"}>{formStatus}</p>
+          ) : null}
+          <p className="auth-foot">Local only - 127.0.0.1 - No data leaves device</p>
+        </section>
+      </div>
+    </div>
   );
 }
 
 function OperatorApp() {
   const { t } = useTranslation();
   const [activeScreen, setActiveScreen] = useState<ScreenKey>("home");
+  const [splitReturnScreen, setSplitReturnScreen] = useState<"review" | "transactions" | null>(null);
   const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
   const [activeActorKey, setActiveActorKey] = useState(() => readLocalStorage(ACTIVE_ACTOR_STORAGE_KEY, "owner"));
   const [activePersonaKey, setActivePersonaKey] = useState(() =>
     readLocalStorage(ACTIVE_PERSONA_STORAGE_KEY, "finance_manager"),
   );
+  const [fundsMonth] = useState(() => currentMonthString());
 
   const summaryQuery = useQuery({ queryKey: ["operator-summary"], queryFn: fetchOperatorSummary });
+  const fundsSummaryQuery = useQuery({ queryKey: ["funds-summary", fundsMonth], queryFn: () => fetchFundsSummary(fundsMonth) });
   const actorsQuery = useQuery({ queryKey: ["actors"], queryFn: fetchActors });
   const inboxQuery = useQuery({ queryKey: ["inbox-scan"], queryFn: scanInbox });
   const findingsQuery = useQuery({ queryKey: ["validation-findings"], queryFn: fetchValidationFindings });
@@ -449,6 +803,7 @@ function OperatorApp() {
   });
 
   const summary = summaryQuery.data ?? emptySummary;
+  const fundsSummary = fundsSummaryQuery.data ?? emptyFundsSummary;
   const actors = actorsQuery.data;
   const findings = findingsQuery.data?.findings ?? [];
   const inbox = inboxQuery.data?.import_batches ?? [];
@@ -460,6 +815,8 @@ function OperatorApp() {
   const permissions = permissionsQuery.data ?? defaultUIPermissionMap();
   const elevatedMode = useElevatedMode(operatorActor, operatorActorContext);
   const elevatedModeActive = elevatedMode.active;
+  const reviewPermissionResolved = permissionsQuery.isSuccess;
+  const canAccessReview = !reviewPermissionResolved || canAccessReviewScreen(permissions.review);
   const categories = categoriesQuery.data?.categories ?? [];
   const sourceProfileKey = summary.sources.profiles.map((profile) => profile.source_key).join("|") || "no-source-profiles";
   const selectedTransaction =
@@ -467,44 +824,54 @@ function OperatorApp() {
     transactions.find((transaction) => transaction.id === selectedTransactionId) ??
     null;
 
+  useEffect(() => {
+    if (reviewPermissionResolved && activeScreen === "review" && !canAccessReviewScreen(permissions.review)) {
+      setActiveScreen("home");
+    }
+  }, [activeScreen, reviewPermissionResolved, permissions.review]);
+
   return (
     <div className="app-shell">
-      {summary.runtime.app_env === "qa" ? (
-        <div className="qa-banner" role="status">
-          QA synthetic demo - not real financial data
-        </div>
-      ) : null}
-      <Header
-        summary={summary}
-        appDisplayName={appDisplayName}
-        actors={actors}
-        activeActorKey={operatorActorContext.actor_key}
-        activePersonaKey={operatorActorContext.persona_key ?? "finance_manager"}
-        onActorChange={(value) => {
-          setActiveActorKey(value);
-          writeLocalStorage(ACTIVE_ACTOR_STORAGE_KEY, value);
-        }}
-        onPersonaChange={(value) => {
-          setActivePersonaKey(value);
-          writeLocalStorage(ACTIVE_PERSONA_STORAGE_KEY, value);
-        }}
-        elevation={{
-          status: elevatedMode.status,
-          active: elevatedModeActive,
-          countdown: elevatedMode.countdown,
-          operatorActor,
-          operatorActorContext,
-          enterMutation: elevatedMode.enterMutation,
-          exitMutation: elevatedMode.exitMutation,
-          isLoading: elevatedMode.isLoading,
-          isError: elevatedMode.isError,
-          error: elevatedMode.error,
-        }}
-      />
+      <div className="app-chrome">
+        {summary.runtime.app_env === "qa" ? (
+          <div className="qa-banner" role="status">
+            QA synthetic demo - not real financial data
+          </div>
+        ) : null}
+        <Header
+          summary={summary}
+          appDisplayName={appDisplayName}
+          actors={actors}
+          activeActorKey={operatorActorContext.actor_key}
+          activePersonaKey={operatorActorContext.persona_key ?? "finance_manager"}
+          onActorChange={(value) => {
+            setActiveActorKey(value);
+            writeLocalStorage(ACTIVE_ACTOR_STORAGE_KEY, value);
+          }}
+          onPersonaChange={(value) => {
+            setActivePersonaKey(value);
+            writeLocalStorage(ACTIVE_PERSONA_STORAGE_KEY, value);
+          }}
+          elevation={{
+            status: elevatedMode.status,
+            active: elevatedModeActive,
+            countdown: elevatedMode.countdown,
+            operatorActor,
+            operatorActorContext,
+            enterMutation: elevatedMode.enterMutation,
+            exitMutation: elevatedMode.exitMutation,
+            isLoading: elevatedMode.isLoading,
+            isError: elevatedMode.isError,
+            error: elevatedMode.error,
+          }}
+        />
+      </div>
 
       <div className="workspace">
         <nav className="sidebar" aria-label="Primary">
-          {screens.map((screen) => (
+          {screens
+            .filter((screen) => screen.key !== "review" || canAccessReview)
+            .map((screen) => (
             <a
               key={screen.key}
               href={`#${screen.key}`}
@@ -520,8 +887,39 @@ function OperatorApp() {
         </nav>
 
         <main className="content">
-          {activeScreen === "home" ? <HomeScreen summary={summary} /> : null}
-          {activeScreen === "sources" ? (
+          {splitReturnScreen && selectedTransaction ? (
+            <SplitEditorScreen
+              selectedTransaction={selectedTransaction}
+              categories={categories}
+              operatorActor={operatorActor}
+              operatorActorContext={operatorActorContext}
+              canSaveSplits={permissionAllows(permissions.review) && !elevatedModeActive}
+              onCancel={() => setSplitReturnScreen(null)}
+              onSaved={() => setSplitReturnScreen(splitReturnScreen)}
+            />
+          ) : null}
+          {!splitReturnScreen && activeScreen === "home" ? (
+            <HomeScreen summary={summary} fundsSummary={fundsSummary} onOpenFunds={() => setActiveScreen("funds")} />
+          ) : null}
+          {!splitReturnScreen && activeScreen === "dashboard" ? (
+            <DashboardScreen
+              month={currentMonthString()}
+              operatorActor={operatorActor}
+              operatorActorContext={operatorActorContext}
+              canReviewDecide={permissionAllows(permissions.review)}
+              elevatedModeActive={elevatedModeActive}
+            />
+          ) : null}
+          {!splitReturnScreen && activeScreen === "funds" ? (
+            <FundsScreen
+              fundsSummary={fundsSummary}
+              operatorActor={operatorActor}
+              operatorActorContext={operatorActorContext}
+              canReviewDecide={permissionAllows(permissions.review)}
+              elevatedModeActive={elevatedModeActive}
+            />
+          ) : null}
+          {!splitReturnScreen && activeScreen === "sources" ? (
             <SourcesScreen
               key={sourceProfileKey}
               profiles={summary.sources.profiles}
@@ -532,7 +930,7 @@ function OperatorApp() {
               elevatedModeActive={elevatedModeActive}
             />
           ) : null}
-          {activeScreen === "validation" ? (
+          {!splitReturnScreen && activeScreen === "validation" ? (
             <ValidationScreen
               findings={findings}
               operatorActor={operatorActor}
@@ -540,7 +938,7 @@ function OperatorApp() {
               elevatedModeActive={elevatedModeActive}
             />
           ) : null}
-          {activeScreen === "review" ? (
+          {!splitReturnScreen && activeScreen === "review" ? (
             <ReviewScreen
               transactions={transactions}
               selectedTransaction={selectedTransaction}
@@ -553,29 +951,32 @@ function OperatorApp() {
               elevatedModeActive={elevatedModeActive}
               approvalModeEnabled={settingBoolean(settings, "approval", "approval.approval_mode_enabled")}
               onSelectTransaction={setSelectedTransactionId}
+              onOpenSplitEditor={() => setSplitReturnScreen("review")}
             />
           ) : null}
-          {activeScreen === "transactions" ? (
+          {!splitReturnScreen && activeScreen === "transactions" ? (
             <TransactionsScreen
               transactions={transactions}
               selectedTransaction={selectedTransaction}
               selectedTransactionId={selectedTransactionId}
               onSelectTransaction={setSelectedTransactionId}
+              onOpenSplitEditor={() => setSplitReturnScreen("transactions")}
             />
           ) : null}
-          {activeScreen === "reports" ? (
+          {!splitReturnScreen && activeScreen === "reports" ? (
             <ReportsScreen
               summary={summary}
               artifacts={artifactsQuery.data?.artifacts ?? []}
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
               canRunReports={permissionAllows(permissions.reports) && !elevatedModeActive}
-              canRunMonthlyClose={permissionAllows(permissions.monthlyClose) && !elevatedModeActive}
+              canRunMonthlyClose={permissionAllows(permissions.monthlyClose)}
               canCreateExports={permissionAllows(permissions.exports) && !elevatedModeActive}
               elevatedModeActive={elevatedModeActive}
+              elevatedModeStatus={elevatedMode.status ?? null}
             />
           ) : null}
-          {activeScreen === "settings" ? (
+          {!splitReturnScreen && activeScreen === "settings" ? (
             <SettingsScreen
               settings={settings}
               runtime={summary.runtime}
@@ -633,7 +1034,6 @@ function Header({
         <h1>{appDisplayName}</h1>
       </div>
       <div className="actor-controls" aria-label="Active local actor">
-        <ElevationControls {...elevation} />
         <label>
           Actor
           <select value={activeActorKey} onChange={(event) => onActorChange(event.target.value)}>
@@ -656,6 +1056,7 @@ function Header({
             )}
           </select>
         </label>
+        <ElevationControls {...elevation} />
       </div>
       <div className="status-strip" aria-label="Runtime status">
         {elevation.active ? (
@@ -1006,19 +1407,108 @@ function PermissionPreviewPanel({ actors }: { actors?: ActorsPayload }) {
   );
 }
 
-function HomeScreen({ summary }: { summary: OperatorSummary }) {
+function HomeScreen({
+  summary,
+  fundsSummary,
+  onOpenFunds,
+}: {
+  summary: OperatorSummary;
+  fundsSummary: FundsSummary;
+  onOpenFunds: () => void;
+}) {
+  const [includeProvisional, setIncludeProvisional] = useState(false);
+  const spendable = fundsSummary.spendable;
+  const displayedSpendable = includeProvisional
+    ? decimalSubtract(spendable.headline, spendable.provisional_exposure)
+    : spendable.headline;
+  const nextActionExplanation = explainNextAction(summary.next_action.code);
   return (
     <section className="screen" aria-labelledby="home-heading">
       <div className="screen-heading split-heading">
         <div>
           <p className="product-label">Current operating state</p>
           <h2 id="home-heading">Home</h2>
+          <p className="screen-sub">
+            Ledger freshness: {summary.sources.imported_source_keys.length} source(s) loaded - Validation:{" "}
+            {summary.validation.open_blocking} blocking, {summary.validation.open_warning} warning(s)
+          </p>
         </div>
         <div className="next-action">
           <span>Next action</span>
           <strong>{summary.next_action.label}</strong>
+          <p>{nextActionExplanation}</p>
         </div>
       </div>
+
+      <section className="work-panel headline-panel" aria-label="Spendable balance">
+        <span className="headline-label">Spendable balance</span>
+        <div className="headline-amount" aria-live="polite">{formatMoney(displayedSpendable)}</div>
+        <div className="breakdown">
+          <span>Verified liquid cash {formatMoney(spendable.verified_liquid_cash)}</span>
+          <span className="op">-</span>
+          <span>Reserved goal balance {formatMoney(spendable.reserved_goal_balance)}</span>
+          <span className="op">-</span>
+          <span>Manual obligations {formatMoney(spendable.manual_upcoming_obligations)}</span>
+          {includeProvisional ? (
+            <>
+              <span className="op">-</span>
+              <span>Provisional exposure {formatMoney(spendable.provisional_exposure)}</span>
+            </>
+          ) : null}
+        </div>
+        <p className="headline-note">
+          {includeProvisional
+            ? `Includes ${formatMoney(spendable.provisional_exposure)} provisional exposure for scenario review.`
+            : `Excludes ${formatMoney(spendable.provisional_exposure)} provisional exposure (unreviewed outflows).`}
+        </p>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={includeProvisional}
+            onChange={(event) => setIncludeProvisional(event.target.checked)}
+          />
+          Include provisional exposure ({formatMoney(spendable.provisional_exposure)} unreviewed)
+        </label>
+      </section>
+
+      <section className="work-panel" aria-label="Closed-loop checkpoint">
+        <div className="screen-heading split-heading panel-heading">
+          <h3>Where your money is committed</h3>
+          <button type="button" onClick={onOpenFunds}>Open Funds</button>
+        </div>
+        <div className="metric-grid">
+          <Metric
+            label="Fund commitments this month"
+            value={formatMoney(fundsSummary.commitment_health.fund_commitments)}
+            detail={`Funded this month ${formatMoney(fundsSummary.commitment_health.funded_this_month)}`}
+          />
+          <Metric
+            label="Pool remaining (all pools)"
+            value={formatMoney(fundsSummary.commitment_health.pool_remaining_total)}
+            detail={fundsSummary.commitment_health.overcommitted ? "Commitments exceed funding" : "Commitments fit funding"}
+            tone={fundsSummary.commitment_health.overcommitted ? "warn" : "ok"}
+          />
+          <Metric
+            label="Reserved goal balance"
+            value={formatMoney(spendable.reserved_goal_balance)}
+            detail={`${fundsSummary.goals.length} financial goal(s)`}
+          />
+        </div>
+      </section>
+
+      <section className="work-panel">
+        <h3>Card obligation (not yet netted)</h3>
+        <p className="section-note">Total card obligation: {formatMoney(spendable.card_obligation_total)}</p>
+        <DataTable
+          data={spendable.card_obligation_items}
+          emptyLabel="No card obligation items available."
+          columns={[
+            { header: "Card", accessorKey: "card" },
+            { header: "Owed", cell: ({ row }) => formatMoney(row.original.owed) },
+            { header: "Note", accessorKey: "note" },
+          ]}
+        />
+      </section>
 
       <div className="metric-grid" aria-label="Operator overview">
         <Metric label="Latest import" value={formatStatus(summary.latest_import.status)} detail={summary.latest_import.source_key ?? "No source loaded"} />
@@ -1028,23 +1518,244 @@ function HomeScreen({ summary }: { summary: OperatorSummary }) {
         <Metric label="Monthly close" value={summary.monthly_close.ready_for_final ? "Ready" : "Not ready"} detail={summary.monthly_close.ready_for_draft ? "Draft allowed" : "Draft blocked"} tone={summary.monthly_close.ready_for_final ? "ok" : "warn"} />
         <Metric label="Data root" value={summary.runtime.data_root.exists ? "Available" : "Missing"} detail={summary.runtime.data_root.path} tone={summary.runtime.data_root.exists ? "ok" : "danger"} />
       </div>
+    </section>
+  );
+}
 
-      <section className="work-panel" aria-label="Closed-loop checkpoint">
-        <h3>Closed-loop checkpoint</h3>
-        <div className="step-grid">
-          {[
-            ["Source", summary.latest_import.status !== "none"],
-            ["Validation", summary.validation.open_blocking === 0],
-            ["Review", summary.review.unreviewed === 0 && summary.review.total_transactions > 0],
-            ["Reports", Boolean(summary.artifacts?.generated_count)],
-            ["Close", summary.monthly_close.ready_for_final],
-          ].map(([label, complete]) => (
-            <span key={label as string} className={complete ? "step done" : "step"}>
-              {label as string}
-            </span>
-          ))}
+function FundsScreen({
+  fundsSummary,
+  operatorActor,
+  operatorActorContext,
+  canReviewDecide,
+  elevatedModeActive,
+}: {
+  fundsSummary: FundsSummary;
+  operatorActor: string;
+  operatorActorContext: ActorContext;
+  canReviewDecide: boolean;
+  elevatedModeActive: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const goalAction = reviewDecideActionState(canReviewDecide, elevatedModeActive, {
+    denied: "Current persona cannot create financial goals.",
+    elevated: "Financial goal changes are disabled while elevated mode is active.",
+  });
+  const [goalName, setGoalName] = useState("");
+  const [goalType, setGoalType] = useState("purchase");
+  const [targetAmount, setTargetAmount] = useState("");
+  const [targetDate, setTargetDate] = useState("");
+  const [linkedFundPoolId, setLinkedFundPoolId] = useState("");
+  const [reservedBalance, setReservedBalance] = useState("0.00");
+  const [goalStatus, setGoalStatus] = useState<string | null>(null);
+  const [goalModalOpen, setGoalModalOpen] = useState(false);
+  const createGoalMutation = useMutation({
+    mutationFn: createFinancialGoal,
+    onSuccess: () => {
+      setGoalName("");
+      setTargetAmount("");
+      setTargetDate("");
+      setLinkedFundPoolId("");
+      setReservedBalance("0.00");
+      setGoalStatus("Financial goal saved");
+      setGoalModalOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["funds-summary"] });
+    },
+    onError: (error) => setGoalStatus(formatApiError(error, "Financial goal save failed")),
+  });
+  const goalNameMissing = !goalName.trim();
+
+  function handleGoalSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!goalAction.allowed) {
+      return;
+    }
+    if (goalNameMissing) {
+      setGoalStatus("Financial goal name is required");
+      return;
+    }
+    const normalizedTargetAmount = normalizeMoneyInput(targetAmount || "0");
+    const normalizedReservedBalance = normalizeMoneyInput(reservedBalance || "0");
+    createGoalMutation.mutate({
+      name: goalName,
+      goalType,
+      targetAmount: normalizedTargetAmount,
+      targetDate,
+      linkedFundPoolId,
+      reservedBalance: normalizedReservedBalance,
+      actor: operatorActor,
+      actorContext: operatorActorContext,
+    });
+  }
+
+  return (
+    <section className="screen" aria-labelledby="funds-heading">
+      <div className="screen-heading split-heading">
+        <div>
+          <h2 id="funds-heading">Funds</h2>
+          <p className="screen-sub">Fund pools, commitments, and pool remaining</p>
+        </div>
+      </div>
+
+      {fundsSummary.commitment_health.overcommitted ? (
+        <div className="warn-band" role="status">
+          <strong>
+            Warning: fund commitments exceed funding by{" "}
+            {formatMoney(absMoney(fundsSummary.commitment_health.uncommitted))}
+          </strong>
+          <p>
+            Commitments {formatMoney(fundsSummary.commitment_health.fund_commitments)} vs funded{" "}
+            {formatMoney(fundsSummary.commitment_health.funded_this_month)}. Reduce a commitment or add funding. Nothing is blocked,
+            but pool remaining assumes full funding.
+          </p>
+        </div>
+      ) : null}
+
+      <section className="work-panel">
+        <h3>Commitment health</h3>
+        <div className="metric-grid">
+          <Metric label="Funded this month" value={formatMoney(fundsSummary.commitment_health.funded_this_month)} detail={fundsSummary.month} />
+          <Metric label="Fund commitments" value={formatMoney(fundsSummary.commitment_health.fund_commitments)} detail="Active fund commitments" />
+          <Metric
+            label={fundsSummary.commitment_health.overcommitted ? "Overcommitted" : "Uncommitted"}
+            value={formatMoney(fundsSummary.commitment_health.uncommitted)}
+            detail={fundsSummary.commitment_health.overcommitted ? "Review commitment levels" : "OK: commitments fit funding"}
+            tone={fundsSummary.commitment_health.overcommitted ? "danger" : "ok"}
+          />
         </div>
       </section>
+
+      <section className="work-panel">
+        <h3>Pools</h3>
+        <DataTable<FundPoolSummary>
+          data={fundsSummary.pools}
+          emptyLabel="No fund pools configured."
+          columns={[
+            { header: "Pool", accessorKey: "name" },
+            { header: "Commitment", cell: ({ row }) => formatMoney(row.original.commitment) },
+            { header: "Spent", cell: ({ row }) => formatMoney(row.original.spent) },
+            {
+              header: "Pool remaining",
+              cell: ({ row }) => (
+                <span className={Number(row.original.pool_remaining) < 0 ? "danger-text" : undefined}>
+                  {formatMoney(row.original.pool_remaining)}
+                </span>
+              ),
+            },
+            {
+              header: "Status",
+              cell: ({ row }) =>
+                row.original.status.startsWith("Over") ? (
+                  <span className="status-badge danger">{row.original.status}</span>
+                ) : (
+                  row.original.status
+                ),
+            },
+          ]}
+        />
+      </section>
+
+      <section className="work-panel">
+        <div className="screen-heading split-heading panel-heading">
+          <h3>Reserved goal balance</h3>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={!goalAction.allowed}
+            title={goalAction.disabledTitle}
+            onClick={() => {
+              if (goalAction.allowed) {
+                setGoalModalOpen(true);
+              }
+            }}
+          >
+            Add financial goal
+          </button>
+        </div>
+        {goalAction.blockedNotice ? <p className="form-status warn-text">{goalAction.blockedNotice}</p> : null}
+        <DataTable<FinancialGoal>
+          data={fundsSummary.goals}
+          emptyLabel="No financial goals configured."
+          columns={[
+            { header: "Goal", accessorKey: "name" },
+            { header: "Target", cell: ({ row }) => formatMoney(row.original.target_amount) },
+            { header: "Reserved", cell: ({ row }) => formatMoney(row.original.reserved_balance) },
+            { header: "Remaining to target", cell: ({ row }) => formatMoney(row.original.remaining_to_target) },
+          ]}
+        />
+        {goalStatus && !goalModalOpen ? (
+          <p className={goalStatus.includes("failed") || goalStatus.includes("required") ? "form-status danger-text" : "form-status ok-text"}>
+            {goalStatus}
+          </p>
+        ) : null}
+      </section>
+
+      {goalModalOpen ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setGoalModalOpen(false);
+            }
+          }}
+        >
+          <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="goal-modal-title">
+            <h3 id="goal-modal-title">Add financial goal</h3>
+            <form className="modal-form settings-form" onSubmit={handleGoalSubmit}>
+              <label>
+                Goal name
+                <input value={goalName} onChange={(event) => setGoalName(event.target.value)} aria-invalid={goalNameMissing} />
+              </label>
+              <label>
+                Goal type
+                <select value={goalType} onChange={(event) => setGoalType(event.target.value)}>
+                  <option value="emergency">Emergency</option>
+                  <option value="sinking_fund">Sinking fund</option>
+                  <option value="purchase">Purchase</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>
+                Target amount
+                <input value={targetAmount} onChange={(event) => setTargetAmount(event.target.value)} placeholder="2000.00" />
+              </label>
+              <label>
+                Target date
+                <input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
+              </label>
+              <label>
+                Linked fund pool
+                <select value={linkedFundPoolId} onChange={(event) => setLinkedFundPoolId(event.target.value)}>
+                  <option value="">No linked pool</option>
+                  {fundsSummary.pools.map((pool) => (
+                    <option key={pool.id} value={pool.id}>
+                      {pool.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Reserved balance
+                <input value={reservedBalance} onChange={(event) => setReservedBalance(event.target.value)} />
+              </label>
+              {goalNameMissing ? <p className="form-status danger-text">Financial goal name is required.</p> : null}
+              {goalStatus && goalModalOpen ? (
+                <p className={goalStatus.includes("failed") || goalStatus.includes("required") ? "form-status danger-text" : "form-status ok-text"}>
+                  {goalStatus}
+                </p>
+              ) : null}
+              <div className="button-row">
+                <button type="button" onClick={() => setGoalModalOpen(false)} disabled={createGoalMutation.isPending}>
+                  Cancel
+                </button>
+                <button type="submit" className="primary-button" disabled={goalNameMissing || createGoalMutation.isPending || !goalAction.allowed}>
+                  Save financial goal
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1068,6 +1779,8 @@ function SourcesScreen({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedUploadSourceKey, setSelectedUploadSourceKey] = useState(profiles[0]?.source_key ?? "");
   const [batchActionStatus, setBatchActionStatus] = useState<string | null>(null);
+  const [scanStatus, setScanStatus] = useState<string | null>(null);
+  const [scanPending, setScanPending] = useState(false);
   const [voidTarget, setVoidTarget] = useState<ImportBatch | null>(null);
   const [voidReason, setVoidReason] = useState("");
   const [destroyStoredFiles, setDestroyStoredFiles] = useState(false);
@@ -1181,6 +1894,32 @@ function SourcesScreen({
     });
   }
 
+  async function handleScanInbox() {
+    setScanPending(true);
+    setScanStatus(null);
+    const previousBatchIds = new Set(inbox.map((batch) => batch.id));
+    try {
+      const result = await queryClient.fetchQuery({ queryKey: ["inbox-scan"], queryFn: scanInbox });
+      const batches = result.import_batches;
+      if (batches.length === 0) {
+        setScanStatus("Inbox scan complete — no files in inbox");
+        return;
+      }
+      const newBatchCount = batches.filter((batch) => !previousBatchIds.has(batch.id)).length;
+      const batchLabel = batches.length === 1 ? "batch" : "batches";
+      if (newBatchCount > 0) {
+        const newLabel = newBatchCount === 1 ? "batch" : "batches";
+        setScanStatus(`Inbox scan complete — ${newBatchCount} new import ${newLabel} found (${batches.length} total)`);
+        return;
+      }
+      setScanStatus(`Inbox scan complete — ${batches.length} import ${batchLabel} in inbox (no new files)`);
+    } catch (error) {
+      setScanStatus(formatApiError(error, "Inbox scan failed"));
+    } finally {
+      setScanPending(false);
+    }
+  }
+
   return (
     <section className="screen" aria-labelledby="sources-heading">
       <div className="screen-heading split-heading">
@@ -1189,9 +1928,21 @@ function SourcesScreen({
           <h2 id="sources-heading">Sources</h2>
         </div>
         <div className="button-row">
-          <button type="button" onClick={() => void queryClient.invalidateQueries({ queryKey: ["inbox-scan"] })}>
-            Scan inbox
+          <button type="button" onClick={() => void handleScanInbox()} disabled={scanPending}>
+            {scanPending ? "Scanning…" : "Scan inbox"}
           </button>
+          {scanStatus ? (
+            <p
+              className={
+                scanStatus.startsWith("Inbox scan complete")
+                  ? "form-status ok-text"
+                  : "form-status danger-text"
+              }
+              aria-live="polite"
+            >
+              {scanStatus}
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -1559,6 +2310,7 @@ function ReviewScreen({
   elevatedModeActive,
   approvalModeEnabled,
   onSelectTransaction,
+  onOpenSplitEditor,
 }: {
   transactions: Transaction[];
   selectedTransaction: TransactionDetail | Transaction | null;
@@ -1571,6 +2323,7 @@ function ReviewScreen({
   elevatedModeActive: boolean;
   approvalModeEnabled: boolean;
   onSelectTransaction: (id: string) => void;
+  onOpenSplitEditor: () => void;
 }) {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
@@ -1855,9 +2608,16 @@ function ReviewScreen({
 
   return (
     <section className="screen" aria-labelledby="review-heading">
-      <div className="screen-heading">
-        <p className="product-label">Controlled decision queue</p>
-        <h2 id="review-heading">Ledger Review</h2>
+      <div className="screen-heading split-heading">
+        <div>
+          <p className="product-label">Controlled decision queue</p>
+          <h2 id="review-heading">Ledger Review</h2>
+        </div>
+        <div className="action-row">
+          <button type="button" onClick={onOpenSplitEditor} disabled={!selectedTransaction}>
+            Open split editor
+          </button>
+        </div>
       </div>
 
       <div className="filters" aria-label="Review filters">
@@ -2001,19 +2761,15 @@ function ReviewScreen({
             </p>
           ) : null}
 
-          {reviewSuggestionAllowed && !canSaveReview ? (
-            <p className="form-status warn-text">
-              Contributor persona can suggest review changes, but direct save is disabled for this persona.
-            </p>
-          ) : null}
-
           {elevatedModeActive ? (
             <p className="form-status warn-text">Review decisions are disabled while elevated mode is active.</p>
           ) : null}
 
-          <button type="submit" disabled={saveDecisionDisabled}>
-            {selectedTransactionBlocked ? t("review.resolveValidationFirst") : t("review.saveDecision")}
-          </button>
+          {canSaveReview ? (
+            <button type="submit" className="primary-button" disabled={saveDecisionDisabled}>
+              {selectedTransactionBlocked ? t("review.resolveValidationFirst") : t("review.saveDecision")}
+            </button>
+          ) : null}
           {reviewSuggestionAllowed && !canSaveReview ? (
             <button type="button" disabled={submitSuggestionDisabled} onClick={() => suggestionMutation.mutate()}>
               Submit suggestion
@@ -2026,16 +2782,284 @@ function ReviewScreen({
   );
 }
 
+type SplitEditorLine = {
+  localId: string;
+  amount: string;
+  categoryKey: string;
+  memo: string;
+};
+
+function SplitEditorScreen({
+  selectedTransaction,
+  categories,
+  operatorActor,
+  operatorActorContext,
+  canSaveSplits,
+  onCancel,
+  onSaved,
+}: {
+  selectedTransaction: TransactionDetail | Transaction;
+  categories: Category[];
+  operatorActor: string;
+  operatorActorContext: ActorContext;
+  canSaveSplits: boolean;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const activeCategories = useMemo(() => categories.filter((category) => category.active), [categories]);
+  const defaultCategoryKey = selectedTransaction.category_key_current ?? activeCategories[0]?.category_key ?? "";
+  const transactionAmount = selectedTransaction.amount ?? "0.00";
+  const [lines, setLines] = useState<SplitEditorLine[]>(() => [
+    { localId: "line-1", amount: transactionAmount, categoryKey: defaultCategoryKey, memo: "" },
+  ]);
+  const [formStatus, setFormStatus] = useState<string | null>(null);
+  const initializedTransactionId = useRef<string | null>(null);
+  const initializedAllocationSignature = useRef<string | null>(null);
+  const dirtyEditor = useRef(false);
+  const allocationsQuery = useQuery({
+    queryKey: ["transaction-allocations", selectedTransaction.id],
+    queryFn: () => fetchTransactionAllocations(selectedTransaction.id),
+  });
+
+  const categoryByKey = useMemo(
+    () => new Map(activeCategories.map((category) => [category.category_key, category])),
+    [activeCategories],
+  );
+  const categoryKeyById = useMemo(
+    () => new Map(activeCategories.map((category) => [category.id, category.category_key])),
+    [activeCategories],
+  );
+
+  const initialLines = useMemo(() => {
+    const savedLines = allocationsQuery.data?.allocations ?? [];
+    if (savedLines.length > 0) {
+      return savedLines.map((line) => ({
+        localId: line.id,
+        amount: line.amount,
+        categoryKey: categoryKeyById.get(line.category_id) ?? defaultCategoryKey,
+        memo: line.memo ?? "",
+      }));
+    }
+    return [{ localId: "line-1", amount: transactionAmount, categoryKey: defaultCategoryKey, memo: "" }];
+  }, [allocationsQuery.data?.allocations, categoryKeyById, defaultCategoryKey, transactionAmount]);
+
+  useEffect(() => {
+    const allocationSignature =
+      allocationsQuery.data?.allocations.map((allocation) => `${allocation.id}:${allocation.updated_at ?? ""}`).join("|") ??
+      "default";
+    const sameTransaction = initializedTransactionId.current === selectedTransaction.id;
+    const sameAllocations = initializedAllocationSignature.current === allocationSignature;
+    if (sameTransaction && dirtyEditor.current) {
+      return;
+    }
+    if (sameTransaction && sameAllocations) {
+      return;
+    }
+    initializedTransactionId.current = selectedTransaction.id;
+    initializedAllocationSignature.current = allocationSignature;
+    dirtyEditor.current = false;
+    setLines(initialLines);
+    setFormStatus(null);
+  }, [allocationsQuery.data, initialLines, selectedTransaction.id]);
+
+  const transactionCents = parseMoneyCents(transactionAmount);
+  const allocatedCents = lines.reduce((total, line) => total + parseMoneyCents(line.amount), 0);
+  const remainderCents = transactionCents - allocatedCents;
+  const allLinesValid = lines.every(
+    (line) => parseMoneyCents(line.amount) !== 0 && Boolean(categoryByKey.get(line.categoryKey)),
+  );
+  const balanced = lines.length > 0 && allLinesValid && remainderCents === 0;
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      saveTransactionAllocations({
+        transactionId: selectedTransaction.id,
+        actor: operatorActor,
+        actorContext: operatorActorContext,
+        note: "Save transaction split from split editor.",
+        lines: lines.map((line) => ({
+          amount: normalizeMoneyInput(line.amount),
+          category_id: categoryByKey.get(line.categoryKey)?.id ?? "",
+          memo: line.memo.trim() || null,
+        })),
+      }),
+    onSuccess: () => {
+      setFormStatus("Split saved");
+      void queryClient.invalidateQueries({ queryKey: ["transaction-allocations", selectedTransaction.id] });
+      void queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      void queryClient.invalidateQueries({ queryKey: ["transaction", selectedTransaction.id] });
+      void queryClient.invalidateQueries({ queryKey: ["operator-summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["funds-summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
+      onSaved();
+    },
+    onError: (error) => setFormStatus(formatApiError(error, "Split save blocked")),
+  });
+
+  function updateLine(localId: string, patch: Partial<SplitEditorLine>) {
+    dirtyEditor.current = true;
+    setLines((current) => current.map((line) => (line.localId === localId ? { ...line, ...patch } : line)));
+    setFormStatus(null);
+  }
+
+  function addLine() {
+    dirtyEditor.current = true;
+    setLines((current) => [
+      ...current,
+      {
+        localId: `line-${Date.now()}`,
+        amount: formatCentsInput(remainderCents),
+        categoryKey: defaultCategoryKey,
+        memo: "",
+      },
+    ]);
+    setFormStatus(null);
+  }
+
+  function removeLine(localId: string) {
+    dirtyEditor.current = true;
+    setLines((current) => (current.length > 1 ? current.filter((line) => line.localId !== localId) : current));
+    setFormStatus(null);
+  }
+
+  function resetLines() {
+    dirtyEditor.current = false;
+    setLines(initialLines);
+    setFormStatus(null);
+  }
+
+  return (
+    <section className="screen" aria-labelledby="split-heading">
+      <div className="screen-heading split-heading">
+        <div>
+          <p className="product-label">Contextual allocation editor</p>
+          <h2 id="split-heading">Split transaction</h2>
+          <p className="screen-sub">Launched from Review / Transactions</p>
+        </div>
+        <StatusBadge status={balanced ? "balanced" : "unbalanced"} />
+      </div>
+
+      <section className="work-panel">
+        <h3>Imported fact</h3>
+        <div className="metric-grid compact">
+          <label>
+            Date
+            <input type="text" value={selectedTransaction.posted_date ?? ""} readOnly />
+          </label>
+          <label>
+            Merchant
+            <input type="text" value={selectedTransaction.normalized_merchant ?? selectedTransaction.raw_description ?? ""} readOnly />
+          </label>
+          <label>
+            Transaction amount
+            <input type="text" value={transactionAmount} readOnly />
+          </label>
+        </div>
+        <p className="section-note">Receipt lines enrich this transaction only after explicit promotion.</p>
+      </section>
+
+      <section className="work-panel">
+        <h3>Allocations</h3>
+        <div className="alloc-grid">
+          {lines.map((line, index) => (
+            <div className="allocation-row" key={line.localId}>
+              <label>
+                Split amount {index + 1}
+                <input
+                  inputMode="decimal"
+                  value={line.amount}
+                  onChange={(event) => updateLine(line.localId, { amount: event.target.value })}
+                />
+              </label>
+              <label>
+                Split category {index + 1}
+                <select
+                  value={line.categoryKey}
+                  onChange={(event) => updateLine(line.localId, { categoryKey: event.target.value })}
+                >
+                  {activeCategories.map((category) => (
+                    <option key={category.category_key} value={category.category_key}>
+                      {category.display_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Split memo {index + 1}
+                <input value={line.memo} onChange={(event) => updateLine(line.localId, { memo: event.target.value })} />
+              </label>
+              <button type="button" className="link-button" onClick={() => removeLine(line.localId)} disabled={lines.length <= 1}>
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="action-row split-actions">
+          <button type="button" className="link-button" onClick={addLine}>
+            + Add allocation line
+          </button>
+        </div>
+      </section>
+
+      <section className="work-panel">
+        <div className="remainder-line">
+          <div>
+            <dt>Transaction amount</dt>
+            <dd>{formatMoney(transactionAmount)}</dd>
+          </div>
+          <div>
+            <dt>Allocated</dt>
+            <dd>{formatMoney(formatCentsInput(allocatedCents))}</dd>
+          </div>
+          <div>
+            <dt>Remainder</dt>
+            <dd>{formatMoney(formatCentsInput(remainderCents))}</dd>
+          </div>
+          <div className={balanced ? "remainder-status ok-text" : "remainder-status warn-text"} aria-live="polite">
+            {balanced ? "Balanced - ready to save" : "Unbalanced - fix remainder before saving"}
+          </div>
+        </div>
+        <div className="audit-preview">
+          <span>Creates 1 split decision event with {lines.length} line(s)</span>
+          <span>Imported row unchanged and remains linked</span>
+          <span>Saved splits become the report source until replaced</span>
+        </div>
+        {!canSaveSplits ? <p className="form-status warn-text">Split saves are disabled for this persona or mode.</p> : null}
+        {formStatus ? <p className={formStatus === "Split saved" ? "form-status ok-text" : "form-status danger-text"}>{formStatus}</p> : null}
+        <div className="button-row">
+          <button type="button" onClick={resetLines}>
+            Reset
+          </button>
+          <button type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => saveMutation.mutate()}
+            disabled={!balanced || !canSaveSplits || saveMutation.isPending}
+          >
+            Save split
+          </button>
+        </div>
+      </section>
+    </section>
+  );
+}
+
 function TransactionsScreen({
   transactions,
   selectedTransaction,
   selectedTransactionId,
   onSelectTransaction,
+  onOpenSplitEditor,
 }: {
   transactions: Transaction[];
   selectedTransaction: TransactionDetail | Transaction | null;
   selectedTransactionId: string | null;
   onSelectTransaction: (id: string) => void;
+  onOpenSplitEditor: () => void;
 }) {
   const columns = useMemo<ColumnDef<Transaction>[]>(
     () => [
@@ -2065,7 +3089,12 @@ function TransactionsScreen({
           <p className="product-label">Reviewed/current ledger view</p>
           <h2 id="transactions-heading">Transactions</h2>
         </div>
-        <StatusBadge status={selectedTransactionId ? "selected" : "not_selected"} />
+        <div className="action-row">
+          <button type="button" onClick={onOpenSplitEditor} disabled={!selectedTransactionId}>
+            Split selected transaction
+          </button>
+          <StatusBadge status={selectedTransactionId ? "selected" : "not_selected"} />
+        </div>
       </div>
 
       <div className="two-column wide-left">
@@ -2096,6 +3125,397 @@ function TransactionsScreen({
   );
 }
 
+function DashboardBarRow({
+  label,
+  value,
+  fillPercent,
+  tone = "default",
+  provisional = false,
+}: {
+  label: string;
+  value: string;
+  fillPercent: number;
+  tone?: "default" | "inflow" | "outflow" | "warn" | "danger";
+  provisional?: boolean;
+}) {
+  const fillClass =
+    tone === "outflow" || tone === "danger" ? "outflow" : tone === "warn" ? "warn" : tone === "inflow" ? "inflow" : "";
+  const valueClass =
+    tone === "danger" || tone === "outflow"
+      ? "bar-value danger-text"
+      : tone === "warn"
+        ? "bar-value warn-text"
+        : "bar-value";
+  return (
+    <div className="bar-row">
+      <span className="bar-label">
+        {label}
+        {provisional ? " ~" : ""}
+      </span>
+      <span className="bar-track" aria-hidden="true">
+        <span
+          className={`bar-fill ${fillClass}`.trim()}
+          style={{ width: `${Math.min(Math.max(fillPercent, 0), 100)}%` }}
+        />
+      </span>
+      <span className={valueClass}>{value}</span>
+    </div>
+  );
+}
+
+function DashboardScreen({
+  month,
+  operatorActor,
+  operatorActorContext,
+  canReviewDecide,
+  elevatedModeActive,
+}: {
+  month: string;
+  operatorActor: string;
+  operatorActorContext: ActorContext;
+  canReviewDecide: boolean;
+  elevatedModeActive: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const snapshotAction = reviewDecideActionState(canReviewDecide, elevatedModeActive, {
+    denied: "Current persona cannot add net worth snapshots.",
+    elevated: "Net worth snapshot changes are disabled while elevated mode is active.",
+  });
+  const summaryQuery = useQuery({
+    queryKey: ["dashboard-summary", month],
+    queryFn: () => fetchDashboardSummary(month),
+  });
+  const cashflowQuery = useQuery({
+    queryKey: ["dashboard-cashflow", month],
+    queryFn: () => fetchDashboardCashflow(6, month),
+  });
+  const categoryQuery = useQuery({
+    queryKey: ["dashboard-category-spend", month],
+    queryFn: () => fetchDashboardCategorySpend(month),
+  });
+  const poolQuery = useQuery({
+    queryKey: ["dashboard-pool-progress", month],
+    queryFn: () => fetchDashboardPoolProgress(month),
+  });
+  const [includeEstimates, setIncludeEstimates] = useState(false);
+  const netWorthQuery = useQuery({
+    queryKey: ["dashboard-net-worth", includeEstimates],
+    queryFn: () => fetchDashboardNetWorth(includeEstimates),
+  });
+  const netWorthSummaryQuery = useQuery({
+    queryKey: ["net-worth-summary"],
+    queryFn: () => fetchNetWorthSummary({ includeEstimates: false }),
+  });
+  const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
+  const [snapshotDate, setSnapshotDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [assetOrLiability, setAssetOrLiability] = useState("asset");
+  const [netWorthAccountName, setNetWorthAccountName] = useState("");
+  const [netWorthInstitution, setNetWorthInstitution] = useState("");
+  const [netWorthCategory, setNetWorthCategory] = useState("liquid_cash");
+  const [netWorthSubcategory, setNetWorthSubcategory] = useState("");
+  const [netWorthBalance, setNetWorthBalance] = useState("");
+  const [valuationMethod, setValuationMethod] = useState("actual");
+  const [estimateConfidence, setEstimateConfidence] = useState("");
+  const [sourceNotes, setSourceNotes] = useState("");
+  const [netWorthStatus, setNetWorthStatus] = useState<string | null>(null);
+
+  const estimateFieldsRequired = valuationMethod === "estimate";
+  const netWorthFormInvalid =
+    !snapshotDate ||
+    !netWorthAccountName.trim() ||
+    !netWorthCategory.trim() ||
+    !netWorthBalance.trim() ||
+    (estimateFieldsRequired && (!estimateConfidence || !sourceNotes.trim()));
+
+  const netWorthMutation = useMutation({
+    mutationFn: createNetWorthSnapshot,
+    onSuccess: () => {
+      setNetWorthStatus("Net worth snapshot saved");
+      setNetWorthAccountName("");
+      setNetWorthInstitution("");
+      setNetWorthCategory("liquid_cash");
+      setNetWorthSubcategory("");
+      setNetWorthBalance("");
+      setValuationMethod("actual");
+      setEstimateConfidence("");
+      setSourceNotes("");
+      setSnapshotModalOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["net-worth-summary"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-net-worth"] });
+    },
+    onError: (error) => setNetWorthStatus(formatApiError(error, "Net worth snapshot save failed")),
+  });
+
+  function saveNetWorthSnapshot(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!snapshotAction.allowed) {
+      return;
+    }
+    if (netWorthFormInvalid) {
+      setNetWorthStatus("Net worth snapshot is missing required fields");
+      return;
+    }
+    netWorthMutation.mutate({
+      snapshotDate,
+      assetOrLiability,
+      accountName: netWorthAccountName,
+      institution: netWorthInstitution,
+      category: netWorthCategory,
+      subcategory: netWorthSubcategory,
+      balance: netWorthBalance,
+      valuationMethod,
+      confidence: estimateFieldsRequired ? estimateConfidence : undefined,
+      sourceNotes: estimateFieldsRequired ? sourceNotes : undefined,
+      actor: operatorActor,
+      actorContext: operatorActorContext,
+    });
+  }
+
+  const cashflowPoints = cashflowQuery.data?.points ?? [];
+  const maxCashflowAbs = Math.max(...cashflowPoints.map((point) => Math.abs(Number(point.net))), 1);
+  const categoryItems = (categoryQuery.data?.categories ?? []).slice(0, 8);
+  const maxCategoryOutflow = Math.max(...categoryItems.map((item) => Number(item.outflow)), 1);
+  const poolItems = poolQuery.data?.pools ?? [];
+  const netWorthSummary = netWorthSummaryQuery.data ?? emptyNetWorthSummary;
+
+  const summary = summaryQuery.data as
+    | {
+        freshness?: string;
+        confidence?: string;
+        reviewed_percent?: string;
+        spendable?: { headline?: string };
+      }
+    | undefined;
+  const netWorth = netWorthQuery.data as { summary?: { headline_net_worth?: string }; warning?: string | null } | undefined;
+
+  return (
+    <section className="screen" aria-labelledby="dashboard-heading">
+      <div className="screen-heading split-heading">
+        <div>
+          <p className="product-label">Household dashboard</p>
+          <h2 id="dashboard-heading">Dashboard</h2>
+        </div>
+        <StatusBadge status={summary?.freshness === "current" ? "ready" : "not_ready"} />
+      </div>
+
+      <div className="dashboard-rail" aria-label="Dashboard summary">
+        <Metric label="Freshness" value={summary?.freshness ?? "Loading"} detail={month} />
+        <Metric label="Confidence" value={summary?.confidence ?? "Loading"} detail="Spendable source state" />
+        <Metric label="Reviewed" value={`${summary?.reviewed_percent ?? "0.00"}%`} detail="Ledger review coverage" />
+        <Metric label="Spendable balance" value={summary?.spendable?.headline ?? "—"} detail="Headline spendable" />
+      </div>
+
+      <section className="work-panel">
+        <h3>Cashflow (last 6 months)</h3>
+        <p className="chart-caption">Net cashflow by month — values shown inline</p>
+        {cashflowQuery.isLoading ? (
+          <p className="empty-state">Loading cashflow…</p>
+        ) : cashflowPoints.length ? (
+          <div className="bar-chart" aria-label="Six month net cashflow">
+            {cashflowPoints.map((point) => {
+              const net = Number(point.net);
+              const tone = net < 0 ? "outflow" : point.provisional ? "warn" : "inflow";
+              return (
+                <DashboardBarRow
+                  key={point.month}
+                  label={point.month}
+                  value={formatMoney(point.net)}
+                  fillPercent={(Math.abs(net) / maxCashflowAbs) * 100}
+                  tone={tone}
+                  provisional={point.provisional}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <p className="empty-state">No cashflow data for this period</p>
+        )}
+      </section>
+
+      <section className="work-panel">
+        <h3>Category spend</h3>
+        <p className="chart-caption">Top categories this month — outflow shown inline</p>
+        {categoryQuery.isLoading ? (
+          <p className="empty-state">Loading category spend…</p>
+        ) : categoryItems.length ? (
+          <div className="bar-chart" aria-label="Category spending">
+            {categoryItems.map((item) => (
+              <DashboardBarRow
+                key={item.category}
+                label={item.category}
+                value={formatMoney(item.outflow)}
+                fillPercent={(Number(item.outflow) / maxCategoryOutflow) * 100}
+                tone="outflow"
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="empty-state">No category spending for this month</p>
+        )}
+      </section>
+
+      <section className="work-panel">
+        <h3>Pool target progress</h3>
+        <p className="chart-caption">Fund pool usage vs target</p>
+        {poolQuery.isLoading ? (
+          <p className="empty-state">Loading pool progress…</p>
+        ) : poolItems.length ? (
+          <div className="bar-chart" aria-label="Pool target progress">
+            {poolItems.map((pool) => {
+              const progress = Number(pool.progress_percent);
+              return (
+                <DashboardBarRow
+                  key={pool.name}
+                  label={pool.name}
+                  value={`${pool.progress_percent}%`}
+                  fillPercent={progress}
+                  tone={pool.over_target ? "warn" : "default"}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <p className="empty-state">No fund pools configured</p>
+        )}
+      </section>
+
+      <section className="work-panel">
+        <div className="screen-heading split-heading panel-heading">
+          <h3>Net worth</h3>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={!snapshotAction.allowed}
+            title={snapshotAction.disabledTitle}
+            onClick={() => {
+              if (snapshotAction.allowed) {
+                setSnapshotModalOpen(true);
+              }
+            }}
+          >
+            Add snapshot
+          </button>
+        </div>
+        {snapshotAction.blockedNotice ? <p className="form-status warn-text">{snapshotAction.blockedNotice}</p> : null}
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={includeEstimates}
+            onChange={(event) => setIncludeEstimates(event.target.checked)}
+          />
+          Include estimates
+        </label>
+        {netWorth?.warning ? <p className="form-status warn-text">{netWorth.warning}</p> : null}
+        <div className="metric-grid compact">
+          <Metric
+            label="Actual net worth"
+            value={formatMoney(netWorthSummary.actual.net_worth)}
+            detail={`As of ${netWorthSummary.latest_snapshot_date ?? "no snapshot"}`}
+          />
+          <Metric
+            label={includeEstimates ? "With estimates" : "Headline (dashboard)"}
+            value={netWorth?.summary?.headline_net_worth ?? formatMoney(netWorthSummary.with_estimates.net_worth)}
+            detail="Manual snapshot totals"
+          />
+        </div>
+        <p className="form-status warn-text">Estimates never feed Spendable balance.</p>
+        {netWorthStatus && !snapshotModalOpen ? (
+          <p className={netWorthStatus.includes("failed") || netWorthStatus.includes("missing") ? "form-status danger-text" : "form-status ok-text"}>
+            {netWorthStatus}
+          </p>
+        ) : null}
+      </section>
+
+      {snapshotModalOpen ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setSnapshotModalOpen(false);
+            }
+          }}
+        >
+          <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="net-worth-modal-title">
+            <h3 id="net-worth-modal-title">Add net worth snapshot</h3>
+            <p className="modal-copy">Manual balances use positive amounts; asset or liability controls the rollup sign.</p>
+            <form className="modal-form settings-form" onSubmit={saveNetWorthSnapshot}>
+              <label>
+                Snapshot date
+                <input type="date" value={snapshotDate} onChange={(event) => setSnapshotDate(event.target.value)} />
+              </label>
+              <label>
+                Asset or liability
+                <select value={assetOrLiability} onChange={(event) => setAssetOrLiability(event.target.value)}>
+                  <option value="asset">Asset</option>
+                  <option value="liability">Liability</option>
+                </select>
+              </label>
+              <label>
+                Account display name
+                <input value={netWorthAccountName} onChange={(event) => setNetWorthAccountName(event.target.value)} />
+              </label>
+              <label>
+                Institution
+                <input value={netWorthInstitution} onChange={(event) => setNetWorthInstitution(event.target.value)} />
+              </label>
+              <label>
+                Net worth category
+                <input value={netWorthCategory} onChange={(event) => setNetWorthCategory(event.target.value)} />
+              </label>
+              <label>
+                Subcategory
+                <input value={netWorthSubcategory} onChange={(event) => setNetWorthSubcategory(event.target.value)} />
+              </label>
+              <label>
+                Balance
+                <input inputMode="decimal" value={netWorthBalance} onChange={(event) => setNetWorthBalance(event.target.value)} placeholder="1500.00" />
+              </label>
+              <label>
+                Valuation method
+                <select value={valuationMethod} onChange={(event) => setValuationMethod(event.target.value)}>
+                  <option value="actual">Actual</option>
+                  <option value="estimate">Estimate</option>
+                </select>
+              </label>
+              {estimateFieldsRequired ? (
+                <>
+                  <label>
+                    Estimate confidence
+                    <select value={estimateConfidence} onChange={(event) => setEstimateConfidence(event.target.value)}>
+                      <option value="">Select confidence</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </label>
+                  <label>
+                    Source notes
+                    <textarea value={sourceNotes} onChange={(event) => setSourceNotes(event.target.value)} rows={3} />
+                  </label>
+                </>
+              ) : null}
+              {netWorthStatus && snapshotModalOpen ? (
+                <p className={netWorthStatus.includes("failed") || netWorthStatus.includes("missing") ? "form-status danger-text" : "form-status ok-text"}>
+                  {netWorthStatus}
+                </p>
+              ) : null}
+              <div className="button-row">
+                <button type="button" onClick={() => setSnapshotModalOpen(false)} disabled={netWorthMutation.isPending}>
+                  Cancel
+                </button>
+                <button type="submit" className="primary-button" disabled={netWorthFormInvalid || netWorthMutation.isPending || !snapshotAction.allowed}>
+                  Save net worth snapshot
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function ReportsScreen({
   summary,
   artifacts,
@@ -2105,6 +3525,7 @@ function ReportsScreen({
   canRunMonthlyClose,
   canCreateExports,
   elevatedModeActive,
+  elevatedModeStatus,
 }: {
   summary: OperatorSummary;
   artifacts: Artifact[];
@@ -2114,9 +3535,22 @@ function ReportsScreen({
   canRunMonthlyClose: boolean;
   canCreateExports: boolean;
   elevatedModeActive: boolean;
+  elevatedModeStatus: ElevatedModeStatus | null;
 }) {
   const queryClient = useQueryClient();
   const [actionStatus, setActionStatus] = useState<string | null>(null);
+  const [overridePurpose, setOverridePurpose] = useState("");
+  const [includeEstimates, setIncludeEstimates] = useState(false);
+  const [includeRawTransactions, setIncludeRawTransactions] = useState(false);
+  const governorCloseMode =
+    elevatedModeStatus?.context === "financial_governance" &&
+    elevatedModeStatus?.purpose_code === "monthly_close_governance_review";
+  const fundsBlockers = summary.monthly_close.blockers.filter((blocker) =>
+    ["negative_pool_remaining", "reserved_goals_exceed_liquid", "negative_headline_spendable", "missing_fund_commitments"].includes(
+      blocker,
+    ),
+  );
+  const needsGovernorOverride = !summary.monthly_close.ready_for_final && fundsBlockers.length > 0;
 
   const refreshReportState = () => {
     void queryClient.invalidateQueries({ queryKey: ["artifacts"] });
@@ -2139,12 +3573,21 @@ function ReportsScreen({
     onError: (error) => setActionStatus(formatApiError(error, "Draft close blocked")),
   });
   const finalCloseMutation = useMutation({
-    mutationFn: finalizeMonthlyClose,
+    mutationFn: (payload: { actor: string; actorContext?: ActorContext; overridePurpose?: string }) =>
+      finalizeMonthlyClose(payload),
     onSuccess: () => {
       setActionStatus("Final close finalized");
       refreshReportState();
     },
     onError: (error) => setActionStatus(formatApiError(error, "Final close blocked")),
+  });
+  const analystPackMutation = useMutation({
+    mutationFn: buildAnalystPack,
+    onSuccess: () => {
+      setActionStatus("Analyst export pack created");
+      refreshReportState();
+    },
+    onError: (error) => setActionStatus(formatApiError(error, "Analyst export blocked")),
   });
   const advisorExportMutation = useMutation({
     mutationFn: createAdvisorExport,
@@ -2158,7 +3601,8 @@ function ReportsScreen({
     runReportsMutation.isPending ||
     draftCloseMutation.isPending ||
     finalCloseMutation.isPending ||
-    advisorExportMutation.isPending;
+    advisorExportMutation.isPending ||
+    analystPackMutation.isPending;
   const artifactColumns = useMemo<ColumnDef<Artifact>[]>(
     () => [
       { header: "Title", cell: ({ row }) => row.original.title ?? formatStatus(row.original.artifact_type) },
@@ -2193,10 +3637,25 @@ function ReportsScreen({
         <Metric label="Artifacts" value={artifacts.length || summary.artifacts?.generated_count || 0} detail="Generated files" />
       </div>
 
-      <section className="work-panel">
+      <section className="work-panel report-actions-panel">
         <h3>Report actions</h3>
-        {elevatedModeActive ? (
+        {elevatedModeActive && !governorCloseMode ? (
           <p className="form-status warn-text">Report and close actions are disabled while elevated mode is active.</p>
+        ) : null}
+        {needsGovernorOverride ? (
+          <p className="form-status warn-text">
+            Final close needs Financial Governor override because Funds/Spendable checks have blockers.
+          </p>
+        ) : null}
+        {needsGovernorOverride ? (
+          <label className="field-block">
+            <span>Governor override purpose</span>
+            <input
+              value={overridePurpose}
+              onChange={(event) => setOverridePurpose(event.target.value)}
+              placeholder="Enter why final close should proceed with these Funds/Spendable blockers."
+            />
+          </label>
         ) : null}
         <div className="action-row">
           <button
@@ -2215,8 +3674,19 @@ function ReportsScreen({
           </button>
           <button
             type="button"
-            onClick={() => finalCloseMutation.mutate({ actor: operatorActor, actorContext: operatorActorContext })}
-            disabled={actionPending || !canRunMonthlyClose}
+            onClick={() =>
+              finalCloseMutation.mutate({
+                actor: operatorActor,
+                actorContext: operatorActorContext,
+                overridePurpose: overridePurpose.trim() || undefined,
+              })
+            }
+            disabled={
+              actionPending ||
+              !canRunMonthlyClose ||
+              (elevatedModeActive && !governorCloseMode) ||
+              (needsGovernorOverride && (!governorCloseMode || !overridePurpose.trim()))
+            }
           >
             Final close
           </button>
@@ -2227,7 +3697,40 @@ function ReportsScreen({
           >
             Advisor export
           </button>
+          <button
+            type="button"
+            onClick={() =>
+              analystPackMutation.mutate({
+                actor: operatorActor,
+                actorContext: operatorActorContext,
+                includeEstimates,
+                includeRawTransactions,
+              })
+            }
+            disabled={actionPending || !canCreateExports}
+          >
+            Build export pack
+          </button>
         </div>
+        <div className="report-actions-options" aria-label="Analyst pack options">
+          <label>
+            <input
+              type="checkbox"
+              checked={includeEstimates}
+              onChange={(event) => setIncludeEstimates(event.target.checked)}
+            />
+            Include estimates in analyst pack
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={includeRawTransactions}
+              onChange={(event) => setIncludeRawTransactions(event.target.checked)}
+            />
+            Include raw transaction rows (sensitive)
+          </label>
+        </div>
+        <p className="report-privacy-note">Analyst packs are generated locally only. No in-app AI or external service calls.</p>
         {actionStatus ? <p className="save-status">{actionStatus}</p> : null}
       </section>
 
@@ -2406,17 +3909,9 @@ function SettingsScreen({
         <h2 id="settings-heading">Settings</h2>
       </div>
 
-      <div className="tabs" role="tablist" aria-label="Settings sections">
-        {(settings?.tabs ?? []).map((tab, index) => (
-          <button key={tab} type="button" role="tab" aria-selected={index === 0} className={index === 0 ? "active" : undefined}>
-            {tab}
-          </button>
-        ))}
-      </div>
-
       <section className="work-panel environment-panel" aria-label="Runtime environment">
         <h3>Environment</h3>
-        <dl>
+        <dl className="environment-rail">
           <div>
             <dt>Environment</dt>
             <dd>{runtime.app_env_label}</dd>
@@ -2921,6 +4416,35 @@ function hasImportedFacts(transaction: TransactionDetail | Transaction | null): 
 
 function formatStatus(status: string) {
   return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatMoney(value: string | number | null | undefined) {
+  const amount = Number(value ?? 0);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
+}
+
+function parseMoneyCents(value: string | number | null | undefined) {
+  const amount = Number(String(value ?? "0").replace(/[$,]/g, ""));
+  if (!Number.isFinite(amount)) {
+    return 0;
+  }
+  return Math.round(amount * 100);
+}
+
+function formatCentsInput(cents: number) {
+  return (cents / 100).toFixed(2);
+}
+
+function normalizeMoneyInput(value: string) {
+  return formatCentsInput(parseMoneyCents(value));
+}
+
+function decimalSubtract(left: string, right: string) {
+  return (Number(left) - Number(right)).toFixed(2);
+}
+
+function absMoney(value: string) {
+  return Math.abs(Number(value)).toFixed(2);
 }
 
 function settingValueToInput(value: unknown) {

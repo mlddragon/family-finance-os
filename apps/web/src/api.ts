@@ -5,13 +5,18 @@ import type {
   ActorsPayload,
   ApprovalRequest,
   ApprovalRequestsPayload,
+  AuthStatus,
   Category,
   DecisionEventResponse,
   EffectivePermission,
   ElevatedContext,
   ElevatedModeStatus,
+  FinancialGoal,
+  FundsSummary,
   InboxScan,
   ImportBatch,
+  NetWorthSnapshot,
+  NetWorthSummary,
   OperatorSummary,
   PermissionPreviewRequest,
   PermissionPreviewResponse,
@@ -19,6 +24,7 @@ import type {
   Suggestion,
   SuggestionsPayload,
   Transaction,
+  TransactionAllocationsPayload,
   TransactionDetail,
   ValidationFinding,
 } from "./types";
@@ -91,6 +97,16 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
         }
       } else if (typeof detail === "string") {
         message = detail;
+      } else if (Array.isArray(detail)) {
+        message = detail
+          .map((entry) => {
+            if (!isRecord(entry)) {
+              return String(entry);
+            }
+            const loc = Array.isArray(entry.loc) ? entry.loc.join(".") : "field";
+            return `${loc}: ${typeof entry.msg === "string" ? entry.msg : "invalid"}`;
+          })
+          .join("; ");
       }
     } catch {
       // Keep the fallback message when the server does not return JSON.
@@ -150,6 +166,150 @@ export function previewPermission(payload: PermissionPreviewRequest) {
 
 export function fetchOperatorSummary() {
   return apiJson<OperatorSummary>("/api/operator-summary");
+}
+
+export function fetchAuthStatus() {
+  return apiJson<AuthStatus>("/api/auth/status");
+}
+
+export function loginOwner(payload: { username: string; passphrase: string; totpCode: string }) {
+  const { username, passphrase, totpCode } = payload;
+  return apiJson<AuthStatus>("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: username.trim(),
+      passphrase,
+      totp_code: totpCode.trim(),
+    }),
+  });
+}
+
+export function recoveryLoginOwner(payload: { username: string; recoveryCode: string }) {
+  return apiJson<AuthStatus>("/api/auth/recovery-login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: payload.username.trim(),
+      recovery_code: payload.recoveryCode.trim(),
+    }),
+  });
+}
+
+export function enrollOwner(payload: {
+  username: string;
+  displayName: string;
+  passphrase: string;
+  totpConfirmCode: string;
+  recoveryAcknowledged: boolean;
+}) {
+  const { username, displayName, passphrase, totpConfirmCode, recoveryAcknowledged } = payload;
+  return apiJson<
+    AuthStatus & {
+      status?: string;
+      totp_secret?: string;
+      otpauth_uri?: string;
+      recovery_codes?: string[];
+    }
+  >("/api/auth/enroll-owner", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: username.trim(),
+      display_name: displayName.trim(),
+      passphrase,
+      totp_confirm_code: totpConfirmCode.trim(),
+      recovery_acknowledged: recoveryAcknowledged,
+    }),
+  });
+}
+
+export function createDevBypassSession() {
+  return apiJson<AuthStatus>("/api/auth/dev-bypass", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role: "administrator" }),
+  });
+}
+
+export function fetchFundsSummary(month?: string) {
+  const params = new URLSearchParams();
+  if (month) {
+    params.set("month", month);
+  }
+  const query = params.toString();
+  return apiJson<FundsSummary>(`/api/funds/summary${query ? `?${query}` : ""}`);
+}
+
+export function fetchNetWorthSummary(payload?: { includeEstimates?: boolean }) {
+  const params = new URLSearchParams();
+  if (payload?.includeEstimates) {
+    params.set("include_estimates", "true");
+  }
+  const query = params.toString();
+  return apiJson<NetWorthSummary>(`/api/net-worth/summary${query ? `?${query}` : ""}`);
+}
+
+export function createNetWorthSnapshot(payload: {
+  snapshotDate: string;
+  assetOrLiability: string;
+  accountName: string;
+  institution?: string;
+  category: string;
+  subcategory?: string;
+  balance: string;
+  valuationMethod: string;
+  confidence?: string;
+  sourceNotes?: string;
+  actor: string;
+  actorContext?: ActorContext;
+}) {
+  return apiJson<{ snapshot: NetWorthSnapshot }>("/api/net-worth/snapshots", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      snapshot_date: payload.snapshotDate,
+      asset_or_liability: payload.assetOrLiability,
+      account_name: payload.accountName.trim(),
+      institution: payload.institution?.trim() || null,
+      category: payload.category.trim(),
+      subcategory: payload.subcategory?.trim() || null,
+      balance: payload.balance,
+      valuation_method: payload.valuationMethod,
+      confidence: payload.confidence?.trim() || null,
+      source_notes: payload.sourceNotes?.trim() || null,
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+      note: "Create manual net worth snapshot from Settings.",
+    }),
+  });
+}
+
+export function createFinancialGoal(payload: {
+  name: string;
+  goalType: string;
+  targetAmount: string;
+  targetDate?: string;
+  linkedFundPoolId?: string;
+  reservedBalance: string;
+  actor: string;
+  actorContext?: ActorContext;
+}) {
+  return apiJson<{ goal: FinancialGoal }>("/api/financial-goals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: payload.name.trim(),
+      goal_type: payload.goalType,
+      target_amount: payload.targetAmount,
+      target_date: payload.targetDate?.trim() || null,
+      linked_fund_pool_id: payload.linkedFundPoolId || null,
+      reserved_balance: payload.reservedBalance,
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+      note: "Create financial goal from Funds screen.",
+    }),
+  });
 }
 
 export function fetchActors() {
@@ -231,6 +391,36 @@ export function fetchTransactions() {
 
 export function fetchTransactionDetail(transactionId: string) {
   return apiJson<{ transaction: TransactionDetail }>(`/api/transactions/${transactionId}`);
+}
+
+export function fetchTransactionAllocations(transactionId: string) {
+  return apiJson<TransactionAllocationsPayload>(`/api/transactions/${transactionId}/allocations`);
+}
+
+export function saveTransactionAllocations(payload: {
+  transactionId: string;
+  actor: string;
+  actorContext?: ActorContext;
+  note?: string;
+  lines: Array<{
+    amount: string;
+    category_id: string;
+    subcategory?: string | null;
+    fund_pool_id?: string | null;
+    financial_goal_id?: string | null;
+    memo?: string | null;
+  }>;
+}) {
+  return apiJson<TransactionAllocationsPayload>(`/api/transactions/${payload.transactionId}/allocations`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+      note: payload.note?.trim() || null,
+      lines: payload.lines,
+    }),
+  });
 }
 
 export function fetchCategories() {
@@ -381,12 +571,79 @@ export function draftMonthlyClose(payload: { actor: string; actorContext?: Actor
   });
 }
 
-export function finalizeMonthlyClose(payload: { actor: string; actorContext?: ActorContext }) {
+export function finalizeMonthlyClose(payload: {
+  actor: string;
+  actorContext?: ActorContext;
+  overridePurpose?: string;
+}) {
   return apiJson<ArtifactActionResponse>("/api/monthly-close/finalize", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ actor: payload.actor, actor_context: payload.actorContext }),
+    body: JSON.stringify({
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+      override_purpose: payload.overridePurpose,
+    }),
   });
+}
+
+export function buildAnalystPack(payload: {
+  actor: string;
+  actorContext?: ActorContext;
+  month?: string;
+  includeRawTransactions?: boolean;
+  includeEstimates?: boolean;
+  promptKey?: string;
+}) {
+  return apiJson<ArtifactActionResponse & { manifest?: Record<string, unknown> }>("/api/analyst-pack/build", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+      month: payload.month,
+      include_raw_transactions: payload.includeRawTransactions ?? false,
+      include_estimates: payload.includeEstimates ?? false,
+      prompt_key: payload.promptKey ?? "monthly_spending_review",
+    }),
+  });
+}
+
+export function fetchDashboardSummary(month?: string) {
+  const query = month ? `?month=${encodeURIComponent(month)}` : "";
+  return apiJson<Record<string, unknown>>(`/api/dashboard/summary${query}`);
+}
+
+export function fetchDashboardCashflow(months = 6, month?: string) {
+  const params = new URLSearchParams({ months: String(months) });
+  if (month) {
+    params.set("month", month);
+  }
+  return apiJson<{ points: Array<{ month: string; net: string; provisional: boolean }> }>(
+    `/api/dashboard/cashflow?${params.toString()}`,
+  );
+}
+
+export function fetchDashboardCategorySpend(month?: string) {
+  const query = month ? `?month=${encodeURIComponent(month)}` : "";
+  return apiJson<{ categories: Array<{ category: string; outflow: string }> }>(
+    `/api/dashboard/category-spend${query}`,
+  );
+}
+
+export function fetchDashboardPoolProgress(month?: string) {
+  const query = month ? `?month=${encodeURIComponent(month)}` : "";
+  return apiJson<{ pools: Array<{ name: string; progress_percent: string; over_target: boolean }> }>(
+    `/api/dashboard/pool-progress${query}`,
+  );
+}
+
+export function fetchDashboardNetWorth(includeEstimates = false) {
+  const params = new URLSearchParams();
+  if (includeEstimates) {
+    params.set("include_estimates", "true");
+  }
+  return apiJson<Record<string, unknown>>(`/api/dashboard/net-worth?${params.toString()}`);
 }
 
 export function createAdvisorExport(payload: { actor: string; actorContext?: ActorContext }) {

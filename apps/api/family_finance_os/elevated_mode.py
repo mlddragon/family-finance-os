@@ -68,7 +68,9 @@ PURPOSE_CODES_BY_CONTEXT: dict[ElevatedContext, frozenset[str]] = {
 
 ELEVATION_ALLOWED_ACTIONS: dict[ElevatedContext, frozenset[ActionKey]] = {
     ElevatedContext.SYSTEM_ADMINISTRATION: frozenset({ActionKey.RUNTIME_SETTINGS_MANAGE}),
-    ElevatedContext.FINANCIAL_GOVERNANCE: frozenset({ActionKey.APPROVAL_RULES_CONFIGURE}),
+    ElevatedContext.FINANCIAL_GOVERNANCE: frozenset(
+        {ActionKey.APPROVAL_RULES_CONFIGURE, ActionKey.MONTHLY_CLOSE_RUN}
+    ),
 }
 
 CONTEXT_ENTER_REQUIREMENTS: dict[ElevatedContext, list[tuple[ActionKey, DataScopeKey]]] = {

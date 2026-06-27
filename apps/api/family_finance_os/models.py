@@ -5,7 +5,19 @@ from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, event, inspect
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    event,
+    inspect,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 
 
@@ -432,6 +444,315 @@ class ApprovalRequestEvent(TimestampedModel):
     metadata_json: Mapped[Optional[str]] = mapped_column(Text)
 
     approval_request: Mapped[ApprovalRequest] = relationship(back_populates="events")
+
+
+class User(TimestampedModel):
+    __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("username"),
+        Index("ix_users_status_role", "status", "role"),
+    )
+
+    username: Mapped[str] = mapped_column(String(120), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    role: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    passphrase_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    passphrase_updated_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    totp_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    recovery_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_login_at: Mapped[Optional[str]] = mapped_column(String(40))
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    locked_until: Mapped[Optional[str]] = mapped_column(String(40))
+    invited_by_user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    invitation_token_hash: Mapped[Optional[str]] = mapped_column(Text)
+    invitation_expires_at: Mapped[Optional[str]] = mapped_column(String(40))
+
+
+class UserSession(TimestampedModel):
+    __tablename__ = "user_sessions"
+    __table_args__ = (
+        UniqueConstraint("session_token_hash"),
+        Index("ix_user_sessions_user_active", "user_id", "revoked_at", "absolute_expires_at"),
+        Index("ix_user_sessions_idle_expiry", "idle_expires_at"),
+    )
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    session_token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_from: Mapped[str] = mapped_column(String(40), nullable=False)
+    last_seen_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    idle_expires_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    absolute_expires_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    revoked_at: Mapped[Optional[str]] = mapped_column(String(40))
+    revoked_reason: Mapped[Optional[str]] = mapped_column(String(120))
+    user_agent_hash: Mapped[Optional[str]] = mapped_column(String(64))
+    client_host: Mapped[Optional[str]] = mapped_column(String(120))
+
+
+class TotpSecret(TimestampedModel):
+    __tablename__ = "totp_secrets"
+    __table_args__ = (Index("ix_totp_secrets_user_active", "user_id", "disabled_at"),)
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    secret_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    secret_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    confirmed_at: Mapped[Optional[str]] = mapped_column(String(40))
+    disabled_at: Mapped[Optional[str]] = mapped_column(String(40))
+    last_used_counter: Mapped[Optional[int]] = mapped_column(Integer)
+
+
+class RecoveryCode(TimestampedModel):
+    __tablename__ = "recovery_codes"
+    __table_args__ = (
+        UniqueConstraint("code_hash"),
+        Index("ix_recovery_codes_user_status", "user_id", "status"),
+    )
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    code_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    code_label: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    used_at: Mapped[Optional[str]] = mapped_column(String(40))
+    used_session_id: Mapped[Optional[str]] = mapped_column(ForeignKey("user_sessions.id"))
+    rotated_at: Mapped[Optional[str]] = mapped_column(String(40))
+
+
+class FundPool(TimestampedModel):
+    __tablename__ = "fund_pools"
+    __table_args__ = (
+        UniqueConstraint("pool_key"),
+        Index("ix_fund_pools_status_sort", "status", "sort_order"),
+    )
+
+    pool_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    rollover_policy: Mapped[str] = mapped_column(String(40), default="none", nullable=False)
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    updated_by_user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class PoolCategoryLink(TimestampedModel):
+    __tablename__ = "pool_category_links"
+    __table_args__ = (
+        UniqueConstraint("fund_pool_id", "category_id", "subcategory_key"),
+        Index("ix_pool_category_links_category_active", "category_id", "active"),
+        Index("ix_pool_category_links_pool_active", "fund_pool_id", "active"),
+    )
+
+    fund_pool_id: Mapped[str] = mapped_column(ForeignKey("fund_pools.id"), nullable=False)
+    category_id: Mapped[str] = mapped_column(ForeignKey("categories.id"), nullable=False)
+    subcategory_key: Mapped[Optional[str]] = mapped_column(String(120))
+    link_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class MonthlyPoolCommitment(TimestampedModel):
+    __tablename__ = "monthly_pool_commitments"
+    __table_args__ = (
+        UniqueConstraint("fund_pool_id", "month", "status"),
+        Index("ix_monthly_pool_commitments_month_status", "month", "status"),
+    )
+
+    fund_pool_id: Mapped[str] = mapped_column(ForeignKey("fund_pools.id"), nullable=False)
+    month: Mapped[str] = mapped_column(String(7), nullable=False)
+    committed_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    funding_source: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    decision_event_id: Mapped[Optional[str]] = mapped_column(ForeignKey("decision_events.id"))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class FinancialGoal(TimestampedModel):
+    __tablename__ = "financial_goals"
+    __table_args__ = (
+        UniqueConstraint("goal_key"),
+        CheckConstraint("length(trim(name)) > 0", name="ck_financial_goals_name_required"),
+        Index("ix_financial_goals_status_type", "status", "goal_type"),
+        Index("ix_financial_goals_pool_status", "linked_fund_pool_id", "status"),
+    )
+
+    goal_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    goal_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    target_date: Mapped[Optional[str]] = mapped_column(String(10))
+    linked_fund_pool_id: Mapped[Optional[str]] = mapped_column(ForeignKey("fund_pools.id"))
+    reserved_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    updated_by_user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class BudgetTarget(TimestampedModel):
+    __tablename__ = "budget_targets"
+    __table_args__ = (
+        UniqueConstraint("target_key"),
+        Index("ix_budget_targets_month_scope_status", "month", "target_scope", "status"),
+        Index("ix_budget_targets_category_month", "category_id", "month"),
+        Index("ix_budget_targets_pool_month", "fund_pool_id", "month"),
+    )
+
+    target_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    month: Mapped[Optional[str]] = mapped_column(String(7))
+    target_scope: Mapped[str] = mapped_column(String(40), nullable=False)
+    category_id: Mapped[Optional[str]] = mapped_column(ForeignKey("categories.id"))
+    fund_pool_id: Mapped[Optional[str]] = mapped_column(ForeignKey("fund_pools.id"))
+    financial_goal_id: Mapped[Optional[str]] = mapped_column(ForeignKey("financial_goals.id"))
+    target_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    warning_threshold_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2))
+    hard_cap_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2))
+    review_threshold_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2))
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    decision_event_id: Mapped[Optional[str]] = mapped_column(ForeignKey("decision_events.id"))
+
+
+class TransactionAllocation(TimestampedModel):
+    __tablename__ = "transaction_allocations"
+    __table_args__ = (
+        UniqueConstraint("allocation_group_id", "line_number"),
+        Index("ix_transaction_allocations_txn_status", "canonical_transaction_id", "status"),
+        Index("ix_transaction_allocations_pool_status", "fund_pool_id", "status"),
+        Index("ix_transaction_allocations_category_status", "category_id", "status"),
+    )
+
+    canonical_transaction_id: Mapped[str] = mapped_column(
+        ForeignKey("canonical_transactions.id"),
+        nullable=False,
+    )
+    allocation_group_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    category_id: Mapped[str] = mapped_column(ForeignKey("categories.id"), nullable=False)
+    subcategory: Mapped[Optional[str]] = mapped_column(String(120))
+    fund_pool_id: Mapped[Optional[str]] = mapped_column(ForeignKey("fund_pools.id"))
+    financial_goal_id: Mapped[Optional[str]] = mapped_column(ForeignKey("financial_goals.id"))
+    memo: Mapped[Optional[str]] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    decision_event_id: Mapped[Optional[str]] = mapped_column(ForeignKey("decision_events.id"))
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class NetWorthSnapshot(TimestampedModel):
+    __tablename__ = "net_worth_snapshots"
+    __table_args__ = (
+        Index("ix_net_worth_snapshots_date_method", "snapshot_date", "valuation_method"),
+        Index("ix_net_worth_snapshots_category_date", "category", "snapshot_date"),
+    )
+
+    snapshot_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    asset_or_liability: Mapped[str] = mapped_column(String(20), nullable=False)
+    account_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    institution: Mapped[Optional[str]] = mapped_column(String(160))
+    category: Mapped[str] = mapped_column(String(80), nullable=False)
+    subcategory: Mapped[Optional[str]] = mapped_column(String(120))
+    balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    valuation_method: Mapped[str] = mapped_column(String(40), nullable=False)
+    confidence: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_notes: Mapped[Optional[str]] = mapped_column(Text)
+    include_in_actual_net_worth: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class Receipt(TimestampedModel):
+    __tablename__ = "receipts"
+    __table_args__ = (
+        Index("ix_receipts_transaction_status", "canonical_transaction_id", "status"),
+        Index("ix_receipts_purchase_date", "purchase_date"),
+        Index("ix_receipts_source_type_status", "source_type", "status"),
+    )
+
+    canonical_transaction_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("canonical_transactions.id"),
+    )
+    merchant_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    purchase_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    receipt_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    source_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_file_id: Mapped[Optional[str]] = mapped_column(ForeignKey("source_files.id"))
+    stored_artifact_path: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    review_status: Mapped[str] = mapped_column(String(40), nullable=False)
+    applied_as_split_decision_event_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("decision_events.id"),
+    )
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class ReceiptLineItem(TimestampedModel):
+    __tablename__ = "receipt_line_items"
+    __table_args__ = (
+        UniqueConstraint("receipt_id", "line_number"),
+        Index("ix_receipt_line_items_receipt", "receipt_id"),
+        Index("ix_receipt_line_items_category_review", "category_id", "review_status"),
+    )
+
+    receipt_id: Mapped[str] = mapped_column(ForeignKey("receipts.id"), nullable=False)
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_description: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 4))
+    unit_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2))
+    line_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    category_id: Mapped[Optional[str]] = mapped_column(ForeignKey("categories.id"))
+    subcategory: Mapped[Optional[str]] = mapped_column(String(120))
+    fund_pool_id: Mapped[Optional[str]] = mapped_column(ForeignKey("fund_pools.id"))
+    tax_relevant_candidate: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    reimbursement_candidate: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    business_candidate: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    review_status: Mapped[str] = mapped_column(String(40), nullable=False)
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class ManualObligation(TimestampedModel):
+    __tablename__ = "manual_obligations"
+    __table_args__ = (
+        UniqueConstraint("obligation_key"),
+        Index("ix_manual_obligations_month_status", "month", "status"),
+        Index("ix_manual_obligations_due_status", "due_date", "status"),
+    )
+
+    obligation_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    due_date: Mapped[Optional[str]] = mapped_column(String(10))
+    month: Mapped[Optional[str]] = mapped_column(String(7))
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    obligation_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    linked_canonical_transaction_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("canonical_transactions.id"),
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class SpendableBalanceSnapshot(TimestampedModel):
+    __tablename__ = "spendable_balance_snapshots"
+    __table_args__ = (
+        Index("ix_spendable_snapshots_month_type", "month", "snapshot_type"),
+        Index("ix_spendable_snapshots_close", "monthly_close_id"),
+    )
+
+    month: Mapped[str] = mapped_column(String(7), nullable=False)
+    snapshot_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    headline_spendable: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    verified_liquid_cash: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    reserved_goal_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    manual_obligations_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    provisional_exposure: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    include_provisional: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    card_obligation: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    confidence: Mapped[str] = mapped_column(String(40), nullable=False)
+    input_summary_json: Mapped[str] = mapped_column(Text, nullable=False)
+    monthly_close_id: Mapped[Optional[str]] = mapped_column(ForeignKey("monthly_closes.id"))
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
 
 
 @event.listens_for(Session, "before_flush")
