@@ -26,7 +26,29 @@ export type ActorContext = {
   persona_label?: string;
   group_keys: string[];
   system_persona_key?: string;
-  source: "local_selector" | "system" | "compat_actor_string";
+  source: "local_selector" | "system" | "compat_actor_string" | "auth_session" | "recovery" | "dev_bypass";
+};
+
+export type AuthStatus = {
+  requires_owner_enrollment: boolean;
+  authenticated: boolean;
+  user: null | {
+    id: string;
+    username: string;
+    display_name: string;
+    role: string;
+    status: string;
+    totp_required: boolean;
+    recovery_required: boolean;
+  };
+  session: null | {
+    id: string;
+    created_from: string;
+    last_seen_at: string;
+    idle_expires_at: string;
+    absolute_expires_at: string;
+  };
+  qa_auth_bypass_available: boolean;
 };
 
 export type ActorsPayload = {
@@ -116,6 +138,106 @@ export type OperatorSummary = {
     code: string;
     label: string;
   };
+};
+
+export type SpendableSummary = {
+  headline: string;
+  verified_liquid_cash: string;
+  reserved_goal_balance: string;
+  manual_upcoming_obligations: string;
+  provisional_exposure: string;
+  card_obligation_total: string;
+  card_obligation_items: Array<{
+    card: string;
+    owed: string | null;
+    note: string;
+    source_key?: string;
+    status?: string;
+  }>;
+  includes_provisional: boolean;
+  confidence?: string;
+  warnings?: Array<{ code: string; severity: string; message: string }>;
+};
+
+export type FundPoolSummary = {
+  id: string;
+  pool_key: string;
+  name: string;
+  description: string | null;
+  status: string;
+  sort_order: number;
+  rollover_policy: string;
+  commitment: string;
+  spent: string;
+  pool_remaining: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type FundPool = FundPoolSummary & {
+  pool_remaining?: string;
+  spent?: string;
+  commitment?: string;
+};
+
+export type FundCommitment = {
+  id: string;
+  fund_pool_id: string;
+  fund_pool_name: string | null;
+  month: string;
+  committed_amount: string;
+  funding_source: string;
+  status: string;
+  decision_event_id: string | null;
+  notes: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type FinancialGoal = {
+  id: string;
+  goal_key: string;
+  name: string;
+  goal_type: "emergency" | "sinking_fund" | "purchase" | "other" | string;
+  target_amount: string;
+  target_date: string | null;
+  linked_fund_pool_id: string | null;
+  reserved_balance: string;
+  remaining_to_target: string;
+  status: string;
+  notes: string | null;
+};
+
+export type BudgetTarget = {
+  id: string;
+  target_key: string;
+  month: string | null;
+  target_scope: string;
+  category_id: string | null;
+  fund_pool_id: string | null;
+  financial_goal_id: string | null;
+  target_amount: string;
+  warning_threshold_amount: string | null;
+  hard_cap_amount: string | null;
+  review_threshold_amount: string | null;
+  status: string;
+  notes: string | null;
+  decision_event_id: string | null;
+};
+
+export type FundsSummary = {
+  month: string;
+  spendable: SpendableSummary;
+  commitment_health: {
+    funded_this_month: string;
+    fund_commitments: string;
+    pool_remaining_total: string;
+    uncommitted: string;
+    overcommitted: boolean;
+  };
+  pools: Array<FundPoolSummary & { status: "On track" | "Not started" | string }>;
+  goals: FinancialGoal[];
+  budget_targets: BudgetTarget[];
 };
 
 export type ImportBatch = {

@@ -5,11 +5,14 @@ import type {
   ActorsPayload,
   ApprovalRequest,
   ApprovalRequestsPayload,
+  AuthStatus,
   Category,
   DecisionEventResponse,
   EffectivePermission,
   ElevatedContext,
   ElevatedModeStatus,
+  FinancialGoal,
+  FundsSummary,
   InboxScan,
   ImportBatch,
   OperatorSummary,
@@ -150,6 +153,89 @@ export function previewPermission(payload: PermissionPreviewRequest) {
 
 export function fetchOperatorSummary() {
   return apiJson<OperatorSummary>("/api/operator-summary");
+}
+
+export function fetchAuthStatus() {
+  return apiJson<AuthStatus>("/api/auth/status");
+}
+
+export function loginOwner(payload: { username: string; passphrase: string; totpCode: string }) {
+  return apiJson<AuthStatus>("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: payload.username.trim(),
+      passphrase: payload.passphrase,
+      totp_code: payload.totpCode.trim(),
+    }),
+  });
+}
+
+export function enrollOwner(payload: {
+  username: string;
+  displayName: string;
+  passphrase: string;
+  totpConfirmCode: string;
+  recoveryAcknowledged: boolean;
+}) {
+  return apiJson<
+    AuthStatus & {
+      status?: string;
+      totp_secret?: string;
+      otpauth_uri?: string;
+      recovery_codes?: string[];
+    }
+  >("/api/auth/enroll-owner", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: payload.username.trim(),
+      display_name: payload.displayName.trim(),
+      passphrase: payload.passphrase,
+      totp_confirm_code: payload.totpConfirmCode.trim(),
+      recovery_acknowledged: payload.recoveryAcknowledged,
+    }),
+  });
+}
+
+export function createDevBypassSession() {
+  return apiJson<AuthStatus>("/api/auth/dev-bypass", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role: "administrator" }),
+  });
+}
+
+export function fetchFundsSummary(month?: string) {
+  const params = new URLSearchParams();
+  if (month) {
+    params.set("month", month);
+  }
+  const query = params.toString();
+  return apiJson<FundsSummary>(`/api/funds/summary${query ? `?${query}` : ""}`);
+}
+
+export function createFinancialGoal(payload: {
+  name: string;
+  goalType: string;
+  targetAmount: string;
+  reservedBalance: string;
+  actor: string;
+  actorContext?: ActorContext;
+}) {
+  return apiJson<{ goal: FinancialGoal }>("/api/financial-goals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: payload.name.trim(),
+      goal_type: payload.goalType,
+      target_amount: payload.targetAmount,
+      reserved_balance: payload.reservedBalance,
+      actor: payload.actor,
+      actor_context: payload.actorContext,
+      note: "Create financial goal from Funds screen.",
+    }),
+  });
 }
 
 export function fetchActors() {

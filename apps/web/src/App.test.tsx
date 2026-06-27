@@ -13,6 +13,7 @@ afterEach(() => {
 test("en-US locale covers primary UI surfaces", () => {
   expect(Object.keys(enUS.nav)).toEqual([
     "home",
+    "funds",
     "sources",
     "validation",
     "review",
@@ -126,7 +127,7 @@ const categories = [
 
 const personalRuntime = {
   app: "Family Finance OS",
-  version: "0.3.0",
+  version: "0.5.0",
   local_only: true,
   bind_host: "127.0.0.1",
   app_env: "personal",
@@ -169,6 +170,103 @@ const actorsPayload = {
     { persona_key: "administrator", persona_label: "Administrator", group_keys: ["administrator"] },
   ],
   system_personas: [{ system_persona_key: "system:importer", display_name: "System: Importer" }],
+};
+
+const authenticatedStatus = {
+  requires_owner_enrollment: false,
+  authenticated: true,
+  user: {
+    id: "user-1",
+    username: "owner",
+    display_name: "SYNTHETIC Owner",
+    role: "administrator",
+    status: "active",
+    totp_required: true,
+    recovery_required: false,
+  },
+  session: {
+    id: "session-1",
+    created_from: "login",
+    last_seen_at: "2026-06-18T00:00:00Z",
+    idle_expires_at: "2026-06-18T08:00:00Z",
+    absolute_expires_at: "2026-06-25T00:00:00Z",
+  },
+  qa_auth_bypass_available: false,
+};
+
+const fundsSummary = {
+  month: "2026-06",
+  spendable: {
+    headline: "3412.58",
+    verified_liquid_cash: "6180.00",
+    reserved_goal_balance: "1900.00",
+    manual_upcoming_obligations: "867.42",
+    provisional_exposure: "112.00",
+    card_obligation_total: "1523.23",
+    card_obligation_items: [
+      {
+        card: "Synthetic Rewards Card",
+        owed: "1018.23",
+        note: "Pool remaining already reflects this",
+      },
+      {
+        card: "Synthetic Travel Card",
+        owed: "505.00",
+        note: "Statement due Jul 02",
+      },
+    ],
+    includes_provisional: false,
+    warnings: [],
+  },
+  commitment_health: {
+    funded_this_month: "900.00",
+    fund_commitments: "1000.00",
+    pool_remaining_total: "146.50",
+    uncommitted: "-100.00",
+    overcommitted: true,
+  },
+  pools: [
+    {
+      id: "pool-groceries",
+      pool_key: "groceries",
+      name: "Groceries",
+      description: null,
+      status: "On track",
+      sort_order: 10,
+      rollover_policy: "none",
+      commitment: "700.00",
+      spent: "512.40",
+      pool_remaining: "187.60",
+    },
+    {
+      id: "pool-auto",
+      pool_key: "auto_fuel",
+      name: "Auto & fuel",
+      description: null,
+      status: "Over by $41.10",
+      sort_order: 20,
+      rollover_policy: "none",
+      commitment: "300.00",
+      spent: "341.10",
+      pool_remaining: "-41.10",
+    },
+  ],
+  goals: [
+    {
+      id: "goal-emergency",
+      goal_key: "emergency",
+      name: "Emergency fund",
+      goal_type: "emergency",
+      target_amount: "3000.00",
+      target_date: null,
+      linked_fund_pool_id: null,
+      reserved_balance: "1900.00",
+      remaining_to_target: "1100.00",
+      status: "active",
+      notes: null,
+    },
+  ],
+  budget_targets: [],
 };
 
 function response(body: unknown) {
@@ -300,6 +398,12 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
     const url = urlFor(input);
     if (path === "/api/permissions/effective") {
       return response(mockEffectivePermission(url, init));
+    }
+    if (path === "/api/auth/status") {
+      return response({
+        ...authenticatedStatus,
+        qa_auth_bypass_available: runtime.qa_controls_enabled,
+      });
     }
     if (path === "/api/elevated-mode/status") {
       return response(inactiveElevatedModeStatus);
@@ -571,6 +675,24 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
         },
       });
     }
+    if (path === "/api/financial-goals" && init?.method === "POST") {
+      const goalBody = JSON.parse(String(init.body));
+      return response({
+        goal: {
+          id: "goal-new",
+          goal_key: "vacation_2026",
+          name: goalBody.name,
+          goal_type: goalBody.goal_type,
+          target_amount: goalBody.target_amount,
+          target_date: null,
+          linked_fund_pool_id: null,
+          reserved_balance: goalBody.reserved_balance,
+          remaining_to_target: "1600.00",
+          status: "active",
+          notes: null,
+        },
+      });
+    }
     if (path === "/api/reports/run" && init?.method === "POST") {
       return response({
         job: { id: "job-report", status: "completed" },
@@ -658,6 +780,7 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
           label: "Resolve blocking validation findings",
         },
       },
+      "/api/funds/summary": fundsSummary,
       "/api/inbox/scan": {
         import_batches: [
           {
@@ -825,6 +948,10 @@ function installApiMock(options: { acceptImportError?: boolean; runtime?: typeof
   return fetchMock;
 }
 
+async function waitForOperatorShell() {
+  await screen.findByRole("link", { name: "Home" });
+}
+
 test("renders operator home from API state", async () => {
   installApiMock();
 
@@ -832,11 +959,68 @@ test("renders operator home from API state", async () => {
 
   expect(screen.getByRole("heading", { name: "Family Finance OS" })).toBeInTheDocument();
   expect(await screen.findByText("Personal data")).toBeInTheDocument();
+  expect(await screen.findByText("Spendable balance")).toBeInTheDocument();
+  expect(screen.getByText("$3,412.58")).toBeInTheDocument();
+  expect(screen.getByText("Card obligation (not yet netted)")).toBeInTheDocument();
   expect(await screen.findByText("Local browser mode")).toBeInTheDocument();
   expect(await screen.findByText("Resolve blocking validation findings")).toBeInTheDocument();
   expect(screen.getByText("Open blockers")).toBeInTheDocument();
   expect(screen.getByText("Review queue")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Validation Issues" })).toBeInTheDocument();
+});
+
+test("shows auth enrollment and login flows before the operator shell", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      response({
+        ...authenticatedStatus,
+        requires_owner_enrollment: true,
+        authenticated: false,
+        user: null,
+        session: null,
+        qa_auth_bypass_available: true,
+      }),
+    ),
+  );
+
+  const firstRender = render(<App />);
+
+  expect(await screen.findByText("First-boot setup - Owner enrollment")).toBeInTheDocument();
+  expect(screen.getByText("QA synthetic demo - dev bypass available")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Home" })).not.toBeInTheDocument();
+  firstRender.unmount();
+
+  vi.restoreAllMocks();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      response({
+        ...authenticatedStatus,
+        authenticated: false,
+        user: null,
+        session: null,
+      }),
+    ),
+  );
+
+  render(<App />);
+  expect(await screen.findByText("Local sign in")).toBeInTheDocument();
+});
+
+test("funds screen renders commitment warning and blocks unnamed goals", async () => {
+  installApiMock();
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("link", { name: "Funds" }));
+  expect(await screen.findByRole("heading", { name: "Funds" })).toBeInTheDocument();
+  expect(screen.getByText("Warning: fund commitments exceed funding by $100.00")).toBeInTheDocument();
+  expect(screen.getByText("Pool remaining")).toBeInTheDocument();
+  expect(screen.getByText("Over by $41.10")).toBeInTheDocument();
+
+  expect(screen.getByRole("button", { name: "Save financial goal" })).toBeDisabled();
+  expect(screen.getByText("Financial goal name is required.")).toBeInTheDocument();
 });
 
 test("shows persistent QA environment marker for synthetic runtime", async () => {
@@ -869,6 +1053,10 @@ test("navigates through the PR8 operator screens", async () => {
 
   render(<App />);
 
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Funds" }));
+  expect(await screen.findByRole("heading", { name: "Funds" })).toBeInTheDocument();
+
   fireEvent.click(screen.getByRole("link", { name: "Sources" }));
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
@@ -900,6 +1088,7 @@ test("sources screen validates and accepts import batches from the browser", asy
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Sources" }));
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
@@ -932,6 +1121,7 @@ test("sources screen shows structured backend reasons when import acceptance is 
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Sources" }));
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
@@ -963,6 +1153,7 @@ test("sources screen voids an upload with confirmation and optional file destruc
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Sources" }));
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   expect(await screen.findByText("SYNTHETIC_chase_summary.csv")).toBeInTheDocument();
@@ -1005,6 +1196,7 @@ test("sources upload sends selected source profile with the file", async () => {
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Sources" }));
   expect(await screen.findByRole("heading", { name: "Sources" })).toBeInTheDocument();
   await waitFor(() => expect(screen.getAllByText("Alliant Savings").length).toBeGreaterThan(0));
@@ -1040,6 +1232,7 @@ test("validation screen clears acknowledged findings from the default open queue
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Validation Issues" }));
   expect(await screen.findByRole("heading", { name: "Validation Issues" })).toBeInTheDocument();
   expect(await screen.findByText("schema_mismatch")).toBeInTheDocument();
@@ -1078,6 +1271,7 @@ test("review controls are labelled, focusable, and save append-only decisions", 
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Review" }));
   expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
 
@@ -1122,6 +1316,7 @@ test("review save approves unchanged category as a reviewed decision", async () 
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Review" }));
   expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
 
@@ -1156,6 +1351,7 @@ test("blocked validation filter selects blocked transaction and explains review 
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Review" }));
   expect(await screen.findByText("SYNTHETIC GROCERY")).toBeInTheDocument();
 
@@ -1172,6 +1368,7 @@ test("reports screen runs artifacts and close/export actions", async () => {
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Reports" }));
   expect(await screen.findByRole("heading", { name: "Reports & Monthly Close" })).toBeInTheDocument();
   expect(await screen.findByText("Import And Validation Summary")).toBeInTheDocument();
@@ -1219,6 +1416,7 @@ test("settings screen saves source profile sample confirmation with owner note",
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Settings" }));
   expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
   expect(await screen.findByText("Parser sample confirmation needed")).toBeInTheDocument();
@@ -1261,6 +1459,7 @@ test("settings screen edits editable database-backed settings with required note
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Settings" }));
   expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
 
@@ -1305,6 +1504,7 @@ test("settings screen defaults to editable friendly settings with defaults and a
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Settings" }));
   expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
 
@@ -1350,6 +1550,7 @@ test("shows collapsible QA permission matrix inside settings for QA runtime", as
 
   render(<App />);
 
+  await waitForOperatorShell();
   fireEvent.click(screen.getByRole("link", { name: "Settings" }));
   expect(await screen.findByText("Permission preview")).toBeInTheDocument();
   const matrix = screen.getByText("Permission preview").closest("details");

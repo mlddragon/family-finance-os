@@ -69,6 +69,32 @@ from family_finance_os.elevated_mode import (
     serialize_active_session,
     set_request_elevated_session_id,
 )
+from family_finance_os.funds import (
+    ActorMutationRequest,
+    BudgetTargetCreateRequest,
+    BudgetTargetPatchRequest,
+    FinancialGoalCreateRequest,
+    FinancialGoalPatchRequest,
+    FundCommitmentCreateRequest,
+    FundCommitmentPatchRequest,
+    FundPoolCreateRequest,
+    FundPoolPatchRequest,
+    FundsError,
+    create_budget_target,
+    create_financial_goal,
+    create_fund_commitment,
+    create_fund_pool,
+    delete_fund_commitment,
+    funds_summary,
+    list_budget_targets,
+    list_financial_goals,
+    list_fund_commitments,
+    list_fund_pools,
+    update_budget_target,
+    update_financial_goal,
+    update_fund_commitment,
+    update_fund_pool,
+)
 from family_finance_os.import_validation import (
     ImportValidationError,
     accept_import_batch,
@@ -433,6 +459,183 @@ def create_app(
                 )
             except SpendableError as exc:
                 raise spendable_http_error(exc) from exc
+
+    def funds_http_error(exc: FundsError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    @app.get("/api/funds/summary")
+    def get_funds_summary(month: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return funds_summary(session, month=month)
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+            except SpendableError as exc:
+                raise spendable_http_error(exc) from exc
+
+    @app.get("/api/fund-pools")
+    def get_fund_pools(month: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return {"pools": list_fund_pools(session, month=month)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.post("/api/fund-pools")
+    def post_fund_pool(payload: FundPoolCreateRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"pool": create_fund_pool(session, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.patch("/api/fund-pools/{pool_id}")
+    def patch_fund_pool(pool_id: str, payload: FundPoolPatchRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"pool": update_fund_pool(session, pool_id, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.get("/api/fund-commitments")
+    def get_fund_commitments(month: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return {"commitments": list_fund_commitments(session, month=month)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.post("/api/fund-commitments")
+    def post_fund_commitment(payload: FundCommitmentCreateRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"commitment": create_fund_commitment(session, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.patch("/api/fund-commitments/{commitment_id}")
+    def patch_fund_commitment(commitment_id: str, payload: FundCommitmentPatchRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"commitment": update_fund_commitment(session, commitment_id, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.delete("/api/fund-commitments/{commitment_id}")
+    def delete_fund_commitment_route(commitment_id: str, payload: ActorMutationRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"commitment": delete_fund_commitment(session, commitment_id, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.get("/api/financial-goals")
+    def get_financial_goals() -> Dict[str, Any]:
+        with create_session() as session:
+            return {"goals": list_financial_goals(session)}
+
+    @app.post("/api/financial-goals")
+    def post_financial_goal(payload: FinancialGoalCreateRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"goal": create_financial_goal(session, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.patch("/api/financial-goals/{goal_id}")
+    def patch_financial_goal(goal_id: str, payload: FinancialGoalPatchRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"goal": update_financial_goal(session, goal_id, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.get("/api/budget-targets")
+    def get_budget_targets(month: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return {"budget_targets": list_budget_targets(session, month=month)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.post("/api/budget-targets")
+    def post_budget_target(payload: BudgetTargetCreateRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"budget_target": create_budget_target(session, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
+
+    @app.patch("/api/budget-targets/{target_id}")
+    def patch_budget_target(target_id: str, payload: BudgetTargetPatchRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"budget_target": update_budget_target(session, target_id, payload)}
+            except FundsError as exc:
+                raise funds_http_error(exc) from exc
 
     @app.get("/api/actors")
     def get_actors() -> Dict[str, Any]:

@@ -22,12 +22,17 @@ import {
   confirmSourceProfileSample,
   convertSuggestionToApproval,
   createCategory,
+  createDevBypassSession,
+  createFinancialGoal,
   createSuggestion,
   dismissSuggestion,
+  enrollOwner,
   enterElevatedMode,
   exitElevatedMode,
   fetchApprovalRequests,
+  fetchAuthStatus,
   fetchElevatedModeStatus,
+  fetchFundsSummary,
   fetchOperatorSummary,
   createAdvisorExport,
   draftMonthlyClose,
@@ -42,6 +47,7 @@ import {
   fetchValidationFindings,
   finalizeMonthlyClose,
   formatApiError,
+  loginOwner,
   previewPermission,
   readStoredElevatedSessionId,
   rejectApprovalRequest,
@@ -71,10 +77,14 @@ import type {
   ActorContext,
   ActorsPayload,
   ApprovalRequest,
+  AuthStatus,
   Category,
   EffectivePermission,
   ElevatedContext,
   ElevatedModeStatus,
+  FinancialGoal,
+  FundPoolSummary,
+  FundsSummary,
   InboxScan,
   ImportBatch,
   OperatorSummary,
@@ -88,11 +98,12 @@ import type {
 } from "./types";
 import "./styles.css";
 
-type ScreenKey = "home" | "sources" | "validation" | "review" | "transactions" | "reports" | "settings";
+type ScreenKey = "home" | "funds" | "sources" | "validation" | "review" | "transactions" | "reports" | "settings";
 type SettingRow = SettingsPayload["settings"][number];
 
 const screens: Array<{ key: ScreenKey; labelKey: string }> = [
   { key: "home", labelKey: "nav.home" },
+  { key: "funds", labelKey: "nav.funds" },
   { key: "sources", labelKey: "nav.sources" },
   { key: "validation", labelKey: "nav.validation" },
   { key: "review", labelKey: "nav.review" },
@@ -107,7 +118,7 @@ const OTHER_LIST_LABEL = "Other";
 const emptySummary: OperatorSummary = {
   runtime: {
     app: "Family Finance OS",
-    version: "0.3.0",
+    version: "0.5.0",
     local_only: true,
     bind_host: "127.0.0.1",
     app_env: "personal",
@@ -156,6 +167,31 @@ const emptySummary: OperatorSummary = {
     code: "loading",
     label: "Load local operating state",
   },
+};
+
+const emptyFundsSummary: FundsSummary = {
+  month: new Date().toISOString().slice(0, 7),
+  spendable: {
+    headline: "0.00",
+    verified_liquid_cash: "0.00",
+    reserved_goal_balance: "0.00",
+    manual_upcoming_obligations: "0.00",
+    provisional_exposure: "0.00",
+    card_obligation_total: "0.00",
+    card_obligation_items: [],
+    includes_provisional: false,
+    warnings: [],
+  },
+  commitment_health: {
+    funded_this_month: "0.00",
+    fund_commitments: "0.00",
+    pool_remaining_total: "0.00",
+    uncommitted: "0.00",
+    overcommitted: false,
+  },
+  pools: [],
+  goals: [],
+  budget_targets: [],
 };
 
 function uniqueExistingListValues(values: Array<string | null | undefined>) {
@@ -412,8 +448,201 @@ export function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <OperatorApp />
+      <AppSessionGate />
     </QueryClientProvider>
+  );
+}
+
+function AppSessionGate() {
+  const authStatusQuery = useQuery({ queryKey: ["auth-status"], queryFn: fetchAuthStatus });
+  const authStatus = authStatusQuery.data;
+
+  if (authStatusQuery.isLoading) {
+    return (
+      <div className="auth-stage">
+        <section className="auth-card" aria-label="Loading authentication">
+          <h1>Family Finance OS</h1>
+          <p className="muted-text">Checking local session…</p>
+        </section>
+      </div>
+    );
+  }
+
+  if (authStatusQuery.isError) {
+    return (
+      <div className="auth-stage">
+        <section className="auth-card" aria-label="Authentication unavailable">
+          <h1>Family Finance OS</h1>
+          <p className="form-status danger-text">{formatApiError(authStatusQuery.error, "Authentication unavailable")}</p>
+        </section>
+      </div>
+    );
+  }
+
+  if (authStatus?.requires_owner_enrollment) {
+    return <AuthStage mode="enroll" authStatus={authStatus} />;
+  }
+
+  if (!authStatus?.authenticated) {
+    return <AuthStage mode="login" authStatus={authStatus ?? null} />;
+  }
+
+  return <OperatorApp />;
+}
+
+function AuthStage({ mode, authStatus }: { mode: "login" | "enroll"; authStatus: AuthStatus | null }) {
+  const queryClient = useQueryClient();
+  const [username, setUsername] = useState("owner");
+  const [displayName, setDisplayName] = useState("Owner");
+  const [passphrase, setPassphrase] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [recoveryAcknowledged, setRecoveryAcknowledged] = useState(false);
+  const [totpSecret, setTotpSecret] = useState<string | null>(null);
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [formStatus, setFormStatus] = useState<string | null>(null);
+
+  const loginMutation = useMutation({
+    mutationFn: loginOwner,
+    onSuccess: () => {
+      setFormStatus("Signed in");
+      void queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: (error) => setFormStatus(formatApiError(error, "Sign in failed")),
+  });
+
+  const enrollMutation = useMutation({
+    mutationFn: enrollOwner,
+    onSuccess: (body) => {
+      if (body.status === "totp_confirmation_required") {
+        setTotpSecret(body.totp_secret ?? null);
+        setFormStatus("Enter the authenticator code to finish owner enrollment");
+        return;
+      }
+      setRecoveryCodes(body.recovery_codes ?? []);
+      setFormStatus("Owner enrollment complete");
+      void queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: (error) => setFormStatus(formatApiError(error, "Owner enrollment failed")),
+  });
+
+  const devBypassMutation = useMutation({
+    mutationFn: createDevBypassSession,
+    onSuccess: () => {
+      setFormStatus("QA dev bypass session started");
+      void queryClient.invalidateQueries({ queryKey: ["auth-status"] });
+    },
+    onError: (error) => setFormStatus(formatApiError(error, "QA dev bypass failed")),
+  });
+
+  function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    loginMutation.mutate({ username, passphrase, totpCode });
+  }
+
+  function handleEnrollSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    enrollMutation.mutate({
+      username,
+      displayName,
+      passphrase,
+      totpConfirmCode: totpCode || "000000",
+      recoveryAcknowledged,
+    });
+  }
+
+  return (
+    <div className="auth-stage">
+      <div className="auth-stack">
+        {authStatus?.qa_auth_bypass_available ? (
+          <div className="qa-banner" role="status">
+            QA synthetic demo - dev bypass available
+          </div>
+        ) : null}
+        <section className="auth-card" aria-label={mode === "enroll" ? "Owner enrollment" : "Local sign in"}>
+          <div className="auth-brand">
+            <h1>Family Finance OS</h1>
+            <p>{mode === "enroll" ? "First-boot setup - Owner enrollment" : "Local sign in"}</p>
+          </div>
+          <form className="auth-form" onSubmit={mode === "enroll" ? handleEnrollSubmit : handleLoginSubmit}>
+            <label>
+              Username
+              <input value={username} onChange={(event) => setUsername(event.target.value)} />
+            </label>
+            {mode === "enroll" ? (
+              <label>
+                Display name
+                <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+              </label>
+            ) : null}
+            <label>
+              Passphrase
+              <input type="password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} />
+            </label>
+            {totpSecret ? (
+              <div className="auth-secret-panel">
+                <span>Authenticator manual key</span>
+                <code>{totpSecret}</code>
+              </div>
+            ) : null}
+            <label>
+              Authenticator code
+              <input
+                inputMode="numeric"
+                maxLength={12}
+                placeholder="------"
+                value={totpCode}
+                onChange={(event) => setTotpCode(event.target.value)}
+              />
+            </label>
+            {mode === "enroll" ? (
+              <label className="checkbox-row inline-checkbox">
+                <input
+                  type="checkbox"
+                  checked={recoveryAcknowledged}
+                  onChange={(event) => setRecoveryAcknowledged(event.target.checked)}
+                />
+                <span>I have saved the recovery codes.</span>
+              </label>
+            ) : null}
+            <button
+              type="submit"
+              className="primary-button"
+              disabled={
+                !username.trim() ||
+                !passphrase ||
+                (mode === "login" && !totpCode.trim()) ||
+                (mode === "enroll" && !recoveryAcknowledged) ||
+                loginMutation.isPending ||
+                enrollMutation.isPending
+              }
+            >
+              {mode === "enroll" ? "Confirm & continue" : "Sign in"}
+            </button>
+          </form>
+          {authStatus?.qa_auth_bypass_available ? (
+            <button
+              type="button"
+              className="danger-button auth-wide-button"
+              onClick={() => devBypassMutation.mutate()}
+              disabled={devBypassMutation.isPending}
+            >
+              Dev bypass (QA only) - synthetic owner
+            </button>
+          ) : null}
+          {recoveryCodes.length > 0 ? (
+            <div className="recovery-codes" aria-label="Recovery codes">
+              {recoveryCodes.map((code, index) => (
+                <span key={code}>{index + 1}. {code}</span>
+              ))}
+            </div>
+          ) : null}
+          {formStatus ? (
+            <p className={formStatus.includes("failed") ? "form-status danger-text" : "form-status ok-text"}>{formStatus}</p>
+          ) : null}
+          <p className="auth-foot">Local only - 127.0.0.1 - No data leaves device</p>
+        </section>
+      </div>
+    </div>
   );
 }
 
@@ -427,6 +656,7 @@ function OperatorApp() {
   );
 
   const summaryQuery = useQuery({ queryKey: ["operator-summary"], queryFn: fetchOperatorSummary });
+  const fundsSummaryQuery = useQuery({ queryKey: ["funds-summary"], queryFn: () => fetchFundsSummary("2026-06") });
   const actorsQuery = useQuery({ queryKey: ["actors"], queryFn: fetchActors });
   const inboxQuery = useQuery({ queryKey: ["inbox-scan"], queryFn: scanInbox });
   const findingsQuery = useQuery({ queryKey: ["validation-findings"], queryFn: fetchValidationFindings });
@@ -449,6 +679,7 @@ function OperatorApp() {
   });
 
   const summary = summaryQuery.data ?? emptySummary;
+  const fundsSummary = fundsSummaryQuery.data ?? emptyFundsSummary;
   const actors = actorsQuery.data;
   const findings = findingsQuery.data?.findings ?? [];
   const inbox = inboxQuery.data?.import_batches ?? [];
@@ -520,7 +751,16 @@ function OperatorApp() {
         </nav>
 
         <main className="content">
-          {activeScreen === "home" ? <HomeScreen summary={summary} /> : null}
+          {activeScreen === "home" ? (
+            <HomeScreen summary={summary} fundsSummary={fundsSummary} onOpenFunds={() => setActiveScreen("funds")} />
+          ) : null}
+          {activeScreen === "funds" ? (
+            <FundsScreen
+              fundsSummary={fundsSummary}
+              operatorActor={operatorActor}
+              operatorActorContext={operatorActorContext}
+            />
+          ) : null}
           {activeScreen === "sources" ? (
             <SourcesScreen
               key={sourceProfileKey}
@@ -1006,19 +1246,80 @@ function PermissionPreviewPanel({ actors }: { actors?: ActorsPayload }) {
   );
 }
 
-function HomeScreen({ summary }: { summary: OperatorSummary }) {
+function HomeScreen({
+  summary,
+  fundsSummary,
+  onOpenFunds,
+}: {
+  summary: OperatorSummary;
+  fundsSummary: FundsSummary;
+  onOpenFunds: () => void;
+}) {
+  const [includeProvisional, setIncludeProvisional] = useState(false);
+  const spendable = fundsSummary.spendable;
+  const displayedSpendable = includeProvisional
+    ? decimalSubtract(spendable.headline, spendable.provisional_exposure)
+    : spendable.headline;
   return (
     <section className="screen" aria-labelledby="home-heading">
       <div className="screen-heading split-heading">
         <div>
           <p className="product-label">Current operating state</p>
           <h2 id="home-heading">Home</h2>
+          <p className="screen-sub">
+            Ledger freshness: {summary.sources.imported_source_keys.length} source(s) loaded - Validation:{" "}
+            {summary.validation.open_blocking} blocking, {summary.validation.open_warning} warning(s)
+          </p>
         </div>
         <div className="next-action">
           <span>Next action</span>
           <strong>{summary.next_action.label}</strong>
         </div>
       </div>
+
+      <section className="work-panel headline-panel" aria-label="Spendable balance">
+        <span className="headline-label">Spendable balance</span>
+        <div className="headline-amount" aria-live="polite">{formatMoney(displayedSpendable)}</div>
+        <div className="breakdown">
+          <span>Verified liquid cash {formatMoney(spendable.verified_liquid_cash)}</span>
+          <span className="op">-</span>
+          <span>Reserved goal balance {formatMoney(spendable.reserved_goal_balance)}</span>
+          <span className="op">-</span>
+          <span>Manual obligations {formatMoney(spendable.manual_upcoming_obligations)}</span>
+          {includeProvisional ? (
+            <>
+              <span className="op">-</span>
+              <span>Provisional exposure {formatMoney(spendable.provisional_exposure)}</span>
+            </>
+          ) : null}
+        </div>
+        <p className="headline-note">
+          {includeProvisional
+            ? `Includes ${formatMoney(spendable.provisional_exposure)} provisional exposure for scenario review.`
+            : `Excludes ${formatMoney(spendable.provisional_exposure)} provisional exposure (unreviewed outflows).`}
+        </p>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={includeProvisional}
+            onChange={(event) => setIncludeProvisional(event.target.checked)}
+          />
+          Include provisional exposure ({formatMoney(spendable.provisional_exposure)} unreviewed)
+        </label>
+      </section>
+
+      <section className="work-panel">
+        <h3>Card obligation (not yet netted)</h3>
+        <DataTable
+          data={spendable.card_obligation_items}
+          emptyLabel="No card obligation items available."
+          columns={[
+            { header: "Card", accessorKey: "card" },
+            { header: "Owed", cell: ({ row }) => formatMoney(row.original.owed) },
+            { header: "Note", accessorKey: "note" },
+          ]}
+        />
+      </section>
 
       <div className="metric-grid" aria-label="Operator overview">
         <Metric label="Latest import" value={formatStatus(summary.latest_import.status)} detail={summary.latest_import.source_key ?? "No source loaded"} />
@@ -1030,20 +1331,185 @@ function HomeScreen({ summary }: { summary: OperatorSummary }) {
       </div>
 
       <section className="work-panel" aria-label="Closed-loop checkpoint">
-        <h3>Closed-loop checkpoint</h3>
-        <div className="step-grid">
-          {[
-            ["Source", summary.latest_import.status !== "none"],
-            ["Validation", summary.validation.open_blocking === 0],
-            ["Review", summary.review.unreviewed === 0 && summary.review.total_transactions > 0],
-            ["Reports", Boolean(summary.artifacts?.generated_count)],
-            ["Close", summary.monthly_close.ready_for_final],
-          ].map(([label, complete]) => (
-            <span key={label as string} className={complete ? "step done" : "step"}>
-              {label as string}
-            </span>
-          ))}
+        <div className="screen-heading split-heading panel-heading">
+          <h3>Where your money is committed</h3>
+          <button type="button" onClick={onOpenFunds}>Open Funds</button>
         </div>
+        <div className="metric-grid">
+          <Metric
+            label="Fund commitments this month"
+            value={formatMoney(fundsSummary.commitment_health.fund_commitments)}
+            detail={`Funded this month ${formatMoney(fundsSummary.commitment_health.funded_this_month)}`}
+          />
+          <Metric
+            label="Pool remaining (all pools)"
+            value={formatMoney(fundsSummary.commitment_health.pool_remaining_total)}
+            detail={fundsSummary.commitment_health.overcommitted ? "Commitments exceed funding" : "Commitments fit funding"}
+            tone={fundsSummary.commitment_health.overcommitted ? "warn" : "ok"}
+          />
+          <Metric
+            label="Reserved goal balance"
+            value={formatMoney(spendable.reserved_goal_balance)}
+            detail={`${fundsSummary.goals.length} financial goal(s)`}
+          />
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function FundsScreen({
+  fundsSummary,
+  operatorActor,
+  operatorActorContext,
+}: {
+  fundsSummary: FundsSummary;
+  operatorActor: string;
+  operatorActorContext: ActorContext;
+}) {
+  const queryClient = useQueryClient();
+  const [goalName, setGoalName] = useState("");
+  const [goalType, setGoalType] = useState("purchase");
+  const [targetAmount, setTargetAmount] = useState("");
+  const [reservedBalance, setReservedBalance] = useState("0.00");
+  const [goalStatus, setGoalStatus] = useState<string | null>(null);
+  const createGoalMutation = useMutation({
+    mutationFn: createFinancialGoal,
+    onSuccess: () => {
+      setGoalName("");
+      setTargetAmount("");
+      setReservedBalance("0.00");
+      setGoalStatus("Financial goal saved");
+      void queryClient.invalidateQueries({ queryKey: ["funds-summary"] });
+    },
+    onError: (error) => setGoalStatus(formatApiError(error, "Financial goal save failed")),
+  });
+  const goalNameMissing = !goalName.trim();
+
+  function handleGoalSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (goalNameMissing) {
+      setGoalStatus("Financial goal name is required");
+      return;
+    }
+    createGoalMutation.mutate({
+      name: goalName,
+      goalType,
+      targetAmount: targetAmount || "0.00",
+      reservedBalance: reservedBalance || "0.00",
+      actor: operatorActor,
+      actorContext: operatorActorContext,
+    });
+  }
+
+  return (
+    <section className="screen" aria-labelledby="funds-heading">
+      <div className="screen-heading split-heading">
+        <div>
+          <h2 id="funds-heading">Funds</h2>
+          <p className="screen-sub">Fund pools, commitments, and pool remaining</p>
+        </div>
+      </div>
+
+      {fundsSummary.commitment_health.overcommitted ? (
+        <div className="warn-band" role="status">
+          <strong>
+            Warning: fund commitments exceed funding by{" "}
+            {formatMoney(absMoney(fundsSummary.commitment_health.uncommitted))}
+          </strong>
+          <p>
+            Commitments {formatMoney(fundsSummary.commitment_health.fund_commitments)} vs funded{" "}
+            {formatMoney(fundsSummary.commitment_health.funded_this_month)}. Reduce a commitment or add funding. Nothing is blocked,
+            but pool remaining assumes full funding.
+          </p>
+        </div>
+      ) : null}
+
+      <section className="work-panel">
+        <h3>Commitment health</h3>
+        <div className="metric-grid">
+          <Metric label="Funded this month" value={formatMoney(fundsSummary.commitment_health.funded_this_month)} detail={fundsSummary.month} />
+          <Metric label="Fund commitments" value={formatMoney(fundsSummary.commitment_health.fund_commitments)} detail="Active fund commitments" />
+          <Metric
+            label={fundsSummary.commitment_health.overcommitted ? "Overcommitted" : "Uncommitted"}
+            value={formatMoney(fundsSummary.commitment_health.uncommitted)}
+            detail={fundsSummary.commitment_health.overcommitted ? "Review commitment levels" : "OK: commitments fit funding"}
+            tone={fundsSummary.commitment_health.overcommitted ? "danger" : "ok"}
+          />
+        </div>
+      </section>
+
+      <section className="work-panel">
+        <h3>Pools</h3>
+        <DataTable<FundPoolSummary>
+          data={fundsSummary.pools}
+          emptyLabel="No fund pools configured."
+          columns={[
+            { header: "Pool", accessorKey: "name" },
+            { header: "Commitment", cell: ({ row }) => formatMoney(row.original.commitment) },
+            { header: "Spent", cell: ({ row }) => formatMoney(row.original.spent) },
+            { header: "Pool remaining", cell: ({ row }) => formatMoney(row.original.pool_remaining) },
+            {
+              header: "Status",
+              cell: ({ row }) =>
+                row.original.status.startsWith("Over") ? (
+                  <span className="status-badge danger">{row.original.status}</span>
+                ) : (
+                  row.original.status
+                ),
+            },
+          ]}
+        />
+      </section>
+
+      <section className="work-panel">
+        <h3>Reserved goal balance</h3>
+        <DataTable<FinancialGoal>
+          data={fundsSummary.goals}
+          emptyLabel="No financial goals configured."
+          columns={[
+            { header: "Goal", accessorKey: "name" },
+            { header: "Target", cell: ({ row }) => formatMoney(row.original.target_amount) },
+            { header: "Reserved", cell: ({ row }) => formatMoney(row.original.reserved_balance) },
+            { header: "Remaining to target", cell: ({ row }) => formatMoney(row.original.remaining_to_target) },
+          ]}
+        />
+      </section>
+
+      <section className="work-panel">
+        <h3>Add financial goal</h3>
+        <form className="settings-form" onSubmit={handleGoalSubmit}>
+          <label>
+            Goal name
+            <input value={goalName} onChange={(event) => setGoalName(event.target.value)} aria-invalid={goalNameMissing} />
+          </label>
+          <label>
+            Goal type
+            <select value={goalType} onChange={(event) => setGoalType(event.target.value)}>
+              <option value="emergency">Emergency</option>
+              <option value="sinking_fund">Sinking fund</option>
+              <option value="purchase">Purchase</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>
+            Target amount
+            <input value={targetAmount} onChange={(event) => setTargetAmount(event.target.value)} placeholder="2000.00" />
+          </label>
+          <label>
+            Reserved balance
+            <input value={reservedBalance} onChange={(event) => setReservedBalance(event.target.value)} />
+          </label>
+          <button type="submit" className="primary-button" disabled={goalNameMissing || createGoalMutation.isPending}>
+            Save financial goal
+          </button>
+        </form>
+        {goalNameMissing ? <p className="form-status danger-text">Financial goal name is required.</p> : null}
+        {goalStatus ? (
+          <p className={goalStatus.includes("failed") || goalStatus.includes("required") ? "form-status danger-text" : "form-status ok-text"}>
+            {goalStatus}
+          </p>
+        ) : null}
       </section>
     </section>
   );
@@ -2921,6 +3387,19 @@ function hasImportedFacts(transaction: TransactionDetail | Transaction | null): 
 
 function formatStatus(status: string) {
   return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatMoney(value: string | number | null | undefined) {
+  const amount = Number(value ?? 0);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
+}
+
+function decimalSubtract(left: string, right: string) {
+  return (Number(left) - Number(right)).toFixed(2);
+}
+
+function absMoney(value: string) {
+  return Math.abs(Number(value)).toFixed(2);
 }
 
 function settingValueToInput(value: unknown) {
