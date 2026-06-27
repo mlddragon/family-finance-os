@@ -150,9 +150,9 @@ def login(session: Session, request: LoginRequest, *, client_host: str) -> dict[
     user = _active_user_by_username(session, request.username)
     if user is None or not verify_passphrase(user.passphrase_hash, request.passphrase):
         raise AuthError("invalid_credentials", "Invalid username, passphrase, or TOTP code.", 401)
-    secret = active_totp_secret(session, user.id)
+    totp_key = active_totp_secret(session, user.id)
     if user.totp_required and (
-        secret is None or not pyotp.TOTP(secret).verify(request.totp_code, valid_window=1)
+        totp_key is None or not pyotp.TOTP(totp_key).verify(request.totp_code, valid_window=1)
     ):
         raise AuthError("invalid_credentials", "Invalid username, passphrase, or TOTP code.", 401)
 
@@ -322,10 +322,10 @@ def create_session(
     client_host: str,
 ) -> tuple[str, UserSession]:
     now = datetime.now(timezone.utc)
-    token = secrets.token_urlsafe(48)
+    session_value = secrets.token_urlsafe(48)
     user_session = UserSession(
         user_id=user.id,
-        session_token_hash=hash_secret(token),
+        session_token_hash=hash_secret(session_value),
         created_from=created_from,
         last_seen_at=now.isoformat(),
         idle_expires_at=(now + timedelta(hours=SESSION_IDLE_HOURS)).isoformat(),
@@ -334,7 +334,7 @@ def create_session(
     )
     session.add(user_session)
     session.flush()
-    return token, user_session
+    return session_value, user_session
 
 
 def create_recovery_codes(session: Session, user_id: str) -> list[str]:

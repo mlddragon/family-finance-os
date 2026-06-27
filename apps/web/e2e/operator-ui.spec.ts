@@ -120,6 +120,28 @@ async function waitForMutatingControls(page: import("@playwright/test").Page) {
   await expect(page.getByRole("button", { name: "Validate batch" })).toBeEnabled({ timeout: 10_000 });
 }
 
+const authenticatedAuthStatus = {
+  requires_owner_enrollment: false,
+  authenticated: true,
+  user: {
+    id: "user-1",
+    username: "owner",
+    display_name: "SYNTHETIC Owner",
+    role: "administrator",
+    status: "active",
+    totp_required: true,
+    recovery_required: false,
+  },
+  session: {
+    id: "session-1",
+    created_from: "login",
+    last_seen_at: "2026-06-18T00:00:00Z",
+    idle_expires_at: "2026-06-18T08:00:00Z",
+    absolute_expires_at: "2026-06-25T00:00:00Z",
+  },
+  qa_auth_bypass_available: false,
+};
+
 async function mockApi(
   page: Page,
   onDecision?: (payload: unknown) => void,
@@ -129,6 +151,11 @@ async function mockApi(
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+
+    if (path === "/api/auth/status") {
+      await route.fulfill({ json: authenticatedAuthStatus });
+      return;
+    }
 
     if (path === "/api/permissions/effective") {
       const actionKey = new URL(request.url()).searchParams.get("action_key") ?? "";

@@ -173,13 +173,14 @@ export function fetchAuthStatus() {
 }
 
 export function loginOwner(payload: { username: string; passphrase: string; totpCode: string }) {
+  const { username, passphrase, totpCode } = payload;
   return apiJson<AuthStatus>("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      username: payload.username.trim(),
-      passphrase: payload.passphrase,
-      totp_code: payload.totpCode.trim(),
+      username: username.trim(),
+      passphrase,
+      totp_code: totpCode.trim(),
     }),
   });
 }
@@ -202,6 +203,7 @@ export function enrollOwner(payload: {
   totpConfirmCode: string;
   recoveryAcknowledged: boolean;
 }) {
+  const { username, displayName, passphrase, totpConfirmCode, recoveryAcknowledged } = payload;
   return apiJson<
     AuthStatus & {
       status?: string;
@@ -213,11 +215,11 @@ export function enrollOwner(payload: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      username: payload.username.trim(),
-      display_name: payload.displayName.trim(),
-      passphrase: payload.passphrase,
-      totp_confirm_code: payload.totpConfirmCode.trim(),
-      recovery_acknowledged: payload.recoveryAcknowledged,
+      username: username.trim(),
+      display_name: displayName.trim(),
+      passphrase,
+      totp_confirm_code: totpConfirmCode.trim(),
+      recovery_acknowledged: recoveryAcknowledged,
     }),
   });
 }
