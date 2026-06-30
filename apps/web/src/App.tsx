@@ -397,7 +397,8 @@ async function fetchUIPermissions(actor: string, actorContext: ActorContext): Pr
       return [check.id, permission] as const;
     }),
   );
-  return Object.fromEntries(entries);
+  const permissionMap = Object.fromEntries(entries);
+  return permissionMap;
 }
 
 function useUIPermissions(actor: string, actorContext: ActorContext) {
@@ -984,6 +985,7 @@ function OperatorApp() {
               operatorActor={operatorActor}
               operatorActorContext={operatorActorContext}
               canSaveSettings={permissionAllows(permissions.settings)}
+              canConfirmSourceProfiles={permissionAllows(permissions.importSettings)}
               approvalModeEnabled={settingBoolean(settings, "approval", "approval.approval_mode_enabled")}
               canManageApprovals={permissionAllows(permissions.review)}
               qaControlsEnabled={summary.runtime.qa_controls_enabled}
@@ -3762,6 +3764,7 @@ function SettingsScreen({
   operatorActor,
   operatorActorContext,
   canSaveSettings,
+  canConfirmSourceProfiles,
   approvalModeEnabled,
   canManageApprovals,
   qaControlsEnabled,
@@ -3773,6 +3776,7 @@ function SettingsScreen({
   operatorActor: string;
   operatorActorContext: ActorContext;
   canSaveSettings: boolean;
+  canConfirmSourceProfiles: boolean;
   approvalModeEnabled: boolean;
   canManageApprovals: boolean;
   qaControlsEnabled?: boolean;
@@ -4075,7 +4079,12 @@ function SettingsScreen({
               </label>
               <button
                 type="submit"
-                disabled={!selectedSourceKey || !confirmationNote.trim() || confirmationMutation.isPending || !canSaveSettings}
+                disabled={
+                  !selectedSourceKey ||
+                  !confirmationNote.trim() ||
+                  confirmationMutation.isPending ||
+                  !canConfirmSourceProfiles
+                }
               >
                 Confirm source sample
               </button>

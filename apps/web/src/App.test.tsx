@@ -374,6 +374,15 @@ function mockEffectivePermission(url: URL, init?: RequestInit) {
   };
 }
 
+function permissionProbeCalls(fetchMock: ReturnType<typeof installApiMock>, actionKey: string) {
+  return fetchMock.mock.calls.filter((call) => {
+    if (pathFor(call[0]) !== "/api/permissions/effective") {
+      return false;
+    }
+    return urlFor(call[0]).searchParams.get("action_key") === actionKey;
+  });
+}
+
 function mockPermissionPreview(body: { persona_key: string; action_key: string; data_scope_key: string }) {
   const url = new URL(`http://localhost/api/permissions/effective?action_key=${body.action_key}&data_scope_key=${body.data_scope_key}`);
   const evaluation = mockEffectivePermission(url, {
@@ -1757,6 +1766,8 @@ test("settings screen saves source profile sample confirmation with owner note",
   });
   const confirmSourceButton = screen.getByRole("button", { name: "Confirm source sample" });
   await waitFor(() => expect(confirmSourceButton).not.toBeDisabled());
+  expect(permissionProbeCalls(fetchMock, "imports.settings.configure").length).toBeGreaterThan(0);
+  expect(permissionProbeCalls(fetchMock, "runtime.settings.manage").length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole("button", { name: "Confirm source sample" }));
 
   await waitFor(() => {
@@ -1780,6 +1791,40 @@ test("settings screen saves source profile sample confirmation with owner note",
       },
     ],
   });
+});
+
+test("settings source confirmation uses import settings permission not runtime settings", async () => {
+  window.localStorage.setItem("family-finance-os.activePersonaKey", "administrator");
+  const fetchMock = installApiMock();
+
+  render(<App />);
+
+  await waitForOperatorShell();
+  fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+  expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
+  await waitFor(() => {
+    expect(permissionProbeCalls(fetchMock, "imports.settings.configure").length).toBeGreaterThan(0);
+    expect(permissionProbeCalls(fetchMock, "runtime.settings.manage").length).toBeGreaterThan(0);
+  });
+
+  fireEvent.change(screen.getByLabelText("Source profile"), {
+    target: { value: "chase_prime_visa" },
+  });
+  fireEvent.change(screen.getByLabelText("Owner confirmation note"), {
+    target: { value: "Should not submit under administrator persona." },
+  });
+
+  const confirmSourceButton = screen.getByRole("button", { name: "Confirm source sample" });
+  await waitFor(() => expect(confirmSourceButton).toBeDisabled());
+
+  fireEvent.change(screen.getByLabelText("Change note"), {
+    target: { value: "Administrator can still edit runtime settings." },
+  });
+  fireEvent.change(screen.getByLabelText("Setting value"), {
+    target: { value: "true" },
+  });
+  const saveSettingButton = screen.getByRole("button", { name: "Save setting" });
+  await waitFor(() => expect(saveSettingButton).not.toBeDisabled());
 });
 
 test("dashboard screen adds a manual net worth snapshot", async () => {
