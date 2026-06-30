@@ -42,6 +42,8 @@ Each seed writes a manifest under QA `DATA_ROOT/manifests/` describing scenario 
 
 Update synthetic fixtures and scenario definitions in git when product behavior changes require new validation coverage. Generated QA state (SQLite, reports, bundles, exports) must remain outside git.
 
+**Manual import pack:** [tests/fixtures/synthetic/imports/](../tests/fixtures/synthetic/imports/) holds CSV files for hands-on import/approval QA without seeding (~48 ledger rows across four sources, plus net worth and receipt imports). Regenerate with `make generate-synthetic-imports` when dates go stale.
+
 ## Validation Layers
 
 ### 1. CI (every PR)

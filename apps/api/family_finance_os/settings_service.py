@@ -183,6 +183,30 @@ def default_settings() -> list[dict[str, Any]]:
         },
         {
             "domain": "future_integrations",
+            "setting_key": "vendor_scraper.amazon.enabled",
+            "friendly_name": "Amazon vendor scraper enabled",
+            "value": False,
+            "editable": True,
+            "note_required": True,
+        },
+        {
+            "domain": "future_integrations",
+            "setting_key": "vendor_scraper.costco.enabled",
+            "friendly_name": "Costco vendor scraper enabled",
+            "value": False,
+            "editable": True,
+            "note_required": True,
+        },
+        {
+            "domain": "future_integrations",
+            "setting_key": "vendor_scraper.walmart.enabled",
+            "friendly_name": "Walmart vendor scraper enabled",
+            "value": False,
+            "editable": True,
+            "note_required": True,
+        },
+        {
+            "domain": "future_integrations",
             "setting_key": "ai_integration.status",
             "friendly_name": "AI integration status",
             "value": "disabled",
@@ -366,6 +390,13 @@ def _validate_change(change: SettingChange, existing: Setting) -> None:
             raise SettingsValidationError(
                 "invalid_manual_obligation_window",
                 "Manual obligation window must be an integer from 1 to 365 days.",
+            )
+
+    if change.domain == "future_integrations" and change.setting_key.startswith("vendor_scraper."):
+        if not change.setting_key.endswith(".enabled") or not isinstance(change.value, bool):
+            raise SettingsValidationError(
+                "invalid_vendor_scraper_setting",
+                "Vendor scraper enablement settings must be boolean values.",
             )
 
     if change.domain == "sources" and change.setting_key.endswith(".profile_confirmation_status"):

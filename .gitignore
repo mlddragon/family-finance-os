@@ -50,6 +50,14 @@ attachments/
 statements/
 receipts/
 
+# Synthetic fixture packs (marked SYNTHETIC — safe for git/CI)
+!tests/fixtures/synthetic/
+!tests/fixtures/synthetic/**
+!tests/fixtures/synthetic/imports/
+!tests/fixtures/synthetic/imports/**
+!tests/fixtures/synthetic/imports/*.csv
+!tests/fixtures/synthetic/imports/manifest.json
+
 # Common local financial-data file formats
 *.csv
 *.tsv

@@ -1,0 +1,38 @@
+{
+  "synthetic_fixture_marker": "SYNTHETIC Costco collect fixture for CI only — not real vendor data",
+  "receipt_shape": "warehouse",
+  "receipts": [
+    {
+      "transaction_id": "SYNTHETIC-COSTCO-WH-001",
+      "transaction_date": "2026-06-10",
+      "warehouse_number": "123",
+      "total": "41.48",
+      "lines": [
+        {
+          "item_number": "123456",
+          "description": "SYNTHETIC Paper Towels",
+          "department": "Grocery",
+          "line_type": "item",
+          "quantity": 1,
+          "amount": "19.99"
+        },
+        {
+          "item_number": "789012",
+          "description": "SYNTHETIC Ibuprofen",
+          "department": "Pharmacy",
+          "line_type": "pharmacy",
+          "quantity": 1,
+          "amount": "12.50"
+        },
+        {
+          "item_number": "345678",
+          "description": "SYNTHETIC Bottled Water",
+          "department": "Grocery",
+          "line_type": "item",
+          "quantity": 2,
+          "amount": "8.99"
+        }
+      ]
+    }
+  ]
+}

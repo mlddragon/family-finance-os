@@ -78,6 +78,16 @@ http://127.0.0.1:28081
 
 For a guaranteed clean QA baseline, run `make qa-reset CONFIRM="RESET QA DATA"` before `make qa-seed`.
 
+### Manual import CSV pack (no seed)
+
+For import and approval testing without `qa-seed`, use the synthetic CSV pack under [tests/fixtures/synthetic/imports/](tests/fixtures/synthetic/imports/). Regenerate fresh transaction dates with:
+
+```bash
+make generate-synthetic-imports
+```
+
+See that directory's README for file list, row counts, and suggested manual import order (~48 ledger transactions across four sources, plus net worth and receipt CSVs).
+
 Named QA scenarios are script-level only. The browser does not include reset or reseed controls in v0.4.0. Scenarios are not additive; reset QA before seeding a different scenario.
 
 ```bash

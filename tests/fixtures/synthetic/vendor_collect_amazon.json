@@ -1,0 +1,25 @@
+{
+  "synthetic_fixture_marker": "SYNTHETIC Amazon collect fixture for CI only — not real vendor data",
+  "source": "order_list",
+  "orders": [
+    {
+      "order_id": "SYNTHETIC-ORDER-001",
+      "order_date": "2026-06-12",
+      "order_status": "Delivered",
+      "order_total": "42.50",
+      "items": [
+        {
+          "title": "SYNTHETIC item",
+          "quantity": 1,
+          "price": "42.50"
+        }
+      ],
+      "payment_groups": [
+        {
+          "payment_method": "Visa ending 1234",
+          "amount": "42.50"
+        }
+      ]
+    }
+  ]
+}

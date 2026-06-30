@@ -1,0 +1,35 @@
+{
+  "synthetic_fixture_marker": "SYNTHETIC Amazon split-charge collect fixture — not real vendor data",
+  "source": "order_list",
+  "orders": [
+    {
+      "order_id": "SYNTHETIC-ORDER-SPLIT-001",
+      "order_date": "2026-06-15",
+      "order_status": "Delivered",
+      "order_total": "75.00",
+      "split_charge": true,
+      "items": [
+        {
+          "title": "SYNTHETIC split item A",
+          "quantity": 1,
+          "price": "45.00"
+        },
+        {
+          "title": "SYNTHETIC split item B",
+          "quantity": 1,
+          "price": "30.00"
+        }
+      ],
+      "payment_groups": [
+        {
+          "payment_method": "Gift Card",
+          "amount": "25.00"
+        },
+        {
+          "payment_method": "Visa ending 1234",
+          "amount": "50.00"
+        }
+      ]
+    }
+  ]
+}

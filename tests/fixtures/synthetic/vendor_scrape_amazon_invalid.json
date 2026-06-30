@@ -1,0 +1,43 @@
+{
+  "synthetic_fixture_marker": "SYNTHETIC invalid vendor scrape fixture for validation tests",
+  "vendor_key": "amazon",
+  "run_id": "job_synthetic_invalid",
+  "receipts": [
+    {
+      "external_receipt_id": "synthetic-order-dup",
+      "merchant_name": "SYNTHETIC Amazon",
+      "purchase_date": "2026-06-12",
+      "receipt_total": "50.00",
+      "lines": [
+        {
+          "line_number": 1,
+          "item_description": "SYNTHETIC item A",
+          "quantity": "1",
+          "line_total": "20.00",
+          "category_id": null,
+          "review_status": "needs_review"
+        }
+      ]
+    },
+    {
+      "external_receipt_id": "synthetic-order-dup",
+      "merchant_name": "SYNTHETIC Amazon",
+      "purchase_date": "2026-06-13",
+      "lines": [
+        {
+          "line_number": 1,
+          "item_description": "SYNTHETIC item B",
+          "quantity": "1",
+          "line_total": "10.00",
+          "category_id": null,
+          "review_status": "needs_review"
+        }
+      ]
+    }
+  ],
+  "quality": {
+    "receipt_count": 2,
+    "line_count": 2,
+    "warnings": []
+  }
+}

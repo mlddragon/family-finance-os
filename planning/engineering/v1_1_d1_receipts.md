@@ -203,4 +203,10 @@ Human QA:
 - A2: spendable/funds remain driven by splits, not raw receipt lines.
 - A3: permissions and actor audit context.
 - B2: split API and D11 promotion contract.
-- E1: scraper output must create receipt headers/lines first, reusing D1 contracts.
+- E1: scraper output must create receipt headers/lines first, reusing D1 contracts. **Ship D1 API core before E1 skeleton** so `persist` calls real receipt services, not stubs.
+
+## Implementation phases
+
+1. **API core (first PR)** — `GET/POST/PATCH /api/receipts`, review queue, CSV import preview/accept, promote-to-splits wiring, API tests.
+2. **UI (follow-up)** — Screen E receipt editor from mockups; may lag API.
+3. **E1 unblock** — once phase 1 lands, E1 may call receipt persist helpers with `source_type=vendor_scraper`.

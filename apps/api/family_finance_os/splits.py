@@ -17,6 +17,7 @@ from family_finance_os.models import (
     FinancialGoal,
     FundPool,
     Receipt,
+    ReceiptLineItem,
     TransactionAllocation,
 )
 
@@ -60,6 +61,14 @@ class ReceiptPromotionRequest(BaseModel):
     actor: str = Field(default="owner", min_length=1)
     actor_context: Optional[ActorContext] = None
     receipt_id: str = Field(min_length=1)
+    confirm: bool = False
+    note: Optional[str] = None
+
+
+class ReceiptPromoteToSplitsRequest(BaseModel):
+    actor: str = Field(default="owner", min_length=1)
+    actor_context: Optional[ActorContext] = None
+    transaction_id: str = Field(min_length=1)
     confirm: bool = False
     note: Optional[str] = None
 
@@ -173,11 +182,52 @@ def promote_receipt_lines_to_allocations(
             "Receipt promotion requires a receipt linked to this transaction.",
             404,
         )
-    raise SplitsError(
-        "receipt_promotion_not_implemented",
-        "Receipt line promotion is waiting for the receipt editor implementation.",
-        409,
+    lines = session.scalars(
+        select(ReceiptLineItem)
+        .where(ReceiptLineItem.receipt_id == receipt.id)
+        .order_by(ReceiptLineItem.line_number)
+    ).all()
+    if not lines:
+        raise SplitsError("receipt_lines_required", "Receipt promotion requires at least one line item.")
+    missing_category = next((line for line in lines if not line.category_id), None)
+    if missing_category is not None:
+        raise SplitsError(
+            "receipt_line_category_required",
+            "All receipt lines must have a category before promotion to splits.",
+        )
+    transaction_amount = _money_decimal(transaction.amount)
+    signed_line_amounts = [_allocation_amount_from_receipt_line(transaction, line.line_total) for line in lines]
+    line_total = sum(signed_line_amounts, Decimal("0.00")).quantize(MONEY_QUANT)
+    if line_total != transaction_amount:
+        raise SplitsError(
+            "receipt_promotion_total_mismatch",
+            "Receipt line totals must equal the transaction amount before promotion to splits.",
+        )
+    allocation_lines = [
+        AllocationLineRequest(
+            amount=amount,
+            category_id=line.category_id,
+            subcategory=line.subcategory,
+            fund_pool_id=line.fund_pool_id,
+            memo=line.item_description,
+            source="receipt_promoted",
+        )
+        for line, amount in zip(lines, signed_line_amounts)
+    ]
+    put_request = TransactionAllocationsPutRequest(
+        actor=request.actor,
+        actor_context=request.actor_context,
+        lines=allocation_lines,
+        note=request.note,
     )
+    result = replace_transaction_allocations(session, transaction_id, put_request)
+    receipt = session.get(Receipt, request.receipt_id)
+    if receipt is not None:
+        receipt.applied_as_split_decision_event_id = result["event"]["id"]
+        receipt.review_status = "reviewed"
+        receipt.status = "matched"
+        session.commit()
+    return {**result, "receipt_id": request.receipt_id}
 
 
 def _active_allocations(session: Session, transaction_id: str) -> list[TransactionAllocation]:
@@ -330,6 +380,16 @@ def _decision_value(value: Any) -> Optional[str]:
 
 def _money_decimal(value: Decimal) -> Decimal:
     return Decimal(value).quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
+
+
+def _allocation_amount_from_receipt_line(transaction: CanonicalTransaction, line_total: Decimal) -> Decimal:
+    magnitude = abs(_money_decimal(line_total))
+    transaction_amount = _money_decimal(transaction.amount)
+    if transaction_amount < 0:
+        return -magnitude
+    if transaction_amount > 0:
+        return magnitude
+    raise SplitsError("allocation_amount_invalid", "Transaction amount must be non-zero.")
 
 
 def _money(value: Decimal) -> str:

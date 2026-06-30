@@ -102,7 +102,10 @@ All v1.1 expansion decisions D1–D11 are recorded above. No open planning decis
 1. Schema + spendable engine + auth (backend)
 2. Funds, splits, net worth, analyst export (API + UI)
 3. Dashboard + charts
-4. Receipt manual/CSV
-5. **Last:** Amazon → Costco → Walmart scraper framework and adapters
+4. Receipt manual/CSV (D1) — **required before scraper persist**
+5. Vendor scrapers (E1–E4), sequenced as:
+   - **E1 first** — framework skeleton (jobs, adapter contract, D1 persist hook, synthetic fixtures)
+   - **E2 overlaps E1** — Amazon reference adapter once contract v1 is frozen; E1+E2 complete together as the golden test loop
+   - **E3 and E4 in parallel** — Costco and Walmart adapters after E1+E2 lessons are merged into the framework; per-vendor human QA gates remain sequential for enablement
 
 Target version line: `0.6.0` after v1.0.0 stable / post-RC foundation.

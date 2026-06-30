@@ -1,0 +1,62 @@
+{
+  "feature_coverage": [
+    "ledger_import_all_four_sources",
+    "review_and_approval_workflows",
+    "mixed_basket_merchants_amazon_walmart_costco",
+    "card_payments_refunds_interest",
+    "internal_transfers_and_income",
+    "net_worth_actual_and_estimate_rows",
+    "receipt_csv_import_and_review_queues",
+    "blocked_import_validation_via_blocked_wrong_header.csv",
+    "stale_source_testing_via_chase_prime_visa_stale.csv"
+  ],
+  "files": {
+    "alliant_checking.csv": {
+      "path": "tests/fixtures/synthetic/imports/alliant_checking.csv",
+      "rows": 12
+    },
+    "alliant_credit_card.csv": {
+      "path": "tests/fixtures/synthetic/imports/alliant_credit_card.csv",
+      "rows": 12
+    },
+    "alliant_savings.csv": {
+      "path": "tests/fixtures/synthetic/imports/alliant_savings.csv",
+      "rows": 8
+    },
+    "blocked_wrong_header.csv": {
+      "path": "tests/fixtures/synthetic/imports/blocked_wrong_header.csv",
+      "rows": 1
+    },
+    "chase_prime_visa.csv": {
+      "path": "tests/fixtures/synthetic/imports/chase_prime_visa.csv",
+      "rows": 16
+    },
+    "chase_prime_visa_stale.csv": {
+      "path": "tests/fixtures/synthetic/imports/chase_prime_visa_stale.csv",
+      "rows": 16
+    },
+    "net_worth.csv": {
+      "path": "tests/fixtures/synthetic/imports/net_worth.csv",
+      "rows": 8
+    },
+    "receipts.csv": {
+      "path": "tests/fixtures/synthetic/imports/receipts.csv",
+      "rows": 9
+    }
+  },
+  "generated_for_dates": {
+    "fresh_post_date": "2026-06-29",
+    "fresh_transaction_date": "2026-06-28",
+    "stale_transaction_date": "2026-04-30"
+  },
+  "manual_import_order": [
+    "alliant_checking.csv",
+    "alliant_savings.csv",
+    "alliant_credit_card.csv",
+    "chase_prime_visa.csv",
+    "net_worth.csv",
+    "receipts.csv"
+  ],
+  "pack_version": "1.0.0",
+  "synthetic_fixture_marker": "SYNTHETIC import pack fixture \u2014 not real financial data"
+}
