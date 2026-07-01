@@ -48,3 +48,44 @@ None triggered. No personal `DATA_ROOT` used. No raw transaction data recorded i
 - [docs/qa_validation_strategy.md](../docs/qa_validation_strategy.md)
 - [planning/v1_rc_foundation_review_guide.md](v1_rc_foundation_review_guide.md)
 - [docs/runbooks/v1-rc-release-gates.md](../docs/runbooks/v1-rc-release-gates.md)
+
+---
+
+## PR #101 — v1.1 D1 receipts / E1–E4 vendor scrapers (2026-06-30)
+
+**Runtime:** `ffos-qa`, `http://127.0.0.1:28081`, synthetic only. **Owner verdict:** **Pass with noted exceptions** (merge approved).
+
+### Automated / API verification
+
+| Area | Result |
+| --- | --- |
+| CI on PR #101 | **Pass** (synthetic-checks, Security) |
+| Ledger import pack (4 sources + blocked) | **Pass** |
+| Review backlog (48/48 reviewed) | **Pass** (API decision-events) |
+| Receipt CSV import + promote-to-splits | **Pass** (Amazon, Costco, Walmart) |
+| Manual Amazon split allocations | **Pass** |
+| Net worth import + summary | **Pass** |
+| Reports run (7 types, provisional) | **Pass** |
+| Monthly close draft | **Pass** |
+| Credential rejection on vendor scrape | **Pass** (422) |
+| Vendor adapters enable in Settings | **Pass** |
+
+### Noted exceptions (non-blocking for merge)
+
+| Exception | Notes | Follow-up |
+| --- | --- | --- |
+| Vendor synthetic scrapes in Docker QA | `vendor_scrape_fixture_not_found` at collect — fixtures not under `DATA_ROOT` in image | [#106](https://github.com/mlddragon/family-finance-os/issues/106) |
+| Final monthly close | Blocked by intentional open `schema_mismatch` on wrong-header import (Section 4 demo) | Expected; void batch to test finalize |
+| Hardware Store receipt | Unmatched on review queue (no Chase row) | Optional manual link or known gap |
+| Vendor scrape / receipt UI | API-only in this PR | Intentional PR scope |
+| Governance persona browser spot-check | Automated tests pass; full persona matrix not re-walked in browser this session | `docs/qa_validation_strategy.md` when convenient |
+| Source profile manual confirmation UX | Permission fix landed; removal tracked separately | [#103](https://github.com/mlddragon/family-finance-os/issues/103) |
+
+### Owner decisions recorded (same session)
+
+- Decision 16: UI-only user file I/O, `DATA_ROOT` runtime model — [#107](https://github.com/mlddragon/family-finance-os/issues/107)
+- `DATA_ROOT` default public user directory + installer profile/UNC path — [#108](https://github.com/mlddragon/family-finance-os/issues/108)
+
+### Stop conditions
+
+None triggered. No personal `:28080` data used. No raw rows recorded here.

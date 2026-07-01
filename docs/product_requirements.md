@@ -189,6 +189,20 @@ All trigger points, thresholds, classifications, and behavior choices should liv
 
 Normal household tuning should not require code edits.
 
+## 4.12 User file I/O boundary
+
+Approved owner direction (2026-06-30):
+
+- Users import and export files **only through the application UI**. Routine operation must not require adding or removing files directly from application folders on disk.
+- Backend storage for user/runtime file artifacts belongs under **external `DATA_ROOT`**. Folder layout is an engineering decision; design for all current and future user file inputs and outputs (imports, raw copies, reports, exports, vendor scrape inputs, quarantine, receipt uploads).
+- **App-internal-only** files (static UI, locale, built-in non-financial templates) ship inside the **Docker image** / application package.
+- **QA runtime files** that do not ship with the app but are required for full QA validation must be generated into the correct `DATA_ROOT` paths by **`make qa-seed`**, not read from repo-relative paths at runtime in Docker.
+- **Default `DATA_ROOT` location:** public user directory for the host OS (outside the install tree). A future **installer** must offer **current user profile** or **custom local/UNC drive** path selection ([#108](https://github.com/mlddragon/family-finance-os/issues/108)).
+
+Direct `DATA_ROOT` filesystem access is reserved for backup, recovery, and documented operator disaster recovery—not the primary product workflow.
+
+Implementation: [GitHub #106](https://github.com/mlddragon/family-finance-os/issues/106), [GitHub #107](https://github.com/mlddragon/family-finance-os/issues/107), [GitHub #108](https://github.com/mlddragon/family-finance-os/issues/108). Architecture record: `planning/architecture_decisions_v1.md` Decision 16.
+
 ---
 
 # 5. Current Household Context

@@ -42,7 +42,9 @@ Each seed writes a manifest under QA `DATA_ROOT/manifests/` describing scenario 
 
 Update synthetic fixtures and scenario definitions in git when product behavior changes require new validation coverage. Generated QA state (SQLite, reports, bundles, exports) must remain outside git.
 
-**Manual import pack:** [tests/fixtures/synthetic/imports/](../tests/fixtures/synthetic/imports/) holds CSV files for hands-on import/approval QA without seeding (~48 ledger rows across four sources, plus net worth and receipt imports). Regenerate with `make generate-synthetic-imports` when dates go stale.
+**Runtime fixture materialization (Decision 16):** Git holds synthetic *templates* (e.g. `tests/fixtures/synthetic/imports/`, `vendor_collect_*.json`). `make qa-seed` must copy or generate all runtime files required for full QA gates into the correct `DATA_ROOT` paths. Docker QA must not depend on repo bind-mounts or manual `docker cp`. See [#106](https://github.com/mlddragon/family-finance-os/issues/106).
+
+**Hands-on import QA:** Prefer UI upload of seeded files or files exported from a prior seed run. Committed CSV templates under [tests/fixtures/synthetic/imports/](../tests/fixtures/synthetic/imports/) remain the git source of truth for seed scripts; regenerate with `make generate-synthetic-imports` when dates go stale. Do not treat direct `DATA_ROOT/inbox/` drops as the primary user workflow ([#107](https://github.com/mlddragon/family-finance-os/issues/107)).
 
 ## Validation Layers
 

@@ -37,7 +37,20 @@ Synthetic fixtures must be obviously fake. They should use:
 
 ## Data Directory Rule
 
-If future tooling creates local data directories such as `raw/`, `normalized/`, `reports/`, `snapshots/`, `exports/`, or `imports/`, those directories remain untracked unless the owner explicitly approves a different plan.
+If future tooling creates local data directories such as `raw/`, `normalized/`, `reports/`, `snapshots/`, `exports/`, or `imports/`, those directories remain untracked unless the owner explicitly approved a different plan.
+
+## Runtime File Placement (owner 2026-06-30)
+
+Three tiers:
+
+1. **User file I/O** — Imports and exports flow through the application UI. Users do not routinely add or remove files directly from `DATA_ROOT` subfolders.
+2. **`DATA_ROOT` (external, mounted)** — All user/runtime file artifacts (imports, raw copies, reports, exports, vendor inputs, quarantine, etc.) and the SQLite database. Never inside git.
+3. **Docker image / package** — App-internal-only assets (static UI, locale, built-in templates). Not household financial data.
+4. **QA seeding** — Committed synthetic *templates* may stay in git. Runtime copies required for Docker QA or full QA gates are materialized under `DATA_ROOT` by `make qa-seed`, not loaded from repo-relative paths in installed package code.
+
+**Default location (owner 2026-06-30):** `DATA_ROOT` defaults to the host **public user directory**. A future installer ([#108](https://github.com/mlddragon/family-finance-os/issues/108)) lets the user choose the **current user profile** path or a **custom local or UNC network path**. Dev/Compose env overrides remain valid until the installer ships.
+
+See `planning/owner_decision_record.md`, `planning/architecture_decisions_v1.md` Decision 16, and GitHub issues [#106](https://github.com/mlddragon/family-finance-os/issues/106) / [#107](https://github.com/mlddragon/family-finance-os/issues/107) / [#108](https://github.com/mlddragon/family-finance-os/issues/108).
 
 ## External Services
 

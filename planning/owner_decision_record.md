@@ -4,7 +4,10 @@ This document captures owner decisions from the interactive planning interview a
 
 ## Status
 
-Updated 2026-06-26. The decision content below remains the owner-approved planning record; this section tracks current implementation alignment only.
+Updated 2026-06-30. The decision content below remains the owner-approved planning record; this section tracks current implementation alignment only.
+
+- **User file I/O via UI only approved 2026-06-30:** all user-facing import and export flows through the application UI; runtime user files under external `DATA_ROOT`; app-internal shipped files in the Docker image; QA-only runtime fixtures generated via `make qa-seed`. Backport: [GitHub #107](https://github.com/mlddragon/family-finance-os/issues/107). Vendor synthetic collect seeding: [GitHub #106](https://github.com/mlddragon/family-finance-os/issues/106).
+- **`DATA_ROOT` default location approved 2026-06-30:** default under the **public user directory** (platform-specific); future installer offers **current user profile** or **custom local/UNC drive** path. Tracking: [GitHub #108](https://github.com/mlddragon/family-finance-os/issues/108).
 
 - v0.1.0 through v0.5.0 are implemented on the public `family-finance-os` repository (pyproject `0.5.0` after RC prep).
 - Approved architecture direction is landed: local Docker Compose, browser UI, SQLite operational state, external `DATA_ROOT`, synthetic CI, personal/QA side-by-side runtimes.
@@ -13,6 +16,7 @@ Updated 2026-06-26. The decision content below remains the owner-approved planni
 - Issue #55 view-as direction approved 2026-06-25: non-mutating permission preview in B.1; true impersonation deferred. See `planning/issue_55_view_as_decision_record.md`.
 - Owner real-data smoke is deferred until after `v1.0.0-rc.N` and explicit owner approval; use synthetic QA validation until then. See `docs/qa_validation_strategy.md`.
 - Amazon vendor enrichment is explicitly **post-v1.0.0 stable** (v1.1 direction per `planning/first_closed_loop_slice_v1.md`).
+- **Source profile manual confirmation removal approved 2026-06-30 (Option 1):** drop the Settings attestation step; per-import validate+accept is sufficient format verification. Remove spendable/monthly-close blockers tied to `pending_owner_sample`. Tracking: [GitHub #103](https://github.com/mlddragon/family-finance-os/issues/103). Supersedes [#102](https://github.com/mlddragon/family-finance-os/issues/102).
 - Remaining owner approvals still gate cost-bearing tooling, cloud dependencies, AI data-access changes, credential automation, and major architecture shifts beyond the landed v1 foundation.
 
 ## Runtime And Deployment
@@ -135,6 +139,17 @@ PDF statements are later reconciliation scope. The first slice should rely on ex
 - Captured vendor files should remain local and feed shared vendor schemas.
 - Bank aggregation services are off limits by default unless explicitly approved as paid/external-data tools.
 
+## Source Profile Confirmation
+
+Approved 2026-06-30. **Option 1 — remove manual confirmation.**
+
+- Do **not** require a one-time Settings attestation (`profile_confirmation_status` / “Confirm source sample”) before imports or reporting can be trusted.
+- **Per-import validation** (header match, schema checks, validate+accept) is the runtime format gate.
+- Remove operator-facing confirmation UI and downstream blockers (Spendable `unconfirmed_liquid_source`, monthly-close `unconfirmed_source_profiles`) tied to `pending_owner_sample`.
+- Planning-era “confirm header samples before parser implementation” remains historical context in `planning/import_validation_contract_v1.md`; it is not a runtime workflow requirement.
+
+Implementation tracking: [GitHub #103](https://github.com/mlddragon/family-finance-os/issues/103). Supersedes [#102](https://github.com/mlddragon/family-finance-os/issues/102).
+
 ## Review Workflow
 
 - Mason performs v1 review decisions.
@@ -252,6 +267,31 @@ Cost-bearing approval is required for:
 - Paid bank/data connectors.
 - Paid AI beyond the existing approved OpenAI/ChatGPT workflow.
 - Any tool that creates recurring operational cost.
+
+## User File I/O And Runtime File Placement
+
+Approved 2026-06-30.
+
+- All **user-facing** import and export files must flow through the **application UI**. Users must not add or remove files directly from application folders (`DATA_ROOT` subdirectories, inbox paths, export folders, vendor scrape inboxes, etc.) as part of normal operation.
+- On the backend, user and runtime file artifacts (imports, raw copies, reports, exports, vendor collect inputs, quarantine, logs tied to user actions) live under **external `DATA_ROOT`**. Exact folder and subfolder layout is an engineering decision; design the tree for all eventual user file input and output.
+- **App-internal-only** data (locale, static UI, JSON schema templates, built-in defaults—not household financial data) may live inside the **Docker image** / installed Python package.
+- Committed **synthetic templates** may remain in git (`tests/fixtures/synthetic/`, seed script sources). Anything required at **runtime in Docker QA or full QA gates** that does not ship in the image must be **materialized under `DATA_ROOT`** by `make qa-seed` (and aligned E2E helpers such as `scripts/run_docker_e2e.py`), not resolved via repo-relative paths from installed package code.
+- Direct filesystem access to `DATA_ROOT` remains acceptable for **backup, recovery, and operator disaster recovery** documentation—not for routine import/export workflow.
+
+**Default location and installer (approved 2026-06-30):**
+
+- By default, `DATA_ROOT` lives in the **public user directory** for the host OS—not inside the application install tree, Docker image, or git repo.
+- When a full **installer** is implemented, it must let the owner choose:
+  1. **Current user profile** — standard profile-accessible data location for the active user.
+  2. **Custom drive location** — another local path or a **UNC network path** (e.g. `\\server\share\...` on Windows).
+- Platform-specific default paths and Docker volume wiring are engineering decisions; illustrative examples appear in `planning/architecture_decisions_v1.md` Decision 16.
+- Until the installer exists, dev/Compose may continue using explicit env overrides (e.g. `~/Dillon_Finances_Data`).
+
+Implementation tracking:
+
+- [GitHub #106](https://github.com/mlddragon/family-finance-os/issues/106) — vendor synthetic collect fixtures under `DATA_ROOT` + qa-seed (immediate Docker QA blocker).
+- [GitHub #107](https://github.com/mlddragon/family-finance-os/issues/107) — backport across code, runbooks, and docs.
+- [GitHub #108](https://github.com/mlddragon/family-finance-os/issues/108) — installer default public user directory + profile/custom local/UNC path selection.
 
 ## Automation Maturity Ladder
 
