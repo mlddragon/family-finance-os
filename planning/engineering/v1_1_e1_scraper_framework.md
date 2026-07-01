@@ -6,7 +6,7 @@ Schema source: `planning/engineering/v1_1_a1_schema.md` controls receipt output 
 
 ## Purpose
 
-Implement the vendor scraper framework after funds, splits, net worth, analyst export, dashboard, monthly close, and manual/CSV receipts are stable.
+Implement the vendor scraper framework after funds, splits, net worth, analyst export, dashboard, monthly close, and **D1 receipt API core** (CRUD, CSV import, review queue, promote-to-splits) are stable.
 
 D5 requires this work to be last. The initial adapters are:
 
@@ -213,3 +213,17 @@ Human QA per vendor:
 - D1: scraper output persists through receipt services and review queues.
 - B2: D11 promotion to splits remains the only path from receipt lines to report/fund impacts.
 - C1/B4/B5: dashboard, analyst pack, and monthly close may surface scraper-derived receipt review status but not count unpromoted lines as spending.
+
+## Delivery sequencing (E1–E4)
+
+This track coordinates with [`v1_1_00_overview.md`](v1_1_00_overview.md) vendor scraper sequencing:
+
+| Phase | Track | Gate |
+| --- | --- | --- |
+| 0 | D1 API core | Receipt services callable from E1 `persist` stage |
+| 1 | E1 skeleton | Adapter contract v1 + synthetic round-trip |
+| 2 | E2 Amazon (overlaps E1) | Starts after contract v1 frozen; no Amazon selectors in framework core |
+| 3 | E1+E2 golden loop | Amazon synthetic CI + bounded personal QA; merge lessons into E1 |
+| 4 | E3 Costco ∥ E4 Walmart | Parallel adapter implementation; separate per-vendor enablement QA |
+
+Framework changes discovered during E2 must land in E1 before E3/E4 fork adapter code. Adapters stay disabled-by-default until each vendor's human QA script passes.

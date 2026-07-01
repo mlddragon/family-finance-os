@@ -1,0 +1,29 @@
+{
+  "synthetic_fixture_marker": "SYNTHETIC vendor scrape fixture for CI only — not real vendor data",
+  "vendor_key": "amazon",
+  "run_id": "job_synthetic_001",
+  "receipts": [
+    {
+      "external_receipt_id": "synthetic-order-1",
+      "merchant_name": "SYNTHETIC Amazon",
+      "purchase_date": "2026-06-12",
+      "receipt_total": "42.50",
+      "lines": [
+        {
+          "line_number": 1,
+          "item_description": "SYNTHETIC item",
+          "quantity": "1",
+          "line_total": "42.50",
+          "category_id": null,
+          "review_status": "needs_review",
+          "metadata_json": "{\"review_reason\":\"category_needed\"}"
+        }
+      ]
+    }
+  ],
+  "quality": {
+    "receipt_count": 1,
+    "line_count": 1,
+    "warnings": []
+  }
+}

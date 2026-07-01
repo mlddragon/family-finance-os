@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -20,6 +19,8 @@ REVIEW_BACKLOG_SCENARIO = "review-backlog"
 MONTHLY_CLOSE_READY_SCENARIO = "monthly-close-ready"
 SCENARIO_VERSION = "0.4.0"
 
+IMPORT_PACK_DIR = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "synthetic" / "imports"
+
 SOURCE_KEYS = (
     "alliant_checking",
     "alliant_savings",
@@ -32,76 +33,32 @@ class QaSeedError(RuntimeError):
     pass
 
 
-def _fresh_dates() -> tuple[str, str]:
-    transaction_date = date.today() - timedelta(days=1)
-    post_date = date.today()
-    return transaction_date.isoformat(), post_date.isoformat()
-
-
-def _stale_dates() -> tuple[str, str]:
-    transaction_date = date.today() - timedelta(days=60)
-    post_date = transaction_date + timedelta(days=1)
-    return transaction_date.isoformat(), post_date.isoformat()
+def _load_import_pack_file(filename: str) -> str:
+    path = IMPORT_PACK_DIR / filename
+    if not path.exists():
+        raise QaSeedError(
+            f"Synthetic import pack file missing: {path}. Run `make generate-synthetic-imports`."
+        )
+    return path.read_text(encoding="utf-8")
 
 
 def _source_files(*, stale_sources: set[str] | None = None) -> dict[str, str]:
     stale_sources = stale_sources or set()
-    fresh_transaction_date, fresh_post_date = _fresh_dates()
-    stale_transaction_date, stale_post_date = _stale_dates()
-
-    def dates_for(source_key: str) -> tuple[str, str]:
-        if source_key in stale_sources:
-            return stale_transaction_date, stale_post_date
-        return fresh_transaction_date, fresh_post_date
-
-    checking_date, _ = dates_for("alliant_checking")
-    savings_date, _ = dates_for("alliant_savings")
-    alliant_card_date, alliant_card_post_date = dates_for("alliant_credit_card")
-    chase_date, chase_post_date = dates_for("chase_prime_visa")
+    chase_file = (
+        "chase_prime_visa_stale.csv"
+        if "chase_prime_visa" in stale_sources
+        else "chase_prime_visa.csv"
+    )
     return {
-        "alliant_checking": "\n".join(
-            [
-                "Date,Description,Amount,Balance",
-                f"{checking_date},SYNTHETIC PAYROLL,2450.00,5200.00",
-                f"{checking_date},SYNTHETIC UTILITY BILL,-125.32,5074.68",
-                "",
-            ]
-        ),
-        "alliant_savings": "\n".join(
-            [
-                "Date,Description,Amount,Balance",
-                f"{savings_date},SYNTHETIC SAVINGS TRANSFER,300.00,12000.00",
-                f"{savings_date},SYNTHETIC INTEREST,4.25,12004.25",
-                "",
-            ]
-        ),
-        "alliant_credit_card": "\n".join(
-            [
-                "Date,Description,Amount,Balance,Post Date",
-                f"{alliant_card_date},SYNTHETIC HARDWARE STORE,78.42,78.42,{alliant_card_post_date}",
-                f"{alliant_card_date},SYNTHETIC CARD PAYMENT,-78.42,0.00,{alliant_card_post_date}",
-                "",
-            ]
-        ),
-        "chase_prime_visa": "\n".join(
-            [
-                "Transaction Date,Post Date,Description,Category,Amount",
-                f"{chase_date},{chase_post_date},SYNTHETIC GROCERY MARKET,Food & Drink,-62.41",
-                f"{chase_date},{chase_post_date},SYNTHETIC ONLINE ORDER,Shopping,-44.18",
-                "",
-            ]
-        ),
+        "alliant_checking": _load_import_pack_file("alliant_checking.csv"),
+        "alliant_savings": _load_import_pack_file("alliant_savings.csv"),
+        "alliant_credit_card": _load_import_pack_file("alliant_credit_card.csv"),
+        "chase_prime_visa": _load_import_pack_file(chase_file),
     }
 
 
 def _blocked_import_file() -> str:
-    return "\n".join(
-        [
-            "Wrong,Header",
-            "SYNTHETIC WRONG HEADER,12.34",
-            "",
-        ]
-    )
+    return _load_import_pack_file("blocked_wrong_header.csv")
 
 
 def _system_actor_context(system_persona_key: str) -> dict[str, Any]:
@@ -419,7 +376,7 @@ def _seed_baseline(client: TestClient) -> dict[str, Any]:
     advisor_export = _advisor_export(client)
 
     return {
-        "description": "Smallest useful closed loop with accepted imports, several reviewed transactions, reports, draft close, and advisor export.",
+        "description": "Accepted imports from the synthetic import pack with several reviewed transactions, reports, draft close, and advisor export.",
         "accepted_import_batch_ids": accepted_batch_ids,
         "accepted_source_keys": sorted(_source_files().keys()),
         "reviewed_transaction_count": reviewed_count,

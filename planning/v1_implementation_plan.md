@@ -23,7 +23,8 @@
 ## Runtime Defaults
 
 - Local repository: `/Users/masondillon/GitHub/Dillon_Finances`.
-- Host data directory for docs/examples: `~/Dillon_Finances_Data`.
+- **Production default (Decision 16 / #108):** host `DATA_ROOT` under the public user directory; installer chooses profile or custom local/UNC path.
+- **Dev/Compose interim:** host data directory `~/Dillon_Finances_Data` (personal) and `~/Dillon_Finances_QA_Data` (QA) via env/compose overrides until installer ships.
 - Container data mount: `/data`.
 - App port: host `127.0.0.1:8080` to container `8080`.
 - Default `DATA_ROOT`: `/data`.
@@ -46,6 +47,8 @@ logs/
 ```
 
 The app must refuse startup if `DATA_ROOT` resolves inside the git repository.
+
+**User file I/O (Decision 16, owner 2026-06-30):** User imports and exports go through the UI into `DATA_ROOT`. App-internal assets ship in the image. QA runtime fixtures are materialized by `make qa-seed`. Backport: [#107](https://github.com/mlddragon/family-finance-os/issues/107).
 
 ## Milestone PR Sequence
 

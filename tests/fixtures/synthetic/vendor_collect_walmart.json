@@ -1,0 +1,38 @@
+{
+  "synthetic_fixture_marker": "SYNTHETIC Walmart collect fixture for CI only — not real vendor data",
+  "receipt_shape": "pickup",
+  "orders": [
+    {
+      "order_id": "SYNTHETIC-WMT-PICKUP-001",
+      "order_date": "2026-06-08",
+      "order_total": "18.47",
+      "lines": [
+        {
+          "component_type": "item",
+          "description": "SYNTHETIC Milk",
+          "quantity": 1,
+          "amount": "3.99"
+        },
+        {
+          "component_type": "substitution",
+          "description": "SYNTHETIC Substituted: OJ for Apple Juice",
+          "quantity": 1,
+          "amount": "4.50",
+          "original_item": "Apple Juice"
+        },
+        {
+          "component_type": "pickup_fee",
+          "description": "Pickup fee",
+          "quantity": 1,
+          "amount": "6.99"
+        },
+        {
+          "component_type": "item",
+          "description": "SYNTHETIC Bread",
+          "quantity": 1,
+          "amount": "2.99"
+        }
+      ]
+    }
+  ]
+}

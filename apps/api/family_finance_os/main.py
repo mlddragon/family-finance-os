@@ -122,6 +122,20 @@ from family_finance_os.net_worth import (
     update_net_worth_snapshot,
 )
 from family_finance_os.operator_summary import operator_summary_payload
+from family_finance_os.receipts import (
+    ActorReceiptRequest,
+    ReceiptCreateRequest,
+    ReceiptError,
+    ReceiptPatchRequest,
+    accept_receipt_import,
+    create_receipt,
+    get_receipt,
+    list_receipt_review_queue,
+    list_receipts,
+    persist_vendor_scraper_receipts,
+    preview_receipt_import,
+    update_receipt,
+)
 from family_finance_os.permissions import (
     ActionKey,
     DataScopeKey,
@@ -179,6 +193,7 @@ from family_finance_os.settings_service import (
 )
 from family_finance_os.spendable import SpendableError, compute_spendable
 from family_finance_os.splits import (
+    ReceiptPromoteToSplitsRequest,
     ReceiptPromotionRequest,
     SplitsError,
     TransactionAllocationsDeleteRequest,
@@ -187,6 +202,17 @@ from family_finance_os.splits import (
     list_transaction_allocations,
     promote_receipt_lines_to_allocations,
     replace_transaction_allocations,
+)
+from family_finance_os.vendor_scrapes import (
+    VendorScrapeCancelRequest,
+    VendorScrapeError,
+    VendorScrapeRunRequest,
+    cancel_vendor_scrape,
+    get_vendor_scrape_events,
+    get_vendor_scrape_job,
+    list_vendor_adapters,
+    reject_forbidden_request_fields,
+    run_vendor_scrape,
 )
 
 
@@ -621,6 +647,222 @@ def create_app(
                 )
             except NetWorthError as exc:
                 raise net_worth_http_error(exc) from exc
+
+    def receipt_http_error(exc: ReceiptError) -> HTTPException:
+        return HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message, **exc.detail},
+        )
+
+    @app.get("/api/receipts")
+    def get_receipts(
+        status: Optional[str] = Query(default=None),
+        review_status: Optional[str] = Query(default=None),
+        transaction_id: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return {
+                    "receipts": list_receipts(
+                        session,
+                        status=status,
+                        review_status=review_status,
+                        transaction_id=transaction_id,
+                    )
+                }
+            except ReceiptError as exc:
+                raise receipt_http_error(exc) from exc
+
+    @app.post("/api/receipts")
+    def post_receipt(payload: ReceiptCreateRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"receipt": create_receipt(session, payload)}
+            except ReceiptError as exc:
+                raise receipt_http_error(exc) from exc
+
+    @app.get("/api/receipts/{receipt_id}")
+    def get_receipt_detail(receipt_id: str) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return {"receipt": get_receipt(session, receipt_id)}
+            except ReceiptError as exc:
+                raise receipt_http_error(exc) from exc
+
+    @app.patch("/api/receipts/{receipt_id}")
+    def patch_receipt(receipt_id: str, payload: ReceiptPatchRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return {"receipt": update_receipt(session, receipt_id, payload)}
+            except ReceiptError as exc:
+                raise receipt_http_error(exc) from exc
+
+    @app.post("/api/receipts/imports")
+    async def post_receipt_import(
+        file: UploadFile = File(...),
+        actor: Optional[str] = Form(default="owner"),
+        actor_context_json: Optional[str] = Form(default=None),
+    ) -> Dict[str, Any]:
+        actor_context = (
+            ActorContext.model_validate_json(actor_context_json) if actor_context_json else None
+        )
+        active_data_root = get_data_root()
+        with create_session() as session:
+            require_permission(
+                session,
+                actor or "owner",
+                ActionKey.IMPORTS_RUN,
+                DataScopeKey.IMPORTED_SOURCE_RECORDS,
+                actor_context=actor_context,
+            )
+            try:
+                preview = preview_receipt_import(
+                    active_data_root,
+                    filename=file.filename or "SYNTHETIC_receipts.csv",
+                    content=await file.read(),
+                    actor=actor or "owner",
+                    actor_context=actor_context,
+                )
+                return {"import": preview}
+            except ReceiptError as exc:
+                raise receipt_http_error(exc) from exc
+
+    @app.post("/api/receipts/imports/{import_id}/accept")
+    def post_receipt_import_accept(import_id: str, payload: ActorReceiptRequest) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.IMPORTS_RUN,
+                DataScopeKey.IMPORTED_SOURCE_RECORDS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return accept_receipt_import(session, active_data_root, import_id, payload)
+            except ReceiptError as exc:
+                raise receipt_http_error(exc) from exc
+
+    @app.get("/api/receipt-review-queue")
+    def get_receipt_review_queue() -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return list_receipt_review_queue(session)
+            except ReceiptError as exc:
+                raise receipt_http_error(exc) from exc
+
+    @app.post("/api/receipts/{receipt_id}/promote-to-splits")
+    def post_receipt_promote_to_splits(
+        receipt_id: str,
+        payload: ReceiptPromoteToSplitsRequest,
+    ) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.REVIEW_DECIDE,
+                DataScopeKey.REVIEW_DECISIONS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return promote_receipt_lines_to_allocations(
+                    session,
+                    payload.transaction_id,
+                    ReceiptPromotionRequest(
+                        actor=payload.actor,
+                        actor_context=payload.actor_context,
+                        receipt_id=receipt_id,
+                        confirm=payload.confirm,
+                        note=payload.note,
+                    ),
+                )
+            except SplitsError as exc:
+                raise splits_http_error(exc) from exc
+
+    def vendor_scrape_http_error(exc: VendorScrapeError) -> HTTPException:
+        return HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message, **exc.detail},
+        )
+
+    @app.get("/api/vendor-adapters")
+    def get_vendor_adapters() -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return list_vendor_adapters(session)
+            except VendorScrapeError as exc:
+                raise vendor_scrape_http_error(exc) from exc
+
+    @app.post("/api/vendor-scrapes")
+    def post_vendor_scrape(body: Dict[str, Any]) -> Dict[str, Any]:
+        active_data_root = get_data_root()
+        with create_session() as session:
+            try:
+                reject_forbidden_request_fields(body)
+                payload = VendorScrapeRunRequest.model_validate(body)
+            except VendorScrapeError as exc:
+                raise vendor_scrape_http_error(exc) from exc
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.IMPORTS_RUN,
+                DataScopeKey.IMPORTED_SOURCE_RECORDS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return run_vendor_scrape(
+                    session,
+                    active_data_root,
+                    payload,
+                    synthetic_artifact_marker="SYNTHETIC vendor scrape artifact for CI only",
+                )
+            except VendorScrapeError as exc:
+                raise vendor_scrape_http_error(exc) from exc
+
+    @app.get("/api/vendor-scrapes/{job_id}")
+    def get_vendor_scrape(job_id: str) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return get_vendor_scrape_job(session, job_id)
+            except VendorScrapeError as exc:
+                raise vendor_scrape_http_error(exc) from exc
+
+    @app.get("/api/vendor-scrapes/{job_id}/events")
+    def get_vendor_scrape_job_events(job_id: str) -> Dict[str, Any]:
+        with create_session() as session:
+            try:
+                return get_vendor_scrape_events(session, job_id)
+            except VendorScrapeError as exc:
+                raise vendor_scrape_http_error(exc) from exc
+
+    @app.post("/api/vendor-scrapes/{job_id}/cancel")
+    def post_vendor_scrape_cancel(job_id: str, payload: VendorScrapeCancelRequest) -> Dict[str, Any]:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.IMPORTS_RUN,
+                DataScopeKey.IMPORTED_SOURCE_RECORDS,
+                actor_context=payload.actor_context,
+            )
+            try:
+                return cancel_vendor_scrape(session, job_id, payload)
+            except VendorScrapeError as exc:
+                raise vendor_scrape_http_error(exc) from exc
 
     def funds_http_error(exc: FundsError) -> HTTPException:
         return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})

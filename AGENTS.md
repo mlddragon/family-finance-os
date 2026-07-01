@@ -40,6 +40,7 @@ Primary engineers must not weaken security boundaries, skip required CI checks, 
 - Keep operational codes stable in APIs. User-facing display text should come from locale files or install settings where appropriate.
 - Prefer small, reviewable changes with focused tests.
 - Keep generated runtime artifacts out of git, including QA/demo outputs.
+- **User file I/O:** imports and exports go through the UI; runtime user files live under external `DATA_ROOT` (default: public user directory; installer: profile or local/UNC path — [#108](https://github.com/mlddragon/family-finance-os/issues/108)); app-internal shipped assets stay in the image/package; QA runtime fixtures are materialized by `make qa-seed` (see `planning/architecture_decisions_v1.md` Decision 16, [#107](https://github.com/mlddragon/family-finance-os/issues/107)). Do not add runtime reads of `tests/fixtures/` from installed package paths.
 
 ## Testing And QA
 

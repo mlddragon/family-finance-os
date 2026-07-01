@@ -1,0 +1,10 @@
+merchant,purchase_date,receipt_total,line_description,line_quantity,line_amount,category_id,transaction_id
+SYNTHETIC Amazon,2026-06-29,128.47,SYNTHETIC household supplies,1,48.47,,
+SYNTHETIC Amazon,2026-06-29,128.47,SYNTHETIC book bundle,1,40.00,,
+SYNTHETIC Amazon,2026-06-29,128.47,SYNTHETIC pantry item,1,40.00,,
+SYNTHETIC Walmart,2026-06-29,96.33,SYNTHETIC groceries,1,62.33,,
+SYNTHETIC Walmart,2026-06-29,96.33,SYNTHETIC household,1,34.00,,
+SYNTHETIC Costco,2026-06-29,214.88,SYNTHETIC bulk groceries,1,120.00,,
+SYNTHETIC Costco,2026-06-29,214.88,SYNTHETIC household goods,1,54.88,,
+SYNTHETIC Costco,2026-06-29,214.88,SYNTHETIC pharmacy line,1,40.00,,
+SYNTHETIC Hardware Store,2026-06-29,78.42,SYNTHETIC paint supplies,1,78.42,,

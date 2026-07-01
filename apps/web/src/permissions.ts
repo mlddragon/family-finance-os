@@ -8,6 +8,12 @@ export const UI_PERMISSION_CHECKS: UIPermissionCheck[] = [
     data_scope_key: "imported_source_records",
   },
   {
+    id: "importSettings",
+    label: "Configure import settings",
+    action_key: "imports.settings.configure",
+    data_scope_key: "source_profiles_import_config",
+  },
+  {
     id: "review",
     label: "Review decisions",
     action_key: "review.decide",

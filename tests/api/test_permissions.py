@@ -253,3 +253,114 @@ def test_preview_endpoint_available_in_dev_mode(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["allowed"] is False
+
+
+def _source_confirmation_patch(note: str = "SYNTHETIC owner confirmed parser sample.") -> dict:
+    return {
+        "actor": "owner",
+        "changes": [
+            {
+                "domain": "sources",
+                "setting_key": "sources.chase_prime_visa.profile_confirmation_status",
+                "value": "owner_confirmed_header_sample",
+                "note": note,
+            }
+        ],
+    }
+
+
+def test_finance_manager_allowed_source_profile_confirmation(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        client.get("/api/settings")
+        response = client.patch(
+            "/api/settings",
+            json={
+                **_source_confirmation_patch(),
+                "actor_context": finance_manager_context(),
+            },
+        )
+
+    assert response.status_code == 200
+    changed = next(
+        setting
+        for setting in response.json()["settings"]
+        if setting["setting_key"] == "sources.chase_prime_visa.profile_confirmation_status"
+    )
+    assert changed["value"] == "owner_confirmed_header_sample"
+
+
+def test_administrator_denied_source_profile_confirmation(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        client.get("/api/settings")
+        response = client.patch(
+            "/api/settings",
+            json={
+                **_source_confirmation_patch(),
+                "actor_context": administrator_context(),
+            },
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "permission_denied"
+
+
+def test_administrator_allowed_runtime_settings_but_denied_import_settings(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        runtime_allowed = client.get(
+            "/api/permissions/effective",
+            params={
+                "action_key": ActionKey.RUNTIME_SETTINGS_MANAGE.value,
+                "data_scope_key": DataScopeKey.RUNTIME_SETTINGS.value,
+                "actor": "owner",
+            },
+            headers={"X-Actor-Context": json.dumps(administrator_context())},
+        )
+        import_settings_denied = client.get(
+            "/api/permissions/effective",
+            params={
+                "action_key": ActionKey.IMPORTS_SETTINGS_CONFIGURE.value,
+                "data_scope_key": DataScopeKey.SOURCE_PROFILES_IMPORT_CONFIG.value,
+                "actor": "owner",
+            },
+            headers={"X-Actor-Context": json.dumps(administrator_context())},
+        )
+
+    assert runtime_allowed.status_code == 200
+    assert runtime_allowed.json()["allowed"] is True
+    assert import_settings_denied.status_code == 200
+    assert import_settings_denied.json()["allowed"] is False
+
+
+def test_finance_manager_allowed_import_settings_but_denied_runtime_settings(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        runtime_denied = client.get(
+            "/api/permissions/effective",
+            params={
+                "action_key": ActionKey.RUNTIME_SETTINGS_MANAGE.value,
+                "data_scope_key": DataScopeKey.RUNTIME_SETTINGS.value,
+                "actor": "owner",
+            },
+            headers={"X-Actor-Context": json.dumps(finance_manager_context())},
+        )
+        import_settings_allowed = client.get(
+            "/api/permissions/effective",
+            params={
+                "action_key": ActionKey.IMPORTS_SETTINGS_CONFIGURE.value,
+                "data_scope_key": DataScopeKey.SOURCE_PROFILES_IMPORT_CONFIG.value,
+                "actor": "owner",
+            },
+            headers={"X-Actor-Context": json.dumps(finance_manager_context())},
+        )
+
+    assert runtime_denied.status_code == 200
+    assert runtime_denied.json()["allowed"] is False
+    assert import_settings_allowed.status_code == 200
+    assert import_settings_allowed.json()["allowed"] is True

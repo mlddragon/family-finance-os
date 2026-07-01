@@ -2,7 +2,10 @@ PERSONAL_DATA_ROOT ?= $(HOME)/FamilyFinanceOS_Data
 QA_DATA_ROOT ?= $(HOME)/FamilyFinanceOS_QA_Data
 QA_SCENARIO ?= baseline
 
-.PHONY: personal-up personal-down qa-up qa-down qa-seed qa-reset qa-update qa-deploy
+.PHONY: personal-up personal-down qa-up qa-down qa-seed qa-reset qa-update qa-deploy generate-synthetic-imports
+
+generate-synthetic-imports:
+	.venv/bin/python scripts/generate_synthetic_import_pack.py
 
 qa-update qa-deploy:
 	./scripts/qa_deploy.sh

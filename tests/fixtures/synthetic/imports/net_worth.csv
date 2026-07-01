@@ -1,0 +1,9 @@
+snapshot_date,asset_or_liability,account_name,institution,category,subcategory,balance,valuation_method,confidence,source_notes
+2026-06-30,asset,SYNTHETIC Checking,Local Credit Union,liquid_cash,checking,5200.00,actual,high,
+2026-06-30,asset,SYNTHETIC Savings,Local Credit Union,liquid_cash,savings,12829.25,actual,high,
+2026-06-30,asset,SYNTHETIC Brokerage,Example Brokerage,investment,taxable,18500.00,actual,high,
+2026-06-30,asset,SYNTHETIC Vehicle,Garage,vehicle,sedan,8000.00,estimate,medium,SYNTHETIC import pack fixture — not real financial data
+2026-06-30,asset,SYNTHETIC Home Equity Estimate,Appraisal Service,home,primary_residence,120000.00,estimate,low,SYNTHETIC import pack fixture — not real financial data
+2026-06-30,liability,SYNTHETIC Card,Card Issuer,consumer_debt,card,915.75,actual,high,
+2026-06-30,liability,SYNTHETIC Auto Loan,Credit Union,consumer_debt,auto,8400.00,actual,high,
+2026-06-30,liability,SYNTHETIC Mortgage,Lender,consumer_debt,mortgage,210000.00,actual,high,

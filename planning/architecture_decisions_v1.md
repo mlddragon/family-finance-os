@@ -122,6 +122,12 @@ Runtime guardrail:
 
 The app should refuse to run if financial data storage is configured inside the git repo.
 
+Default host location (owner 2026-06-30, installer [#108](https://github.com/mlddragon/family-finance-os/issues/108)):
+
+- **Default:** public user directory for the host OS (outside install tree).
+- **Installer choice:** current user profile location, or a custom local path / UNC network path.
+- Dev/Compose may override via env until installer ships.
+
 Serious alternatives considered:
 
 - Data folders under the repo but gitignored: simpler, but higher accidental-commit risk.
@@ -150,7 +156,7 @@ Approved direction: guided manual imports first.
 Flow:
 
 1. User manually downloads bank/vendor exports.
-2. User places files in `DATA_ROOT/inbox/` or uploads through the local UI.
+2. User uploads through the local UI (primary path). Files land under `DATA_ROOT` via API—not direct folder manipulation by the user. See **Decision 16** for the full file-placement model; legacy inbox scan may remain for seed/system workflows until backport completes ([#107](https://github.com/mlddragon/family-finance-os/issues/107)).
 3. App detects candidate files.
 4. App identifies source type where possible.
 5. App validates schema, freshness, duplicates, and expected fields.
@@ -393,6 +399,32 @@ Serious alternatives considered:
 - Flat Python-first repo: faster initially, higher script-sprawl risk.
 - Separate frontend/backend repos: too much coordination overhead now.
 - Everything under `src/`: workable, but less clear once React, FastAPI, vendor plugins, reports, and Docker all exist.
+
+## Decision 16: User File I/O And Runtime File Placement
+
+Approved direction (owner 2026-06-30): UI-mediated user file I/O; `DATA_ROOT` for runtime user artifacts; image-resident app-internal files; qa-seed for QA runtime fixtures.
+
+Rules:
+
+1. **User imports and exports** — Users interact only through the application UI (upload, download, export actions). They do not routinely add or remove files from `DATA_ROOT` subfolders by hand.
+2. **Runtime storage** — All user/runtime file artifacts live under external mounted `DATA_ROOT`. Extend the layout in Decision 5 as new file flows appear (vendor scrape inboxes, receipt uploads, advisor exports, etc.).
+3. **App-internal files** — Non-user data shipped with the app (static assets, locale, built-in templates) lives in the Docker image / package, not in `DATA_ROOT`.
+4. **QA and E2E** — Synthetic templates may stay in git. Runtime copies required for Docker QA or full QA gates are written under `DATA_ROOT` by `make qa-seed` and shared seed helpers—not read via `Path(__file__).parents[N]` into `tests/fixtures/` at runtime ([#106](https://github.com/mlddragon/family-finance-os/issues/106), [#107](https://github.com/mlddragon/family-finance-os/issues/107)).
+5. **Default `DATA_ROOT` location** — By default, `DATA_ROOT` lives in the **public user directory** for the host OS (not inside the application install tree). When a full installer is implemented ([#108](https://github.com/mlddragon/family-finance-os/issues/108)), the user chooses either the **current user profile** data location or a **custom drive path**, including **UNC network paths** on Windows. Engineering owns exact per-OS default paths and Docker volume mapping.
+
+Illustrative default paths (finalize at install time):
+
+| OS | Public user directory default |
+| --- | --- |
+| Windows | `%PUBLIC%\Family Finance OS\Data` |
+| macOS | `/Users/Shared/Family Finance OS/Data` |
+
+Profile override examples: `%USERPROFILE%\Documents\Family Finance OS\Data`, `~/Library/Application Support/Family Finance OS/Data`. Custom/UNC example: `\\nas\household\Family Finance OS\Data`.
+
+Serious alternatives considered:
+
+- Filesystem inbox as co-equal user path: simpler for power users, weakens validation/audit and confuses personal vs QA data roots.
+- Bundle all QA fixtures in the Docker image: fixes Docker paths but duplicates seed logic and bloats the image; rejected in favor of `DATA_ROOT` + qa-seed.
 
 ## Deferred Decisions And Explicit Gates
 

@@ -59,8 +59,14 @@ Personal and QA data roots must be separate host directories. Both remain outsid
 Recommended defaults:
 
 ```text
-~/Dillon_Finances_Data
-~/Dillon_Finances_QA_Data
+# Production (after installer — Decision 16 / #108)
+Windows:  %PUBLIC%\Family Finance OS\Data
+macOS:    /Users/Shared/Family Finance OS/Data
+# Or user-selected profile path or UNC path (\\server\share\...)
+
+# Dev/Compose interim (until installer)
+~/Dillon_Finances_Data          # personal
+~/Dillon_Finances_QA_Data       # synthetic QA
 ```
 
 The app should continue enforcing the existing data-root safety rules:
@@ -106,6 +112,8 @@ All five initial scenarios are implemented (v0.4.0):
 - `monthly-close-ready`: a dataset ready for draft/final monthly close flows.
 
 Seed with `make qa-seed QA_SCENARIO=<name>`. See README and `docs/qa_validation_strategy.md` for expected outcomes.
+
+**Runtime fixture rule (Decision 16):** Seed scripts must materialize every synthetic file required for full QA gates (ledger imports, vendor collect fixtures, receipt CSVs, etc.) into `DATA_ROOT`. Git holds templates only; Docker QA must not read `tests/fixtures/` from installed package paths ([#106](https://github.com/mlddragon/family-finance-os/issues/106), [#107](https://github.com/mlddragon/family-finance-os/issues/107)).
 
 Scenario runs should write a manifest under QA `DATA_ROOT` describing:
 

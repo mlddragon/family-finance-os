@@ -55,11 +55,23 @@ Phase 1 must unblock later track docs and implementation without forcing later w
 | B4 | Analyst export | Local-only export pack additions for v1.1 summaries | A1, A2, B1-B3 | Must preserve privacy boundary and explicit user action. |
 | B5 | Monthly close | Close blockers/warnings for funds and spendable, snapshot bundle additions | A1, A2, B1-B4, existing close flow | Final close override requires Financial Governor elevation and audit. |
 | C1 | Dashboard | Charts and dashboard tiles for cashflow, category spend, pools, net worth, confidence | A2, B1-B5 | Uses mockup Dashboard screen. |
-| D1 | Receipts manual/CSV | Receipt headers, line items, CSV import/review queue, promote-to-split action | A1, A3, B2 | Receipt lines are enrichment until explicit split promotion. |
-| E1 | Scraper framework | Local vendor scrape run records, credential/session artifact boundaries, shared adapter contract | D1, B2, B4 | Must be local `DATA_ROOT` only. |
-| E2 | Amazon scraper | Amazon adapter using scraper framework | E1 | Runs after all other v1.1 core work is stable. |
-| E3 | Costco scraper | Costco adapter using scraper framework | E1, E2 lessons | Same credential/session artifact gates. |
-| E4 | Walmart scraper | Walmart adapter using scraper framework | E1-E3 lessons | Last adapter in this pass. |
+| D1 | Receipts manual/CSV | Receipt headers, line items, CSV import/review queue, promote-to-split action | A1, A3, B2 | Receipt lines are enrichment until explicit split promotion. **Prerequisite for E1 persist stage.** |
+| E1 | Scraper framework | Local vendor scrape run records, credential/session artifact boundaries, shared adapter contract | D1 API core, B2 | Must be local `DATA_ROOT` only. Adapter contract v1 frozen before E2 goes deep. |
+| E2 | Amazon scraper | Amazon reference adapter; overlaps late E1 | E1 contract v1 | Overlap E1 once registry/jobs/persist hook exist; converges with E1 in golden-loop QA. |
+| E3 | Costco scraper | Costco adapter | E1+E2 golden loop | **May start in parallel with E4** after E1 framework lessons are merged back from E2. |
+| E4 | Walmart scraper | Walmart adapter | E1+E2 golden loop | **May start in parallel with E3** after E1 framework lessons are merged back from E2. |
+
+### Vendor scraper sequencing (E1–E4)
+
+Approved build order still places all scraper work **after** D1/B2 core is stable. Within the scraper phase:
+
+1. **D1 API core** — receipt CRUD, CSV import, review queue, promote-to-splits (E1 `persist` depends on this).
+2. **E1 skeleton** — adapter registry, scrape jobs API, stage pipeline, `DATA_ROOT` safety, synthetic fixture round-trip through D1 services.
+3. **E2 overlaps E1** — Amazon adapter starts once **adapter contract v1** is frozen (interface + synthetic persist test, no vendor-specific code in framework).
+4. **E1+E2 golden loop** — Amazon synthetic CI + one bounded personal QA run; framework lessons merged into E1 before downstream adapters fork patterns.
+5. **E3 ∥ E4** — Costco and Walmart adapters may proceed **in parallel** after step 4; each adapter stays **disabled until its own human QA script passes** (no parallel enablement on personal data).
+
+CI never hits real vendors. Synthetic fixtures only in automated tests.
 
 ## Shared Conventions
 

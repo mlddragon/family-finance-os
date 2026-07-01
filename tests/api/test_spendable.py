@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -245,9 +247,13 @@ def test_spendable_snapshot_is_persisted_only_when_requested(tmp_path):
 def test_operator_summary_includes_spendable_and_next_action(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
-    with TestClient(app) as client:
-        _seed_spendable_fixture(tmp_path)
-        response = client.get("/api/operator-summary")
+    with patch("family_finance_os.spendable.date") as mock_date:
+        mock_date.today = lambda: date(2026, 6, 26)
+        mock_date.fromisoformat = date.fromisoformat
+        mock_date.side_effect = date
+        with TestClient(app) as client:
+            _seed_spendable_fixture(tmp_path)
+            response = client.get("/api/operator-summary")
 
     assert response.status_code == 200
     body = response.json()
