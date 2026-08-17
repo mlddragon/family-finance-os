@@ -322,13 +322,16 @@ def test_voided_destroyed_import_batch_cannot_be_revalidated(tmp_path):
 def test_revoid_does_not_delete_reuploaded_same_filename(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
     filename = "History-061926-011648.csv"
+    today = date.today()
+    first_date = today - timedelta(days=2)
+    second_date = today - timedelta(days=1)
     content = (
         "Date,Description,Amount,Balance\n"
-        "06/18/2026,SYNTHETIC FIRST UPLOAD,$12.34,$100.00\n"
+        f"{first_date.strftime('%m/%d/%Y')},SYNTHETIC FIRST UPLOAD,$12.34,$100.00\n"
     )
     replacement_content = (
         "Date,Description,Amount,Balance\n"
-        "06/19/2026,SYNTHETIC SECOND UPLOAD,$45.67,$145.67\n"
+        f"{second_date.strftime('%m/%d/%Y')},SYNTHETIC SECOND UPLOAD,$45.67,$145.67\n"
     )
 
     with TestClient(app) as client:
@@ -523,10 +526,15 @@ def test_real_alliant_credit_card_header_profile_validates(tmp_path):
 
 def test_alliant_export_money_and_us_dates_validate_and_accept(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    today = date.today()
+    first_date = today - timedelta(days=2)
+    second_date = today - timedelta(days=1)
+    first_us_date = first_date.strftime("%m/%d/%Y")
+    second_us_date = second_date.strftime("%m/%d/%Y")
     content = (
         "Date,Description,Amount,Balance\n"
-        '06/18/2026,SYNTHETIC ALLIANT DEPOSIT,"$1,234.56","$2,345.67"\n'
-        '06/19/2026,SYNTHETIC ALLIANT WITHDRAWAL,($45.67),"$2,300.00"\n'
+        f'{first_us_date},SYNTHETIC ALLIANT DEPOSIT,"$1,234.56","$2,345.67"\n'
+        f'{second_us_date},SYNTHETIC ALLIANT WITHDRAWAL,($45.67),"$2,300.00"\n'
     )
 
     with TestClient(app) as client:
@@ -548,16 +556,28 @@ def test_alliant_export_money_and_us_dates_validate_and_accept(tmp_path):
     assert accept_response.json()["status"] == "accepted"
     transactions = transactions_response.json()["transactions"]
     assert len(transactions) == 2
-    assert {transaction["posted_date"] for transaction in transactions} == {"2026-06-18", "2026-06-19"}
+    assert {transaction["posted_date"] for transaction in transactions} == {
+        first_date.isoformat(),
+        second_date.isoformat(),
+    }
     assert {transaction["amount"] for transaction in transactions} == {"1234.56", "-45.67"}
 
 
 def test_alliant_credit_card_export_money_and_us_dates_validate_and_accept(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+    today = date.today()
+    first_date = today - timedelta(days=2)
+    second_date = today - timedelta(days=1)
+    first_post_date = second_date
+    second_post_date = today
+    first_us_date = first_date.strftime("%m/%d/%Y")
+    second_us_date = second_date.strftime("%m/%d/%Y")
+    first_us_post_date = first_post_date.strftime("%m/%d/%Y")
+    second_us_post_date = second_post_date.strftime("%m/%d/%Y")
     content = (
         "Date,Description,Amount,Balance,Post Date\n"
-        "06/18/2026,SYNTHETIC ALLIANT CARD CHARGE,$45.67,$100.00,06/19/2026\n"
-        "06/19/2026,SYNTHETIC ALLIANT CARD PAYMENT,($123.45),$0.00,06/20/2026\n"
+        f"{first_us_date},SYNTHETIC ALLIANT CARD CHARGE,$45.67,$100.00,{first_us_post_date}\n"
+        f"{second_us_date},SYNTHETIC ALLIANT CARD PAYMENT,($123.45),$0.00,{second_us_post_date}\n"
     )
 
     with TestClient(app) as client:
@@ -579,7 +599,10 @@ def test_alliant_credit_card_export_money_and_us_dates_validate_and_accept(tmp_p
     assert accept_response.json()["status"] == "accepted"
     transactions = transactions_response.json()["transactions"]
     assert len(transactions) == 2
-    assert {transaction["posted_date"] for transaction in transactions} == {"2026-06-19", "2026-06-20"}
+    assert {transaction["posted_date"] for transaction in transactions} == {
+        first_post_date.isoformat(),
+        second_post_date.isoformat(),
+    }
     assert {transaction["amount"] for transaction in transactions} == {"45.67", "-123.45"}
 
 

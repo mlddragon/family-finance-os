@@ -5,6 +5,7 @@ alwaysApply: true
 
 # Agent Bootstrap
 
+- Read [docs/AI-START-HERE.md](../../docs/AI-START-HERE.md) for cross-system identity, ownership, project status, Notion, or migration work.
 - Read [AGENTS.md](../../AGENTS.md) before product-shaping or implementation work.
 - Read [SECURITY.md](../../SECURITY.md) and [docs/data_handling_policy.md](../../docs/data_handling_policy.md) before changes that touch data handling, auth, Docker, CI, or dependencies.
 - Do not commit raw financial data, credentials, or local runtime artifacts.

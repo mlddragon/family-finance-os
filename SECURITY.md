@@ -54,7 +54,7 @@ If sensitive data is committed or exposed:
 
 ## GitHub Repository Expectations
 
-- Repository visibility should remain private until an explicit public-release review is complete.
+- The repository is public. Preserve the completed public-release privacy boundary and never use public visibility as permission to include household data, owner-specific runtime details, or secrets.
 - Work should land through branches and pull requests.
 - Main branch should be protected where account permissions allow.
 - Pull requests should document whether raw, normalized, or generated financial artifacts were excluded.

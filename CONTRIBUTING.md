@@ -1,6 +1,6 @@
 # Contributing
 
-Family Finance OS is being prepared for future open-source release. The repository is currently private, but contributions should already follow the same traceable, privacy-first workflow expected for a sensitive financial product.
+Family Finance OS is public and open source under MPL-2.0. Contributions must follow a traceable, privacy-first workflow appropriate for a sensitive financial product.
 
 ## Ground Rules
 

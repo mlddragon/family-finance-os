@@ -45,9 +45,9 @@
     }
   },
   "generated_for_dates": {
-    "fresh_post_date": "2026-06-30",
-    "fresh_transaction_date": "2026-06-29",
-    "stale_transaction_date": "2026-05-01"
+    "fresh_post_date": "2026-08-16",
+    "fresh_transaction_date": "2026-08-15",
+    "stale_transaction_date": "2026-06-17"
   },
   "manual_import_order": [
     "alliant_checking.csv",

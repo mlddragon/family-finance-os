@@ -2,11 +2,11 @@
 
 This repository contains **Family Finance OS**, a local-first family financial operating system. The public GitHub home is [`mlddragon/family-finance-os`](https://github.com/mlddragon/family-finance-os) after rehome; runtime defaults stay generic so other households can install and adapt the product.
 
-The landed v1 build is treated as `0.1.0`. The `0.2.0` line prepares the product for future open-source release by using MPL-2.0 licensing, localization scaffolding, generic install defaults, configurable install-specific text, and a stable category catalog.
+The landed v1 build is treated as `0.1.0`. The `0.2.0` line established open-source foundations through MPL-2.0 licensing, localization scaffolding, generic install defaults, configurable install-specific text, and a stable category catalog.
 
 The `0.3.0` line adds reviewability, QA/demo, and audit foundations: side-by-side personal/QA Docker operation, visible runtime identity, synthetic QA seed/reset scripts, AI-agent repo guidance, and the first local actor context slice.
 
-The `0.4.0` line rehomes the product to `family-finance-os`, renames runtime env vars to `FFOS_*`, and prepares public release while keeping legacy `DILLON_FINANCES_*` Compose fallbacks for one release.
+The `0.4.0` line rehomed the product to the current public `family-finance-os` repository, renamed runtime env vars to `FFOS_*`, and retained legacy `DILLON_FINANCES_*` Compose fallbacks for one release.
 
 The app runs as a local Docker Compose app, serves the personal browser UI at `127.0.0.1:28080` by default, serves QA synthetic demo mode at `127.0.0.1:28081`, stores operational state in SQLite under an external `DATA_ROOT`, and keeps raw/source evidence and generated artifacts out of git.
 
@@ -17,6 +17,7 @@ Family Finance OS is licensed under `MPL-2.0`. See [LICENSE](LICENSE). Copyright
 ## Source Of Truth
 
 - The primary product source of truth is [docs/product_requirements.md](docs/product_requirements.md).
+- Cross-system AI routing lives in [docs/AI-START-HERE.md](docs/AI-START-HERE.md).
 - Planning notes for the migration from the prior prototype live in [planning/](planning/).
 - Repository data-handling rules live in [docs/data_handling_policy.md](docs/data_handling_policy.md).
 - Security expectations live in [SECURITY.md](SECURITY.md).
@@ -25,7 +26,7 @@ Family Finance OS is licensed under `MPL-2.0`. See [LICENSE](LICENSE). Copyright
 - Codex security analyst guidance lives in [docs/security/codex-analyst.md](docs/security/codex-analyst.md).
 - Codex subscription setup lives in [docs/runbooks/codex-subscription-setup.md](docs/runbooks/codex-subscription-setup.md).
 - QA self-hosted auto-update setup lives in [docs/runbooks/qa-self-hosted-runner.md](docs/runbooks/qa-self-hosted-runner.md).
-- Public release runbook lives in [docs/runbooks/public-release-v0.4.0.md](docs/runbooks/public-release-v0.4.0.md).
+- The completed public rehome record lives in [docs/runbooks/public-release-v0.4.0.md](docs/runbooks/public-release-v0.4.0.md).
 - Prior prototype archive notes live in [docs/archive/family_finance_planner.md](docs/archive/family_finance_planner.md).
 - Release history lives in [CHANGELOG.md](CHANGELOG.md).
 
