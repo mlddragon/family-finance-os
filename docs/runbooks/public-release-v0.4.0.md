@@ -73,11 +73,11 @@ GitHub → Settings → General → Danger zone → Change visibility → Public
 
 ## 5. Archive prototype repository
 
-On `mlddragon/Family_Finance_planner`:
+For the prior private prototype:
 
-1. Merge or commit archive README from `docs/archive/family_finance_planner_README.md`.
-2. Set description: `Archived prototype. See mlddragon/family-finance-os.`
-3. Archive repository (keep **private**).
+1. Use the generic archive notice in `docs/archive/prior_private_prototype_README.md`.
+2. Point readers to the public Family Finance OS repository without exposing the private repository's identifier.
+3. Keep the repository **private** and archived.
 4. Disable Actions and Dependabot.
 
 ## 6. Tag v0.4.0

@@ -33,7 +33,7 @@ All notable changes to Family Finance OS will be tracked here.
 - Rename Compose projects to `ffos-personal` and `ffos-qa` (legacy `dillon-*` deprecated).
 - Add five named QA seed scenarios beyond `baseline`.
 - Add dedicated Security CI workflow, agent entrypoints, and Codex security-analyst role guidance.
-- Archive prior prototype repository `Family_Finance_planner` as private research reference.
+- Archive the prior prototype as a private research reference.
 
 ## 0.3.0 - 2026-06-21
 
