@@ -22,12 +22,12 @@ Family Finance OS is licensed under `MPL-2.0`. See [LICENSE](LICENSE). Copyright
 - Security expectations live in [SECURITY.md](SECURITY.md).
 - Contribution expectations live in [CONTRIBUTING.md](CONTRIBUTING.md).
 - AI-agent repository instructions live in [AGENTS.md](AGENTS.md) and [cursor.md](cursor.md).
-- Cross-system AI routing lives in [docs/AI-START-HERE.md](docs/AI-START-HERE.md).
+- Public AI and contributor boundary guidance lives in [docs/AI-START-HERE.md](docs/AI-START-HERE.md).
 - Codex security analyst guidance lives in [docs/security/codex-analyst.md](docs/security/codex-analyst.md).
 - Codex subscription setup lives in [docs/runbooks/codex-subscription-setup.md](docs/runbooks/codex-subscription-setup.md).
 - QA self-hosted auto-update setup lives in [docs/runbooks/qa-self-hosted-runner.md](docs/runbooks/qa-self-hosted-runner.md).
 - Public release runbook lives in [docs/runbooks/public-release-v0.4.0.md](docs/runbooks/public-release-v0.4.0.md).
-- Prior prototype archive notes live in [docs/archive/family_finance_planner.md](docs/archive/family_finance_planner.md).
+- Prior private prototype notes live in [docs/archive/prior_private_prototype.md](docs/archive/prior_private_prototype.md).
 - Release history lives in [CHANGELOG.md](CHANGELOG.md).
 
 ## Current Scope
@@ -182,4 +182,4 @@ Use this troubleshooting checklist before changing code or moving data.
 
 ## Working Principle
 
-The prior `Family_Finance_planner` repo is treated as product research and validated learning, not as the implementation foundation. Architecture, storage, UI, and runtime decisions require planning and owner review before product-shaping changes.
+The prior private prototype is treated as product research and validated learning, not as the implementation foundation. Architecture, storage, UI, and runtime decisions require planning and owner review before product-shaping changes.

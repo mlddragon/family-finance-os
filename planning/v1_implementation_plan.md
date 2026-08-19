@@ -22,7 +22,7 @@
 
 ## Runtime Defaults
 
-- Local repository: `/Users/masondillon/GitHub/Dillon_Finances`.
+- Local repository: the maintainer's checkout root.
 - **Production default (Decision 16 / #108):** host `DATA_ROOT` under the public user directory; installer chooses profile or custom local/UNC path.
 - **Dev/Compose interim:** host data directory `~/Dillon_Finances_Data` (personal) and `~/Dillon_Finances_QA_Data` (QA) via env/compose overrides until installer ships.
 - Container data mount: `/data`.

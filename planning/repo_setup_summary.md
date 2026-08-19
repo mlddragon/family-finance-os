@@ -28,12 +28,12 @@
 
 ## Materials migrated
 
-- The updated PRD from `mlddragon/Family_Finance_planner/docs/product_requirements.md` was migrated to `docs/product_requirements.md`.
+- The updated PRD from the prior private prototype was migrated to `docs/product_requirements.md`.
 
 ## Assumptions made
 
-- The new repository should live under `/Users/masondillon/Documents/Dillon Finances/Dillon_Finances`.
-- The prior repo is available locally at `/Users/masondillon/GitHub/Family_Finance_planner`.
+- The new repository should use a maintainer-chosen local checkout path.
+- The prior prototype may be available in an authorized private checkout; its location is intentionally not recorded here.
 - "Create the new repo" means create a local git repository scaffold; no remote repository was created or pushed.
 - The old repo is product research and historical evidence, not implementation scaffolding.
 - Financial data directories should be ignored by default and should not be committed.
