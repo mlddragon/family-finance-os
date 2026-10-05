@@ -6,7 +6,7 @@ alwaysApply: true
 # Agent Bootstrap
 
 - Read [AGENTS.md](../../AGENTS.md) before product-shaping or implementation work.
-- Read [docs/AI-START-HERE.md](../../docs/AI-START-HERE.md) for cross-system identity, ownership or open-source classification, high-level status, commercialization, organizational placement, Notion, or migration questions.
+- Read [docs/AI-START-HERE.md](../../docs/AI-START-HERE.md) when work may depend on context outside this repository; ask a maintainer for the minimum missing decision rather than searching for private systems.
 - Read [SECURITY.md](../../SECURITY.md) and [docs/data_handling_policy.md](../../docs/data_handling_policy.md) before changes that touch data handling, auth, Docker, CI, or dependencies.
 - Do not commit raw financial data, credentials, or local runtime artifacts.
 - Use branches and pull requests; do not push directly to `main`.

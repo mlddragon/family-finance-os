@@ -2,7 +2,7 @@
 
 Read and follow [AGENTS.md](AGENTS.md) before doing any work in this repository.
 
-For cross-system identity, ownership or open-source classification, high-level status, commercialization, organizational placement, Notion, or migration questions, also read [docs/AI-START-HERE.md](docs/AI-START-HERE.md).
+For work that may depend on context outside this repository, also follow the public boundary in [docs/AI-START-HERE.md](docs/AI-START-HERE.md).
 
 For security-sensitive changes, also read [SECURITY.md](SECURITY.md) and [docs/data_handling_policy.md](docs/data_handling_policy.md).
 

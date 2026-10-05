@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-The prior `mlddragon/Family_Finance_planner` repo contains useful product discovery, validated financial-data integrity lessons, category/review concepts, and prototype evidence. It should not be used as the implementation foundation for Dillon Finances.
+The prior private prototype contains useful product discovery, validated financial-data integrity lessons, category/review concepts, and prototype evidence. It should not be used as the implementation foundation for Dillon Finances. Its repository identifier and location are intentionally omitted from this public audit.
 
 The most valuable material is the updated PRD, the ledger-integrity principles, the category and review workflow concepts, and the lessons from Amazon order matching, ledger-safe enrichment, review exposure, and budget intelligence reporting. The highest-risk inheritance would be copying the old app, scripts, CSV folder structure, generated artifacts, or Streamlit/dashboard assumptions into the new product before architecture has been reviewed.
 
