@@ -122,6 +122,14 @@ from family_finance_os.net_worth import (
     update_net_worth_snapshot,
 )
 from family_finance_os.operator_summary import operator_summary_payload
+from family_finance_os.qa_ops import (
+    QaOpsError,
+    latest_manifest,
+    require_qa_runtime,
+    reset_qa_data_root,
+    scenario_catalog_payload,
+    seed_scenario,
+)
 from family_finance_os.receipts import (
     ActorReceiptRequest,
     ReceiptCreateRequest,
@@ -192,6 +200,7 @@ from family_finance_os.settings_service import (
     settings_payload,
 )
 from family_finance_os.spendable import SpendableError, compute_spendable
+from family_finance_os.status import APP_NAME, status_payload as build_status_payload
 from family_finance_os.splits import (
     ReceiptPromoteToSplitsRequest,
     ReceiptPromotionRequest,
@@ -216,7 +225,6 @@ from family_finance_os.vendor_scrapes import (
 )
 
 
-APP_NAME = "Family Finance OS"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 UI_SHELL_CACHE_HEADERS = {"Cache-Control": "no-cache, must-revalidate"}
 
@@ -240,15 +248,21 @@ class ResolveValidationFindingRequest(BaseModel):
     note: str = Field(min_length=1)
 
 
+class QaOperationRequest(BaseModel):
+    actor: str = Field(default="owner", min_length=1)
+    actor_context: Optional[ActorContext] = None
+
+
+class QaResetRequest(QaOperationRequest):
+    confirmation: str = Field(min_length=1)
+
+
+class QaSeedRequest(QaOperationRequest):
+    scenario: str = Field(min_length=1)
+
+
 def _default_data_root() -> Path:
     return Path(os.environ.get("DATA_ROOT", "/data")).expanduser().resolve()
-
-
-def _database_status(data_root: Path) -> Dict[str, str]:
-    database_path = resolve_database_path(data_root / "database")
-    if database_path.exists():
-        return {"status": "present", "path": str(database_path)}
-    return {"status": "not_initialized", "path": str(database_path)}
 
 
 def create_app(
@@ -341,19 +355,11 @@ def create_app(
         return await call_next(request)
 
     def status_payload() -> Dict[str, Any]:
-        active_data_root = get_data_root()
-        return {
-            "app": APP_NAME,
-            "version": __version__,
-            "local_only": bind_host == "127.0.0.1",
-            "bind_host": bind_host,
-            **runtime_identity.to_status_fields(),
-            "data_root": {
-                "path": str(active_data_root),
-                "exists": active_data_root.exists(),
-            },
-            "database": _database_status(active_data_root),
-        }
+        return build_status_payload(
+            data_root=get_data_root(),
+            bind_host=bind_host,
+            runtime_environment=runtime_identity,
+        )
 
     @app.get("/api/health")
     def health() -> Dict[str, Any]:
@@ -1138,6 +1144,83 @@ def create_app(
                 "persona_key": payload.persona_key,
                 **effective_permission_payload(evaluation),
             }
+
+    def qa_ops_http_error(exc: QaOpsError) -> HTTPException:
+        return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message})
+
+    def require_qa_controls() -> None:
+        try:
+            require_qa_runtime(runtime_identity)
+        except QaOpsError as exc:
+            raise qa_ops_http_error(exc) from exc
+
+    def require_qa_data_permission(payload: QaOperationRequest) -> None:
+        with create_session() as session:
+            require_permission(
+                session,
+                payload.actor,
+                ActionKey.IMPORTS_RUN,
+                DataScopeKey.QA_SYNTHETIC_DATA,
+                actor_context=payload.actor_context,
+            )
+
+    @app.get("/api/qa/scenarios")
+    def get_qa_scenarios() -> Dict[str, Any]:
+        require_qa_controls()
+        active_data_root = get_data_root()
+        return {
+            **scenario_catalog_payload(),
+            "data_root": str(active_data_root),
+            "latest_manifest": latest_manifest(active_data_root),
+        }
+
+    @app.post("/api/qa/reset")
+    def post_qa_reset(payload: QaResetRequest) -> Dict[str, Any]:
+        nonlocal engine, resolved_data_root
+        require_qa_controls()
+        require_qa_data_permission(payload)
+        active_data_root = get_data_root()
+        if engine is not None:
+            engine.dispose()
+            engine = None
+        try:
+            reset_data_root = reset_qa_data_root(
+                data_root=active_data_root,
+                app_env=runtime_identity.app_env,
+                dataset_kind=runtime_identity.dataset_kind,
+                confirmation=payload.confirmation,
+            )
+        except QaOpsError as exc:
+            raise qa_ops_http_error(exc) from exc
+        resolved_data_root = None
+        initialize_runtime_state()
+        return {
+            "status": "reset",
+            "data_root": str(reset_data_root),
+            "runtime": status_payload(),
+        }
+
+    @app.post("/api/qa/seed")
+    def post_qa_seed(payload: QaSeedRequest) -> Dict[str, Any]:
+        require_qa_controls()
+        require_qa_data_permission(payload)
+        active_data_root = get_data_root()
+        try:
+            manifest_path = seed_scenario(
+                active_data_root,
+                payload.scenario,
+                runtime_environment=runtime_identity,
+                session_factory=create_session,
+                bind_host=bind_host,
+            )
+        except QaOpsError as exc:
+            raise qa_ops_http_error(exc) from exc
+        return {
+            "status": "seeded",
+            "scenario": payload.scenario,
+            "manifest_file": manifest_path.name,
+            "latest_manifest": latest_manifest(active_data_root),
+        }
 
     def elevated_mode_error_http(exc: ElevatedModeError) -> HTTPException:
         return HTTPException(status_code=exc.status_code, detail=elevated_mode_http_error(exc))

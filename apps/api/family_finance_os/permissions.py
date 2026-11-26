@@ -334,9 +334,11 @@ DEFAULT_DATA_SCOPE_MATRIX: dict[DataScopeKey, dict[str, ScopeAccess]] = {
         "financial_analyst": ScopeAccess.NONE,
         "report_viewer": ScopeAccess.NONE,
     },
+    # Only reachable on a QA/synthetic runtime with qa_controls_enabled. Administrators and
+    # finance managers drive QA reset/seed; everyone else stays read-only against QA data.
     DataScopeKey.QA_SYNTHETIC_DATA: {
-        "administrator": ScopeAccess.SCOPED,
-        "finance_manager": ScopeAccess.SCOPED,
+        "administrator": ScopeAccess.OWN,
+        "finance_manager": ScopeAccess.OWN,
         "finance_contributor": ScopeAccess.SCOPED,
         "financial_analyst": ScopeAccess.SCOPED,
         "report_viewer": ScopeAccess.SCOPED,

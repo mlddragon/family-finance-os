@@ -26,6 +26,14 @@ CHASE_HEADER = "Transaction Date,Post Date,Description,Category,Amount\n"
 CHASE_REAL_EXPORT_HEADER = "Transaction Date,Post Date,Description,Category,Type,Amount,Memo\n"
 
 
+def fresh_us_date(days_ago: int) -> str:
+    return (date.today() - timedelta(days=days_ago)).strftime("%m/%d/%Y")
+
+
+def fresh_iso_date(days_ago: int) -> str:
+    return (date.today() - timedelta(days=days_ago)).isoformat()
+
+
 def fresh_chase_row(amount: str = "12.34") -> str:
     transaction_date = date.today() - timedelta(days=1)
     post_date = date.today()
@@ -322,16 +330,13 @@ def test_voided_destroyed_import_batch_cannot_be_revalidated(tmp_path):
 def test_revoid_does_not_delete_reuploaded_same_filename(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
     filename = "History-061926-011648.csv"
-    today = date.today()
-    first_date = today - timedelta(days=2)
-    second_date = today - timedelta(days=1)
     content = (
         "Date,Description,Amount,Balance\n"
-        f"{first_date.strftime('%m/%d/%Y')},SYNTHETIC FIRST UPLOAD,$12.34,$100.00\n"
+        f"{fresh_us_date(2)},SYNTHETIC FIRST UPLOAD,$12.34,$100.00\n"
     )
     replacement_content = (
         "Date,Description,Amount,Balance\n"
-        f"{second_date.strftime('%m/%d/%Y')},SYNTHETIC SECOND UPLOAD,$45.67,$145.67\n"
+        f"{fresh_us_date(1)},SYNTHETIC SECOND UPLOAD,$45.67,$145.67\n"
     )
 
     with TestClient(app) as client:
@@ -526,15 +531,10 @@ def test_real_alliant_credit_card_header_profile_validates(tmp_path):
 
 def test_alliant_export_money_and_us_dates_validate_and_accept(tmp_path):
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
-    today = date.today()
-    first_date = today - timedelta(days=2)
-    second_date = today - timedelta(days=1)
-    first_us_date = first_date.strftime("%m/%d/%Y")
-    second_us_date = second_date.strftime("%m/%d/%Y")
     content = (
         "Date,Description,Amount,Balance\n"
-        f'{first_us_date},SYNTHETIC ALLIANT DEPOSIT,"$1,234.56","$2,345.67"\n'
-        f'{second_us_date},SYNTHETIC ALLIANT WITHDRAWAL,($45.67),"$2,300.00"\n'
+        f'{fresh_us_date(2)},SYNTHETIC ALLIANT DEPOSIT,"$1,234.56","$2,345.67"\n'
+        f'{fresh_us_date(1)},SYNTHETIC ALLIANT WITHDRAWAL,($45.67),"$2,300.00"\n'
     )
 
     with TestClient(app) as client:
@@ -557,8 +557,8 @@ def test_alliant_export_money_and_us_dates_validate_and_accept(tmp_path):
     transactions = transactions_response.json()["transactions"]
     assert len(transactions) == 2
     assert {transaction["posted_date"] for transaction in transactions} == {
-        first_date.isoformat(),
-        second_date.isoformat(),
+        fresh_iso_date(2),
+        fresh_iso_date(1),
     }
     assert {transaction["amount"] for transaction in transactions} == {"1234.56", "-45.67"}
 

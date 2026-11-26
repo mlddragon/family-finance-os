@@ -6,9 +6,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from family_finance_os.main import create_app
+from family_finance_os.qa_assets import materialize_vendor_synthetic_fixtures
 from family_finance_os.vendor_adapters import get_adapter
 from family_finance_os.vendor_adapters.base import load_collect_fixture
 from family_finance_os.vendor_scrapes import validate_vendor_scrape_output
+
+
+@pytest.fixture
+def seeded_data_root(tmp_path):
+    materialize_vendor_synthetic_fixtures(tmp_path)
+    return tmp_path
 
 
 def _enable_vendor(client: TestClient, vendor_key: str) -> None:
@@ -30,8 +37,8 @@ def _enable_vendor(client: TestClient, vendor_key: str) -> None:
 
 
 @pytest.mark.parametrize("vendor_key", ["amazon", "costco", "walmart"])
-def test_synthetic_pipeline_creates_vendor_scraper_receipts(tmp_path, vendor_key: str):
-    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+def test_synthetic_pipeline_creates_vendor_scraper_receipts(seeded_data_root, vendor_key: str):
+    app = create_app(data_root=seeded_data_root, local_bind_host="127.0.0.1")
 
     with TestClient(app) as client:
         _enable_vendor(client, vendor_key)
@@ -55,9 +62,9 @@ def test_synthetic_pipeline_creates_vendor_scraper_receipts(tmp_path, vendor_key
     assert queue.json()["count"] >= 1
 
 
-def test_amazon_split_charge_produces_warnings_and_review_flags():
+def test_amazon_split_charge_produces_warnings_and_review_flags(seeded_data_root):
     adapter = get_adapter("amazon")
-    raw = load_collect_fixture("amazon", fixture_name="vendor_collect_amazon_split.json")
+    raw = load_collect_fixture("amazon", seeded_data_root, fixture_name="vendor_collect_amazon_split.json")
     output = adapter.normalize(raw, run_id="job_test_split")
     validate_vendor_scrape_output(output)
 
@@ -67,9 +74,9 @@ def test_amazon_split_charge_produces_warnings_and_review_flags():
     assert "split_charge" in output.receipts[0].lines[0].metadata_json
 
 
-def test_costco_pharmacy_line_needs_review():
+def test_costco_pharmacy_line_needs_review(seeded_data_root):
     adapter = get_adapter("costco")
-    raw = load_collect_fixture("costco")
+    raw = load_collect_fixture("costco", seeded_data_root)
     output = adapter.normalize(raw, run_id="job_test_costco")
     validate_vendor_scrape_output(output)
 
@@ -80,9 +87,9 @@ def test_costco_pharmacy_line_needs_review():
     assert any("costco_mixed_basket_candidate" in warning for warning in output.quality.warnings)
 
 
-def test_walmart_pickup_substitution_and_fee_lines():
+def test_walmart_pickup_substitution_and_fee_lines(seeded_data_root):
     adapter = get_adapter("walmart")
-    raw = load_collect_fixture("walmart")
+    raw = load_collect_fixture("walmart", seeded_data_root)
     output = adapter.normalize(raw, run_id="job_test_walmart")
     validate_vendor_scrape_output(output)
 
@@ -97,11 +104,11 @@ def test_walmart_pickup_substitution_and_fee_lines():
     assert any("walmart_fee_line" in warning for warning in output.quality.warnings)
 
 
-def test_manual_browser_assist_reads_inbox_json(tmp_path):
-    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
-    inbox_dir = tmp_path / "vendor_scrapes" / "inbox" / "amazon"
+def test_manual_browser_assist_reads_inbox_json(seeded_data_root):
+    app = create_app(data_root=seeded_data_root, local_bind_host="127.0.0.1")
+    inbox_dir = seeded_data_root / "vendor_scrapes" / "inbox" / "amazon"
     inbox_dir.mkdir(parents=True)
-    inbox_payload = load_collect_fixture("amazon")
+    inbox_payload = load_collect_fixture("amazon", seeded_data_root)
     (inbox_dir / "browser_export_1.json").write_text(json.dumps(inbox_payload), encoding="utf-8")
 
     with TestClient(app) as client:
@@ -139,3 +146,18 @@ def test_manual_browser_assist_empty_inbox_raises(tmp_path):
 
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "vendor_scrape_collect_empty"
+
+
+def test_synthetic_run_without_seeded_fixtures_reports_missing_fixture(tmp_path):
+    app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
+
+    with TestClient(app) as client:
+        _enable_vendor(client, "amazon")
+        response = client.post(
+            "/api/vendor-scrapes",
+            json={"actor": "owner", "vendor_key": "amazon", "mode": "synthetic"},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "vendor_scrape_fixture_not_found"
+    assert "qa-seed" in response.json()["detail"]["message"]

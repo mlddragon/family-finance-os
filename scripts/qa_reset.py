@@ -2,49 +2,16 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 from pathlib import Path
 
-from family_finance_os.runtime import REQUIRED_DATA_ROOT_DIRS, validate_data_root
+from family_finance_os.qa_ops import RESET_CONFIRMATION, QaOpsError, QaResetError, reset_qa_data_root
 
 
-RESET_CONFIRMATION = "RESET QA DATA"
-
-
-class QaResetError(RuntimeError):
-    pass
+__all__ = ["RESET_CONFIRMATION", "QaResetError", "reset_qa_data_root"]
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
-
-
-def _personal_default_path() -> Path:
-    return (Path.home() / "FamilyFinanceOS_Data").expanduser().resolve()
-
-
-def reset_qa_data_root(
-    *,
-    data_root: Path,
-    app_env: str,
-    dataset_kind: str,
-    confirmation: str,
-) -> Path:
-    if confirmation != RESET_CONFIRMATION:
-        raise QaResetError(f'QA reset requires exact confirmation: "{RESET_CONFIRMATION}".')
-    if app_env != "qa" or dataset_kind != "synthetic":
-        raise QaResetError("QA reset is allowed only for QA/synthetic environment identity.")
-
-    resolved_data_root = validate_data_root(data_root, repo_root=_repo_root())
-    if resolved_data_root == _personal_default_path():
-        raise QaResetError("QA reset refuses the personal default data root.")
-
-    if resolved_data_root.exists():
-        shutil.rmtree(resolved_data_root)
-    resolved_data_root.mkdir(parents=True, exist_ok=True)
-    for directory_name in REQUIRED_DATA_ROOT_DIRS:
-        (resolved_data_root / directory_name).mkdir(exist_ok=True)
-    return resolved_data_root
 
 
 def main() -> int:
@@ -59,8 +26,9 @@ def main() -> int:
             app_env=os.environ.get("APP_ENV", ""),
             dataset_kind=os.environ.get("DATASET_KIND", ""),
             confirmation=args.confirm,
+            repo_root=_repo_root(),
         )
-    except QaResetError as exc:
+    except QaOpsError as exc:
         parser.error(str(exc))
     return 0
 

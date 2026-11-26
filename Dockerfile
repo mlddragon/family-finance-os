@@ -18,7 +18,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     APP_ENV=personal \
     APP_ENV_LABEL="Personal data" \
     DATASET_KIND=personal \
-    DEV_MODE=false
+    DEV_MODE=false \
+    QA_ASSET_ROOT=/app/qa_assets/synthetic
 
 WORKDIR /app
 RUN apt-get update \
@@ -29,6 +30,9 @@ RUN groupadd --gid 10001 appuser \
 
 COPY pyproject.toml ./
 COPY apps/api ./apps/api
+# Synthetic QA templates are app-internal assets (Decision 16). QA seeding copies what it
+# needs into DATA_ROOT; nothing reads them from an installed package path at runtime.
+COPY tests/fixtures/synthetic ./qa_assets/synthetic
 COPY --from=web-build /app/apps/web/dist ./apps/api/family_finance_os/static
 RUN pip install --no-cache-dir --root-user-action=ignore . \
     && pip uninstall --yes --root-user-action=ignore pip setuptools wheel

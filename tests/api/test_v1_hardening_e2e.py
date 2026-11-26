@@ -253,7 +253,8 @@ def test_pr10_security_contract_and_docker_e2e_scripts_exist_and_pass_static_che
     assert security_script.exists()
     assert docker_e2e_script.exists()
     docker_e2e_text = docker_e2e_script.read_text()
-    assert "tests/fixtures/synthetic" in docker_e2e_text
+    assert "qa_asset_root" in docker_e2e_text
+    assert "materialize_vendor_synthetic_fixtures" in docker_e2e_text
     assert "OpenAI" not in docker_e2e_text
 
     result = subprocess.run(

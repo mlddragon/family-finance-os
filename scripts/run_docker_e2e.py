@@ -10,6 +10,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+from family_finance_os.qa_assets import materialize_vendor_synthetic_fixtures, qa_asset_root
+
 
 SOURCE_FIXTURES = (
     "v1_valid_alliant_checking.csv",
@@ -70,12 +72,13 @@ def wait_for_status(base_url: str) -> dict[str, Any]:
     raise E2EError(f"app did not become ready: {last_error}")
 
 
-def write_source_fixtures(repo_root: Path, data_root: Path) -> None:
-    fixture_dir = repo_root / "tests/fixtures/synthetic"
+def write_source_fixtures(data_root: Path) -> None:
+    fixture_dir = qa_asset_root()
     inbox = data_root / "inbox"
     inbox.mkdir(parents=True, exist_ok=True)
     for fixture_name in SOURCE_FIXTURES:
         (inbox / fixture_name).write_text(render_fixture(fixture_dir / fixture_name))
+    materialize_vendor_synthetic_fixtures(data_root)
 
 
 def assert_condition(condition: bool, message: str) -> None:
@@ -166,13 +169,13 @@ def run_blocked_validation_path(base_url: str, data_root: Path) -> dict[str, Any
     return {"blocked_batch_id": batch_id, "validation_codes": validation_codes}
 
 
-def run_closed_loop(base_url: str, repo_root: Path, data_root: Path) -> dict[str, Any]:
+def run_closed_loop(base_url: str, data_root: Path) -> dict[str, Any]:
     status = wait_for_status(base_url)
     assert_condition(status["local_only"] is True, "status must report local-only mode")
     assert_condition(status["bind_host"] == "127.0.0.1", "status must report localhost bind")
     assert_condition(status["app_env"] == "qa", "Docker E2E must run against QA runtime identity")
     assert_condition(status["dataset_kind"] == "synthetic", "Docker E2E must run against synthetic dataset identity")
-    write_source_fixtures(repo_root, data_root)
+    write_source_fixtures(data_root)
 
     scan = request_json(base_url, "POST", "/api/inbox/scan")
     assert_condition(len(scan["import_batches"]) == len(SOURCE_FIXTURES), "all synthetic source files must scan")
@@ -235,10 +238,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run the synthetic Docker E2E closed loop.")
     parser.add_argument("--base-url", default="http://127.0.0.1:28081")
     parser.add_argument("--data-root", required=True)
-    parser.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[1]))
     args = parser.parse_args()
 
-    result = run_closed_loop(args.base_url, Path(args.repo_root).resolve(), Path(args.data_root).resolve())
+    result = run_closed_loop(args.base_url, Path(args.data_root).resolve())
     print(json.dumps(result, sort_keys=True))
     return 0
 
