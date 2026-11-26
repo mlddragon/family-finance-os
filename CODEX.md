@@ -4,6 +4,7 @@ Codex is the **security and privacy analyst** for Family Finance OS.
 
 ## Read First
 
+- [docs/AI-START-HERE.md](docs/AI-START-HERE.md) — for cross-system identity, ownership or open-source classification, high-level status, commercialization, organizational placement, Notion, or migration questions
 - [AGENTS.md](AGENTS.md) — especially **Review guidelines**
 - [SECURITY.md](SECURITY.md)
 - [docs/data_handling_policy.md](docs/data_handling_policy.md)

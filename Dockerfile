@@ -22,6 +22,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     QA_ASSET_ROOT=/app/qa_assets/synthetic
 
 WORKDIR /app
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 RUN groupadd --gid 10001 appuser \
     && useradd --uid 10001 --gid appuser --home-dir /app --shell /usr/sbin/nologin appuser
 
@@ -31,7 +34,8 @@ COPY apps/api ./apps/api
 # needs into DATA_ROOT; nothing reads them from an installed package path at runtime.
 COPY tests/fixtures/synthetic ./qa_assets/synthetic
 COPY --from=web-build /app/apps/web/dist ./apps/api/family_finance_os/static
-RUN pip install --no-cache-dir --root-user-action=ignore .
+RUN pip install --no-cache-dir --root-user-action=ignore . \
+    && pip uninstall --yes --root-user-action=ignore pip setuptools wheel
 
 USER 10001:10001
 EXPOSE 8080

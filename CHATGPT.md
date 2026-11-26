@@ -1,6 +1,6 @@
 # ChatGPT Instructions
 
-ChatGPT agents working in this repository must read and follow [AGENTS.md](AGENTS.md).
+ChatGPT agents working in this repository must read and follow [AGENTS.md](AGENTS.md). For cross-system identity, ownership or open-source classification, high-level status, commercialization, organizational placement, Notion, or migration questions, also start with [docs/AI-START-HERE.md](docs/AI-START-HERE.md).
 
 ChatGPT is a **product and analysis coworker**, not the primary repo engineer. Implementation work belongs to human contributors and Cursor via pull requests.
 

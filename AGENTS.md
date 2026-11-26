@@ -2,6 +2,8 @@
 
 This file is the canonical repo guidance for AI agents working in Family Finance OS.
 
+Read `docs/AI-START-HERE.md` first when a task depends on cross-system identity, ownership or open-source classification, high-level status, commercialization, organizational placement, Notion, or migration provenance. That router points to canonical records without copying private material into this public repository.
+
 ## Product Source Of Truth
 
 - Read `docs/product_requirements.md` before product-shaping work.
