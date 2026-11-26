@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from family_finance_os.actors import derive_actor_context
 from family_finance_os.jobs import record_job
 from family_finance_os.models import Job, Setting, utc_now_iso
+from family_finance_os.qa_assets import vendor_synthetic_fixture_dir
 from family_finance_os.receipts import persist_vendor_scraper_receipts
 from family_finance_os.reporting import (
     ensure_safe_artifact_directory,
@@ -321,22 +322,35 @@ def validate_vendor_scrape_output(payload: VendorScrapeAdapterOutput) -> dict[st
     }
 
 
-def load_synthetic_fixture(vendor_key: str, *, fixture_name: Optional[str] = None) -> dict[str, Any]:
-    """Load a synthetic fixture from tests/fixtures/synthetic."""
-    fixture_path = _synthetic_fixture_path(vendor_key, fixture_name=fixture_name)
+def load_synthetic_fixture(
+    vendor_key: str,
+    data_root: Path,
+    *,
+    fixture_name: Optional[str] = None,
+) -> dict[str, Any]:
+    """Load a synthetic vendor fixture materialized under DATA_ROOT by QA seeding."""
+    fixture_path = _synthetic_fixture_path(vendor_key, data_root, fixture_name=fixture_name)
     if not fixture_path.exists():
         raise VendorScrapeError(
             "vendor_scrape_fixture_not_found",
-            f"Synthetic fixture for '{vendor_key}' was not found.",
+            (
+                f"Synthetic fixture for '{vendor_key}' was not found under DATA_ROOT. "
+                "Seed a QA scenario (QA Options tab or `make qa-seed`) to materialize it."
+            ),
             status_code=404,
         )
     return json.loads(fixture_path.read_text(encoding="utf-8"))
 
 
-def load_collect_fixture(vendor_key: str, *, fixture_name: Optional[str] = None) -> dict[str, Any]:
+def load_collect_fixture(
+    vendor_key: str,
+    data_root: Path,
+    *,
+    fixture_name: Optional[str] = None,
+) -> dict[str, Any]:
     from family_finance_os.vendor_adapters.base import load_collect_fixture as _load_collect_fixture
 
-    return _load_collect_fixture(vendor_key, fixture_name=fixture_name)
+    return _load_collect_fixture(vendor_key, data_root, fixture_name=fixture_name)
 
 
 def _validate_run_request(request: VendorScrapeRunRequest) -> None:
@@ -466,13 +480,14 @@ def _get_vendor_scrape_job(session: Session, job_id: str) -> Job:
     return job
 
 
-def _synthetic_fixture_path(vendor_key: str, *, fixture_name: Optional[str] = None) -> Path:
-    repo_root = Path(__file__).resolve().parents[3]
-    if fixture_name:
-        filename = fixture_name
-    else:
-        filename = f"vendor_collect_{vendor_key}.json"
-    return repo_root / "tests" / "fixtures" / "synthetic" / filename
+def _synthetic_fixture_path(
+    vendor_key: str,
+    data_root: Path,
+    *,
+    fixture_name: Optional[str] = None,
+) -> Path:
+    filename = fixture_name or f"vendor_collect_{vendor_key}.json"
+    return vendor_synthetic_fixture_dir(data_root) / filename
 
 
 def _loads_optional(value: Optional[str]) -> Optional[dict[str, Any]]:

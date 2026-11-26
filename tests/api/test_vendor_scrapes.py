@@ -11,12 +11,19 @@ from family_finance_os.database import create_sqlite_engine
 from family_finance_os.jobs import record_job
 from family_finance_os.main import create_app
 from family_finance_os.models import Job
+from family_finance_os.qa_assets import materialize_vendor_synthetic_fixtures
 from family_finance_os.vendor_scrapes import (
     VendorScrapeAdapterOutput,
     VendorScrapeError,
     load_synthetic_fixture,
     validate_vendor_scrape_output,
 )
+
+
+@pytest.fixture
+def seeded_data_root(tmp_path):
+    materialize_vendor_synthetic_fixtures(tmp_path)
+    return tmp_path
 
 
 def _session_factory(data_root):
@@ -91,7 +98,8 @@ def test_disabled_adapter_cannot_run(tmp_path):
     assert response.json()["detail"]["code"] == "vendor_scrape_disabled"
 
 
-def test_synthetic_run_creates_receipts_and_review_queue_items(tmp_path):
+def test_synthetic_run_creates_receipts_and_review_queue_items(seeded_data_root):
+    tmp_path = seeded_data_root
     app = create_app(data_root=tmp_path, local_bind_host="127.0.0.1")
 
     with TestClient(app) as client:
@@ -192,8 +200,10 @@ def test_cancel_marks_job_canceled_with_event(tmp_path):
     assert events.json()["events"][-1]["status"] == "canceled"
 
 
-def test_validation_catches_invalid_synthetic_fixture(tmp_path):
-    payload = VendorScrapeAdapterOutput.model_validate(load_synthetic_fixture("amazon", fixture_name="vendor_scrape_amazon_invalid.json"))
+def test_validation_catches_invalid_synthetic_fixture(seeded_data_root):
+    payload = VendorScrapeAdapterOutput.model_validate(
+        load_synthetic_fixture("amazon", seeded_data_root, fixture_name="vendor_scrape_amazon_invalid.json")
+    )
 
     with pytest.raises(VendorScrapeError) as exc_info:
         validate_vendor_scrape_output(payload)

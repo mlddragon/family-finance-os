@@ -8,12 +8,13 @@ from typing import Any, Optional
 
 from typing import TYPE_CHECKING
 
+from family_finance_os.qa_assets import vendor_synthetic_fixture_dir
+
 if TYPE_CHECKING:
     from family_finance_os.vendor_scrape_contracts import VendorScrapeAdapterOutput
 
 MONEY_QUANT = Decimal("0.01")
 COLLECT_FIXTURE_PREFIX = "vendor_collect_"
-SYNTHETIC_FIXTURE_DIR = Path(__file__).resolve().parents[4] / "tests" / "fixtures" / "synthetic"
 REVIEW_LINE_TYPES = frozenset(
     {
         "membership",
@@ -39,7 +40,7 @@ class VendorAdapter(ABC):
         from family_finance_os.vendor_scrape_contracts import VendorScrapeError
 
         if mode == "synthetic":
-            payload = load_collect_fixture(self.vendor_key)
+            payload = load_collect_fixture(self.vendor_key, data_root)
         elif mode == "manual_browser_assist":
             payload = load_inbox_collect_payload(data_root, self.vendor_key)
         else:
@@ -48,15 +49,23 @@ class VendorAdapter(ABC):
         return payload
 
 
-def load_collect_fixture(vendor_key: str, *, fixture_name: Optional[str] = None) -> dict[str, Any]:
+def load_collect_fixture(
+    vendor_key: str,
+    data_root: Path,
+    *,
+    fixture_name: Optional[str] = None,
+) -> dict[str, Any]:
     from family_finance_os.vendor_scrape_contracts import VendorScrapeError
 
     filename = fixture_name or f"{COLLECT_FIXTURE_PREFIX}{vendor_key}.json"
-    fixture_path = SYNTHETIC_FIXTURE_DIR / filename
+    fixture_path = vendor_synthetic_fixture_dir(data_root) / filename
     if not fixture_path.exists():
         raise VendorScrapeError(
             "vendor_scrape_fixture_not_found",
-            f"Synthetic collect fixture for '{vendor_key}' was not found.",
+            (
+                f"Synthetic collect fixture for '{vendor_key}' was not found under DATA_ROOT. "
+                "Seed a QA scenario (QA Options tab or `make qa-seed`) to materialize it."
+            ),
             status_code=404,
         )
     return json.loads(fixture_path.read_text(encoding="utf-8"))
